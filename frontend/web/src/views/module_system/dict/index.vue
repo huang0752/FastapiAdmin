@@ -13,6 +13,8 @@
       :show-search="true"
       :disabled-search="false"
       :default-expanded="false"
+      include-audit
+      :audit-item-options="{ showTenantId: true }"
       @search="handleSearchBarSearch"
       @reset="onResetSearch"
     />
@@ -164,6 +166,7 @@ type DictTypeSearchForm = {
   dict_type?: string;
   status?: number;
   created_time?: string[];
+  updated_time?: string[];
 };
 
 const dictStore = useDictStore();
@@ -174,6 +177,7 @@ const searchForm = ref<DictTypeSearchForm>({
   dict_type: undefined,
   status: undefined,
   created_time: undefined,
+  updated_time: undefined,
 });
 
 const showSearchBar = ref(true);
@@ -212,21 +216,6 @@ const dictTypeSearchItems = computed<SearchFormItem[]>(() => [
       clearable: true,
     },
     span: 6,
-  },
-  {
-    label: "创建时间",
-    key: "created_time",
-    type: "datetimerange",
-    span: 6,
-    props: {
-      type: "datetimerange",
-      rangeSeparator: "至",
-      startPlaceholder: "开始日期",
-      endPlaceholder: "结束日期",
-      format: "YYYY-MM-DD HH:mm:ss",
-      valueFormat: "YYYY-MM-DD HH:mm:ss",
-      style: { width: "100%" },
-    },
   },
 ]);
 

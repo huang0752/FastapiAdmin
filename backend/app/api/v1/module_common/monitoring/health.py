@@ -29,35 +29,35 @@ async def _check_database() -> DependencyStatus:
     """检查数据库连接"""
     try:
         if not settings.SQL_DB_ENABLE:
-            return DependencyStatus(status="disabled")
+            return DependencyStatus(status=0)
 
         start = time.perf_counter()
         async with async_db_session() as session:
             await session.execute(text("SELECT 1"))
         latency = (time.perf_counter() - start) * 1000
-        return DependencyStatus(status="up", latency_ms=round(latency, 2))
+        return DependencyStatus(status=1, latency_ms=round(latency, 2))
     except Exception as e:
         logger.warning(f"数据库健康检查失败: {e}")
-        return DependencyStatus(status="down")
+        return DependencyStatus(status=0)
 
 
 async def _check_redis(request: Request) -> DependencyStatus:
     """检查 Redis 连接"""
     try:
         if not settings.REDIS_ENABLE:
-            return DependencyStatus(status="disabled")
+            return DependencyStatus(status=0)
 
         redis = getattr(request.app.state, "redis", None)
         if not redis:
-            return DependencyStatus(status="down")
+            return DependencyStatus(status=0)
 
         start = time.perf_counter()
         await redis.ping()
         latency = (time.perf_counter() - start) * 1000
-        return DependencyStatus(status="up", latency_ms=round(latency, 2))
+        return DependencyStatus(status=1, latency_ms=round(latency, 2))
     except Exception as e:
         logger.warning(f"Redis 健康检查失败: {e}")
-        return DependencyStatus(status="down")
+        return DependencyStatus(status=0)
 
 
 def _get_disk_usage() -> float:
@@ -92,7 +92,7 @@ async def health_check():
     uptime = (datetime.now() - _start_time).total_seconds()
     return SuccessResponse(
         data=HealthOut(
-            status="healthy",
+            status=1,
             timestamp=datetime.now().isoformat(),
             version=settings.VERSION,
             uptime_seconds=uptime,
@@ -120,7 +120,7 @@ async def liveness_check():
     uptime = (datetime.now() - _start_time).total_seconds()
     return SuccessResponse(
         data=HealthOut(
-            status="alive",
+            status=1,
             timestamp=datetime.now().isoformat(),
             version=settings.VERSION,
             uptime_seconds=uptime,
@@ -164,7 +164,7 @@ async def readiness_check(request: Request):
     all_ok = all(is_ok(d) for d in dependencies.values())
 
     payload = ReadinessOut(
-        status="ready" if all_ok else "not_ready",
+        status=1 if all_ok else 0,
         timestamp=datetime.now().isoformat(),
         version=settings.VERSION,
         uptime_seconds=uptime,

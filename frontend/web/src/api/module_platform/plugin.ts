@@ -105,6 +105,7 @@ export default PluginAPI;
 export interface PluginQueryParam extends PageQuery, UserByQueryParams, TenantByQueryParams {
   name?: string;
   category?: string;
+  status?: number;
 }
 
 export interface PluginTable extends BaseType {

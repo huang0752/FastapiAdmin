@@ -13,9 +13,9 @@
       :show-search="true"
       :disabled-search="false"
       :default-expanded="false"
-      :button-left-limit="0"
-      @search="handleJobSearchBarSearch"
-      @reset="onJobResetSearch"
+      include-audit
+      @search="handleSearchBarSearch"
+      @reset="onResetSearch"
     />
 
     <ElCard
@@ -65,7 +65,7 @@
                 v-hasPerm="['module_task:cronjob:job:scheduler']"
                 type="success"
                 icon="VideoPlay"
-                :disabled="schedulerStatus.status !== '停止'"
+                :disabled="schedulerStatus.status !== 0"
                 size="small"
                 @click="handleStartScheduler"
               >
@@ -75,7 +75,7 @@
                 v-hasPerm="['module_task:cronjob:job:scheduler']"
                 type="warning"
                 icon="VideoPause"
-                :disabled="schedulerStatus.status !== '运行中'"
+                :disabled="schedulerStatus.status !== 1"
                 size="small"
                 @click="handlePauseScheduler"
               >
@@ -85,7 +85,7 @@
                 v-hasPerm="['module_task:cronjob:job:scheduler']"
                 type="primary"
                 icon="RefreshRight"
-                :disabled="schedulerStatus.status !== '暂停'"
+                :disabled="schedulerStatus.status !== 2"
                 size="small"
                 @click="handleResumeScheduler"
               >
@@ -95,7 +95,7 @@
                 v-hasPerm="['module_task:cronjob:job:scheduler']"
                 type="danger"
                 icon="SwitchButton"
-                :disabled="schedulerStatus.status === '停止'"
+                :disabled="schedulerStatus.status === 0"
                 size="small"
                 @click="handleShutdownScheduler"
               >
@@ -350,7 +350,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import { Terminal, TerminalApi } from "vue-web-terminal";
 
 const schedulerStatus = ref<SchedulerStatus>({
-  status: "未知",
+  status: 0,
   is_running: false,
   job_count: 0,
 });
@@ -386,9 +386,9 @@ const jobSearchItems = computed<SearchFormItem[]>(() => [
       placeholder: "请选择状态",
       clearable: true,
       options: [
-        { label: "运行中", value: "运行中" },
-        { label: "暂停", value: "暂停" },
-        { label: "停止", value: "停止" },
+        { label: "运行中", value: 0 },
+        { label: "暂停", value: 1 },
+        { label: "停止", value: 2 },
       ],
     },
     span: 6,
@@ -410,17 +410,16 @@ const jobLoading = ref(false);
 /** 主区域为卡片列表无表格列配置，仅占位满足 FaTableHeader v-model */
 const jobColumnChecks = ref<ColumnOption<SchedulerJob>[]>([]);
 
-function matchesJobStatusFilter(jobStatus: string | undefined, filter?: string): boolean {
-  if (!filter) return true;
-  const map: Record<string, string[]> = {
-    运行中: ["运行中"],
-    暂停: ["暂停", "暂停中"],
-    停止: ["停止", "已停止"],
+function matchesJobStatusFilter(jobStatus: number | undefined, filter?: number): boolean {
+  if (filter === undefined) return true;
+  const map: Record<number, number[]> = {
+    0: [0],  // 运行中
+    1: [1],  // 暂停
+    2: [2],  // 停止
   };
-  const aliases = map[filter];
-  if (!aliases) return true;
-  const s = jobStatus ?? "";
-  return aliases.some((a) => s === a || s.includes(a));
+  const allowed = map[filter];
+  if (!allowed) return true;
+  return allowed.includes(jobStatus ?? -1);
 }
 
 async function fetchSchedulerJobs() {
@@ -433,7 +432,7 @@ async function fetchSchedulerJobs() {
     const statusQ = searchForm.value.status;
     jobList.value = list.filter((j) => {
       if (nameQ && !(j.name ?? "").includes(nameQ)) return false;
-      if (!matchesJobStatusFilter(j.status.toString(), statusQ?.toString())) return false;
+      if (!matchesJobStatusFilter(j.status, statusQ)) return false;
       return true;
     });
     await loadSchedulerStatus();
@@ -447,12 +446,12 @@ async function fetchSchedulerJobs() {
 
 const refreshJobList = fetchSchedulerJobs;
 
-async function handleJobSearchBarSearch() {
+async function handleSearchBarSearch() {
   await searchBarRef.value?.validate?.();
   await fetchSchedulerJobs();
 }
 
-async function onJobResetSearch() {
+async function onResetSearch() {
   searchForm.value = {
     name: undefined,
     status: undefined,
@@ -725,13 +724,13 @@ const executionLogDrawerVisible = ref(false);
 const jobStateVisible = ref(false);
 const jobStateData = ref<any>(null);
 
-function getSchedulerStatusType(status: string) {
+function getSchedulerStatusType(status: number) {
   switch (status) {
-    case "运行中":
+    case 1:
       return "success";
-    case "暂停":
+    case 2:
       return "warning";
-    case "停止":
+    case 0:
       return "danger";
     default:
       return "info";

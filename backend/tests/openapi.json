@@ -831,106 +831,6 @@
                 }
             }
         },
-        "/system/auth/forgot-password": {
-            "post": {
-                "tags": [
-                    "系统管理",
-                    "认证授权"
-                ],
-                "summary": "忘记密码",
-                "operationId": "forgot_password_controller_system_auth_forgot_password_post",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ForgotPasswordSchema"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "description": "成功",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ResponseSchema_str_"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误"
-                    },
-                    "401": {
-                        "description": "未认证"
-                    },
-                    "403": {
-                        "description": "未授权"
-                    },
-                    "404": {
-                        "description": "资源不存在"
-                    },
-                    "422": {
-                        "description": "请求参数验证错误"
-                    },
-                    "500": {
-                        "description": "服务器内部错误"
-                    }
-                }
-            }
-        },
-        "/system/auth/reset-password": {
-            "post": {
-                "tags": [
-                    "系统管理",
-                    "认证授权"
-                ],
-                "summary": "重置密码",
-                "operationId": "reset_password_controller_system_auth_reset_password_post",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ResetPasswordWithTokenSchema"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "description": "成功",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ResponseSchema_str_"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误"
-                    },
-                    "401": {
-                        "description": "未认证"
-                    },
-                    "403": {
-                        "description": "未授权"
-                    },
-                    "404": {
-                        "description": "资源不存在"
-                    },
-                    "422": {
-                        "description": "请求参数验证错误"
-                    },
-                    "500": {
-                        "description": "服务器内部错误"
-                    }
-                }
-            }
-        },
         "/system/dept/tree": {
             "get": {
                 "tags": [
@@ -18536,7 +18436,7 @@
                 "tags": [
                     "工作流节点类型"
                 ],
-                "summary": "编排节点类型选项",
+                "summary": "节点类型选项",
                 "operationId": "get_workflow_node_type_options_controller_task_workflow_node_type_options_get",
                 "responses": {
                     "200": {
@@ -18580,7 +18480,7 @@
                 "tags": [
                     "工作流节点类型"
                 ],
-                "summary": "编排节点类型详情",
+                "summary": "节点类型详情",
                 "operationId": "get_workflow_node_type_detail_controller_task_workflow_node_type_detail__id__get",
                 "security": [
                     {
@@ -18637,7 +18537,7 @@
                 "tags": [
                     "工作流节点类型"
                 ],
-                "summary": "编排节点类型列表",
+                "summary": "节点类型列表",
                 "operationId": "get_workflow_node_type_list_controller_task_workflow_node_type_list_get",
                 "security": [
                     {
@@ -18816,7 +18716,7 @@
                 "tags": [
                     "工作流节点类型"
                 ],
-                "summary": "创建编排节点类型",
+                "summary": "创建节点类型",
                 "operationId": "create_workflow_node_type_controller_task_workflow_node_type_create_post",
                 "requestBody": {
                     "content": {
@@ -18870,7 +18770,7 @@
                 "tags": [
                     "工作流节点类型"
                 ],
-                "summary": "更新编排节点类型",
+                "summary": "更新节点类型",
                 "operationId": "update_workflow_node_type_controller_task_workflow_node_type_update__id__put",
                 "security": [
                     {
@@ -18937,7 +18837,7 @@
                 "tags": [
                     "工作流节点类型"
                 ],
-                "summary": "删除编排节点类型",
+                "summary": "删除节点类型",
                 "operationId": "delete_workflow_node_type_controller_task_workflow_node_type_delete_delete",
                 "requestBody": {
                     "content": {
@@ -18996,7 +18896,7 @@
                 "tags": [
                     "工作流节点类型"
                 ],
-                "summary": "编排节点类型选择列表",
+                "summary": "节点类型选择列表",
                 "operationId": "get_workflow_node_type_select_controller_task_workflow_node_type_select_get",
                 "responses": {
                     "200": {
@@ -22814,22 +22714,6 @@
                 ],
                 "title": "EmailTestSchema",
                 "description": "测试 SMTP 连接"
-            },
-            "ForgotPasswordSchema": {
-                "properties": {
-                    "email": {
-                        "type": "string",
-                        "maxLength": 128,
-                        "title": "Email",
-                        "description": "注册时使用的邮箱"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "email"
-                ],
-                "title": "ForgotPasswordSchema",
-                "description": "忘记密码：提交邮箱，接收重置邮件"
             },
             "GenCreateTableSqlBody": {
                 "properties": {
@@ -32748,30 +32632,6 @@
                 "title": "ResetPasswordSchema",
                 "description": "重置密码"
             },
-            "ResetPasswordWithTokenSchema": {
-                "properties": {
-                    "token": {
-                        "type": "string",
-                        "minLength": 1,
-                        "title": "Token",
-                        "description": "密码重置令牌"
-                    },
-                    "new_password": {
-                        "type": "string",
-                        "maxLength": 128,
-                        "minLength": 6,
-                        "title": "New Password",
-                        "description": "新密码"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "token",
-                    "new_password"
-                ],
-                "title": "ResetPasswordWithTokenSchema",
-                "description": "通过邮件链接重置密码"
-            },
             "ResourceCopySchema": {
                 "properties": {
                     "source_path": {
@@ -40955,7 +40815,7 @@
                     "func"
                 ],
                 "title": "WorkflowNodeTypeCreateSchema",
-                "description": "创建编排节点类型"
+                "description": "创建节点类型"
             },
             "WorkflowNodeTypeOutSchema": {
                 "properties": {
@@ -41259,7 +41119,7 @@
                     "func"
                 ],
                 "title": "WorkflowNodeTypeUpdateSchema",
-                "description": "更新编排节点类型"
+                "description": "更新节点类型"
             },
             "WorkflowOutSchema": {
                 "properties": {

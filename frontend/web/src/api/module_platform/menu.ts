@@ -56,6 +56,13 @@ export default MenuAPI;
 export interface MenuPageQuery extends BaseQueryParams {
   name?: string;
   menu_client?: "pc" | "app";
+  status?: number;
+  type?: number;
+  permission?: string;
+  route_path?: string;
+  component_path?: string;
+  description?: string;
+  scope?: "platform" | "tenant";
 }
 
 export interface MenuTable extends BaseType {

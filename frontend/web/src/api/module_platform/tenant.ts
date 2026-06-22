@@ -133,6 +133,7 @@ export default TenantAPI;
 export interface TenantPageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {
   name?: string;
   code?: string;
+  status?: number;
 }
 
 export interface TenantTable extends BaseType {

@@ -15,7 +15,7 @@
           :show-search="true"
           :disabled-search="false"
           :default-expanded="false"
-          :button-left-limit="0"
+          include-audit
           @search="handleOrderSearch"
           @reset="handleOrderReset"
         />

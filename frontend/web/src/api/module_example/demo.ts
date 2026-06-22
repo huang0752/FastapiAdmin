@@ -83,6 +83,7 @@ export default DemoAPI;
 
 export interface DemoPageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {
   name?: string;
+  status?: number;
 }
 
 export interface DemoTable extends BaseType {

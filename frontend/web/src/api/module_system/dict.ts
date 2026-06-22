@@ -135,12 +135,14 @@ export default DictAPI;
 export interface DictPageQuery extends PageQuery, UserByQueryParams {
   dict_name?: string;
   dict_type?: string;
+  status?: number;
 }
 
 export interface DictDataPageQuery extends PageQuery, UserByQueryParams {
   dict_label?: string;
   dict_type?: string;
   dict_type_id?: number;
+  status?: number;
 }
 
 export interface DictTable extends BaseType {

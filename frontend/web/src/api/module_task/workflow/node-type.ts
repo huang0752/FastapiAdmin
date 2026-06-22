@@ -61,7 +61,7 @@ const WorkflowNodeTypeAPI = {
 export default WorkflowNodeTypeAPI;
 export { WorkflowNodeTypeAPI };
 
-/** 编排节点类型选项（对应后端 task_workflow_node_type） */
+/** 节点类型选项（对应后端 task_workflow_node_type） */
 export interface WorkflowNodeTypeOption {
   id: number;
   code: string;
@@ -76,6 +76,7 @@ export interface WorkflowNodeTypePageQuery extends PageQuery, UserByQueryParams 
   code?: string;
   category?: string;
   is_active?: boolean;
+  status?: number;
 }
 
 export interface WorkflowNodeTypeTable extends BaseType {

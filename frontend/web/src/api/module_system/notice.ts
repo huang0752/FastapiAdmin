@@ -100,6 +100,7 @@ export default NoticeAPI;
 export interface NoticePageQuery extends PageQuery, UserByQueryParams {
   notice_title?: string;
   notice_type?: string;
+  status?: number;
 }
 
 export interface NoticeTable extends BaseType {

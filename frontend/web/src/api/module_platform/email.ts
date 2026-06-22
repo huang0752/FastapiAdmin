@@ -209,6 +209,7 @@ export interface EmailLogPageQuery extends PageQuery, UserByQueryParams {
   to_email?: string;
   biz_type?: string;
   template_code?: string;
+  status?: number;
 }
 
 export interface EmailLogTable {

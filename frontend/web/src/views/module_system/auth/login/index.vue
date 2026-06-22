@@ -414,7 +414,7 @@ const validateRegisterConfirm = (_rule: unknown, value: string, callback: (e?: E
   callback();
 };
 
-const registerRules = computed<FormRules<RegisterForm>>(() => ({
+const registerRules = computed<FormRules<RegisterForm & { email: string }>>(() => ({
   username: [{ required: true, message: t("login.message.username.required"), trigger: "blur" }],
   password: [
     { required: true, validator: validateRegisterPassword, trigger: "blur" },
@@ -424,6 +424,14 @@ const registerRules = computed<FormRules<RegisterForm>>(() => ({
     { required: true, message: t("login.message.password.required"), trigger: "blur" },
     { min: 6, message: t("login.message.password.min"), trigger: "blur" },
     { validator: validateRegisterConfirm, trigger: "blur" },
+  ],
+  email: [
+    { required: true, message: t("login.email.required"), trigger: "blur" },
+    {
+      type: "email",
+      message: t("login.email.invalid"),
+      trigger: "blur",
+    },
   ],
 }));
 

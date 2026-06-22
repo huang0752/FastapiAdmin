@@ -14,7 +14,7 @@
           :show-search="true"
           :disabled-search="false"
           :default-expanded="false"
-          :button-left-limit="0"
+          include-audit
           @search="handleConfigSearch"
           @reset="onConfigResetSearch"
         />
@@ -68,7 +68,7 @@
           :show-search="true"
           :disabled-search="false"
           :default-expanded="false"
-          :button-left-limit="0"
+          include-audit
           @search="handleTemplateSearch"
           @reset="onTemplateResetSearch"
         />
@@ -122,7 +122,8 @@
           :show-search="true"
           :disabled-search="false"
           :default-expanded="false"
-          :button-left-limit="0"
+          include-audit
+          :audit-item-options="{ showTenantId: true }"
           @search="handleLogSearch"
           @reset="onLogResetSearch"
         />
@@ -317,6 +318,20 @@ const configSearchItems = computed<SearchFormItem[]>(() => [
     clearable: true,
     span: 6,
   },
+  {
+    label: "状态",
+    key: "status",
+    type: "select",
+    props: {
+      placeholder: "请选择状态",
+      options: [
+        { label: "启用", value: 0 },
+        { label: "停用", value: 1 },
+      ],
+      clearable: true,
+    },
+    span: 6,
+  },
 ]);
 
 const configTableRef = ref<{ elTableRef?: { clearSelection: () => void } } | null>(null);
@@ -443,6 +458,20 @@ const templateSearchItems = computed<SearchFormItem[]>(() => [
     clearable: true,
     span: 6,
   },
+  {
+    label: "状态",
+    key: "status",
+    type: "select",
+    props: {
+      placeholder: "请选择状态",
+      options: [
+        { label: "启用", value: 0 },
+        { label: "停用", value: 1 },
+      ],
+      clearable: true,
+    },
+    span: 6,
+  },
 ]);
 
 const templateTableRef = ref<{ elTableRef?: { clearSelection: () => void } } | null>(null);
@@ -551,6 +580,21 @@ const logSearchItems = computed<SearchFormItem[]>(() => [
     type: "input",
     placeholder: "请输入模板编码",
     clearable: true,
+    span: 6,
+  },
+  {
+    label: "状态",
+    key: "status",
+    type: "select",
+    props: {
+      placeholder: "请选择状态",
+      options: [
+        { label: "待发送", value: 0 },
+        { label: "成功", value: 1 },
+        { label: "失败", value: 2 },
+      ],
+      clearable: true,
+    },
     span: 6,
   },
 ]);

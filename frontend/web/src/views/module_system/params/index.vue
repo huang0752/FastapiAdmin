@@ -13,6 +13,8 @@
       :show-search="true"
       :disabled-search="false"
       :default-expanded="false"
+      include-audit
+      :audit-item-options="{ showTenantId: true }"
       @search="handleSearchBarSearch"
       @reset="onResetSearch"
     />
@@ -212,19 +214,18 @@ const paramSearchItems = computed<SearchFormItem[]>(() => [
     span: 6,
   },
   {
-    label: "创建时间",
-    key: "created_time",
-    type: "datetimerange",
-    span: 6,
+    label: "状态",
+    key: "status",
+    type: "select",
     props: {
-      type: "datetimerange",
-      rangeSeparator: "至",
-      startPlaceholder: "开始日期",
-      endPlaceholder: "结束日期",
-      format: "YYYY-MM-DD HH:mm:ss",
-      valueFormat: "YYYY-MM-DD HH:mm:ss",
-      style: { width: "100%" },
+      placeholder: "请选择状态",
+      options: [
+        { label: "启用", value: 0 },
+        { label: "停用", value: 1 },
+      ],
+      clearable: true,
     },
+    span: 6,
   },
 ]);
 

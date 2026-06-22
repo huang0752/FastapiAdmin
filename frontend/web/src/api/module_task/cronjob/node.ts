@@ -78,6 +78,7 @@ export default NodeAPI;
 export interface NodePageQuery extends PageQuery, UserByQueryParams {
   name?: string;
   code?: string;
+  status?: number;
 }
 
 export type TriggerType = "now" | "cron" | "interval" | "date";
@@ -91,7 +92,7 @@ export interface ExecuteNodeParams {
 
 export interface ExecuteNodeResult {
   job_id: number;
-  status: string;
+  status: number;
   trigger: TriggerType;
 }
 

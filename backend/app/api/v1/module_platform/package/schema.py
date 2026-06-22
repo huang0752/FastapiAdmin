@@ -100,12 +100,15 @@ class PackageQueryParam(BaseQueryParam):
 
     name: str | None = Query(None, description="套餐名称")
     code: str | None = Query(None, description="套餐编码")
+    status: int | None = Query(None, ge=0, le=1, description="状态(0:启动 1:停用)")
 
     def __post_init__(self) -> None:
         if self.name:
             self.name = (QueueEnum.like.value, self.name)
         if self.code:
             self.code = (QueueEnum.like.value, self.code)
+        if isinstance(self.status, int):
+            self.status = (QueueEnum.eq.value, self.status)
 
 
 class PackageMenuSetSchema(BaseModel):

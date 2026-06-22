@@ -86,6 +86,7 @@ export default PackageAPI;
 export interface PackagePageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {
   name?: string;
   code?: string;
+  status?: number;
 }
 
 export interface PackageTable extends BaseType {

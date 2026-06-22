@@ -70,12 +70,15 @@ class NoticeQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
 
     notice_title: str | None = Query(None, description="公告标题")
     notice_type: str | None = Query(None, description="公告类型")
+    status: int | None = Query(None, ge=0, le=1, description="状态(0:启动 1:停用)")
 
     def __post_init__(self) -> None:
         if self.notice_title:
             self.notice_title = (QueueEnum.like.value, self.notice_title)
         if self.notice_type:
             self.notice_type = (QueueEnum.eq.value, self.notice_type)
+        if isinstance(self.status, int):
+            self.status = (QueueEnum.eq.value, self.status)
 
 
 class PanelMessageItem(BaseModel):

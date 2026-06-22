@@ -68,6 +68,7 @@ class ParamsQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
     config_name: str | None = Query(None, description="参数名称")
     config_key: str | None = Query(None, description="参数键名")
     config_type: bool | None = Query(None, description="是否系统内置(True:是 False:否)")
+    status: int | None = Query(None, ge=0, le=1, description="状态(0:启动 1:停用)")
 
     def __post_init__(self) -> None:
         if self.config_name:
@@ -76,3 +77,5 @@ class ParamsQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
             self.config_key = (QueueEnum.like.value, self.config_key)
         if self.config_type is not None:
             self.config_type = (QueueEnum.eq.value, self.config_type)
+        if isinstance(self.status, int):
+            self.status = (QueueEnum.eq.value, self.status)

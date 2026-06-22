@@ -54,10 +54,13 @@ class LoginLogQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
     """登录日志查询参数"""
 
     username: str | None = Query(None, max_length=64, description="用户名")
+    status: int | None = Query(None, description="登录状态(1:成功 2:失败)")
 
     def __post_init__(self) -> None:
         if self.username:
             self.username = (QueueEnum.like.value, self.username)
+        if isinstance(self.status, int):
+            self.status = (QueueEnum.eq.value, self.status)
 
 
 @dataclass
@@ -67,6 +70,7 @@ class OperationLogQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryPara
     request_path: str | None = Query(None, description="请求路径")
     request_method: str | None = Query(None, description="请求方式")
     username: str | None = Query(None, description="用户名")
+    status: int | None = Query(None, ge=0, le=1, description="状态(0:成功 1:失败)")
 
     def __post_init__(self) -> None:
         if self.request_path:
@@ -75,6 +79,8 @@ class OperationLogQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryPara
             self.request_method = (QueueEnum.eq.value, self.request_method)
         if self.username:
             self.username = (QueueEnum.like.value, self.username)
+        if isinstance(self.status, int):
+            self.status = (QueueEnum.eq.value, self.status)
 
 
 class OperationLogOutSchema(BaseSchema, UserBySchema, TenantBySchema):

@@ -116,7 +116,7 @@ export interface WorkspaceData {
     id: number;
     name: string;
     code: string;
-    status: string;
+    status: number;
     status_label: string;
     start_time: string | null;
     end_time: string | null;

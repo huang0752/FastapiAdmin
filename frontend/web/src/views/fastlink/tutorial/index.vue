@@ -192,7 +192,7 @@
                             </ElLink>
                             ·
                             <ElLink href="#page-nodetype" type="primary" underline="never">
-                              编排节点类型
+                              节点类型
                             </ElLink>
                           </div>
                         </li>
@@ -921,7 +921,7 @@ const MANUAL_TOC: ManualModule[] = [
       { anchor: "page-cronjob", title: "调度器监控" },
       { anchor: "page-cronnode", title: "节点管理" },
       { anchor: "page-workflow", title: "流程编排" },
-      { anchor: "page-nodetype", title: "编排节点类型" },
+      { anchor: "page-nodetype", title: "节点类型" },
     ],
   },
   {

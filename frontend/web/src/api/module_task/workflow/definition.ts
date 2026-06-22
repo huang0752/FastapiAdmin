@@ -66,6 +66,7 @@ export { WorkflowDefinitionAPI };
 export interface WorkflowPageQuery extends PageQuery, UserByQueryParams {
   name?: string;
   code?: string;
+  status?: number;
 }
 
 export interface WorkflowTable extends BaseType {
@@ -100,7 +101,7 @@ export interface WorkflowExecuteForm {
 export interface WorkflowExecuteResult {
   workflow_id: number;
   workflow_name: string;
-  status: string;
+  status: number;
   start_time?: string;
   end_time?: string;
   variables?: Record<string, any>;

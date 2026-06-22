@@ -10,11 +10,11 @@ from .schema import WorkflowNodeTypeCreateSchema, WorkflowNodeTypeUpdateSchema
 
 
 class WorkflowNodeTypeCRUD(CRUDBase[WorkflowNodeTypeModel, WorkflowNodeTypeCreateSchema, WorkflowNodeTypeUpdateSchema]):
-    """编排节点类型 CRUD"""
+    """节点类型 CRUD"""
 
     def __init__(self, auth: AuthSchema) -> None:
         """
-        初始化编排节点类型 CRUD。
+        初始化节点类型 CRUD。
 
         参数:
         - auth (AuthSchema): 认证信息。

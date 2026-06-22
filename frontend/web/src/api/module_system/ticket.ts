@@ -41,6 +41,7 @@ export interface TicketPageQuery extends PageQuery, UserByQueryParams {
   title?: string;
   ticket_type?: string;
   assigned_id?: number;
+  status?: number;
 }
 
 export interface TicketTable extends BaseType {

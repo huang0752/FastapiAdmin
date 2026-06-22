@@ -23,7 +23,7 @@ const AuthAPI = {
   },
 
   refreshToken(body: RefreshToekenBody) {
-    return request<ApiResponse<LoginResult>>({
+    return request<ApiResponse<JWTOut>>({
       url: `${API_PATH}/token/refresh`,
       method: "post",
       data: body,
@@ -42,32 +42,6 @@ const AuthAPI = {
       url: `${API_PATH}/logout`,
       method: "post",
       data: body,
-    });
-  },
-
-  /** 获取免登录用户列表 */
-  getAutoLoginUsers() {
-    return request<ApiResponse<AutoLoginUser[]>>({
-      url: `${API_PATH}/auto-login/users`,
-      method: "get",
-    });
-  },
-
-  /** 获取免登录Token */
-  getAutoLoginToken(userId: number) {
-    return request<ApiResponse<AutoLoginToken>>({
-      url: `${API_PATH}/auto-login/token`,
-      method: "post",
-      params: { user_id: userId },
-    });
-  },
-
-  /** 免登录 */
-  autoLogin(token: string) {
-    return request<ApiResponse<LoginResult>>({
-      url: `${API_PATH}/auto-login`,
-      method: "post",
-      params: { token },
     });
   },
 
@@ -129,12 +103,16 @@ export interface LoginFormData {
   login_type?: string;
 }
 
-/** 登录成功返回 (JWTOutSchema) */
-export interface LoginResult {
+/** JWT 响应 (JWTOutSchema) */
+export interface JWTOut {
   access_token: string;
   refresh_token: string;
   token_type: string;
   expires_in: number;
+}
+
+/** 登录成功返回 */
+export interface LoginResult extends JWTOut {
   tenants?: TenantOption[];
 }
 
@@ -146,20 +124,6 @@ export interface RefreshToekenBody {
 /** 退出登录请求体 */
 export interface LogoutBody {
   token: string;
-}
-
-/** 免登录用户 (AutoLoginUserSchema) */
-export interface AutoLoginUser {
-  id: number;
-  username: string;
-  name: string;
-  avatar?: string | null;
-}
-
-/** 免登录 Token (AutoLoginTokenSchema) */
-export interface AutoLoginToken {
-  token: string;
-  user: AutoLoginUser;
 }
 
 /** 租户选项 */

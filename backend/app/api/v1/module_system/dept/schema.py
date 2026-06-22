@@ -68,6 +68,9 @@ class DeptQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
     """部门管理查询参数"""
 
     name: str | None = Query(None, description="部门名称")
+    status: int | None = Query(None, ge=0, le=1, description="状态(0:启动 1:停用)")
 
     def __post_init__(self) -> None:
         self.name = (QueueEnum.like.value, self.name)
+        if isinstance(self.status, int):
+            self.status = (QueueEnum.eq.value, self.status)

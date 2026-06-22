@@ -12,7 +12,7 @@ from .schema import (
 
 
 class WorkflowNodeTypeService:
-    """工作流编排节点类型（与定时任务 task_node 无关）"""
+    """工作流节点类型（与定时任务 task_node 无关）"""
 
     def __init__(self, auth: AuthSchema) -> None:
         self.auth = auth
@@ -38,7 +38,7 @@ class WorkflowNodeTypeService:
     async def get_detail(self, id: int) -> WorkflowNodeTypeOutSchema:
         obj = await WorkflowNodeTypeCRUD(self.auth).get_obj_by_id_crud(id=id)
         if not obj:
-            raise CustomException(msg="编排节点类型不存在")
+            raise CustomException(msg="节点类型不存在")
         return self._out(obj)
 
     async def get_list(
@@ -85,7 +85,7 @@ class WorkflowNodeTypeService:
     async def update(self, id: int, data: WorkflowNodeTypeUpdateSchema) -> WorkflowNodeTypeOutSchema:
         exist = await WorkflowNodeTypeCRUD(self.auth).get_obj_by_id_crud(id=id)
         if not exist:
-            raise CustomException(msg="编排节点类型不存在")
+            raise CustomException(msg="节点类型不存在")
         if exist.code != data.code:
             other = await WorkflowNodeTypeCRUD(self.auth).get(code=data.code)
             if other:

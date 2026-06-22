@@ -114,7 +114,7 @@ export interface permissionMenuType {
   type: number;
   permission: string;
   parent_id?: number;
-  status: string;
+  status: number;
   description?: string;
   children?: permissionMenuType[];
 }

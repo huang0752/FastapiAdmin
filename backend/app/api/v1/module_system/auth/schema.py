@@ -86,16 +86,3 @@ class TenantRegisterOutSchema(BaseModel):
     package: str | None = Field(default=None, description="开通套餐")
     trial_end: str = Field(..., description="试用到期日")
     message: str = Field(default="注册成功", description="提示信息")
-
-
-class ForgotPasswordSchema(BaseModel):
-    """忘记密码：提交邮箱，接收重置邮件"""
-
-    email: str = Field(..., max_length=128, description="注册时使用的邮箱")
-
-
-class ResetPasswordWithTokenSchema(BaseModel):
-    """通过邮件链接重置密码"""
-
-    token: str = Field(..., min_length=1, description="密码重置令牌")
-    new_password: str = Field(..., min_length=6, max_length=128, description="新密码")

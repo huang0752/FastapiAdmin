@@ -15,7 +15,7 @@
           :show-search="true"
           :disabled-search="false"
           :default-expanded="false"
-          :button-left-limit="0"
+          include-audit
           @search="handlePlatformSearch"
           @reset="handlePlatformReset"
         />
@@ -163,6 +163,36 @@ const platformSearchItems = computed<SearchFormItem[]>(() => [
         { label: "已开具", value: 1 },
         { label: "已作废", value: 2 },
       ],
+    },
+  },
+  {
+    label: "创建时间",
+    key: "created_time",
+    type: "datetimerange",
+    span: 6,
+    props: {
+      type: "datetimerange",
+      rangeSeparator: "至",
+      startPlaceholder: "开始日期",
+      endPlaceholder: "结束日期",
+      format: "YYYY-MM-DD HH:mm:ss",
+      valueFormat: "YYYY-MM-DD HH:mm:ss",
+      style: { width: "100%" },
+    },
+  },
+  {
+    label: "更新时间",
+    key: "updated_time",
+    type: "datetimerange",
+    span: 6,
+    props: {
+      type: "datetimerange",
+      rangeSeparator: "至",
+      startPlaceholder: "开始日期",
+      endPlaceholder: "结束日期",
+      format: "YYYY-MM-DD HH:mm:ss",
+      valueFormat: "YYYY-MM-DD HH:mm:ss",
+      style: { width: "100%" },
     },
   },
 ]);

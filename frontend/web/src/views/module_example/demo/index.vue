@@ -13,7 +13,7 @@
       :show-search="true"
       :disabled-search="false"
       :default-expanded="false"
-      :include-audit="true"
+      include-audit
       @search="handleSearch"
       @reset="onResetSearch"
     />

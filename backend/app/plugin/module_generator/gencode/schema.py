@@ -309,7 +309,10 @@ class GenTableQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
 
     table_name: str | None = Query(None, description="表名称")
     table_comment: str | None = Query(None, description="表注释")
+    status: int | None = Query(None, ge=0, le=1, description="状态(0:启动 1:停用)")
 
     def __post_init__(self) -> None:
         self.table_name = (QueueEnum.like.value, self.table_name) if self.table_name else None
         self.table_comment = (QueueEnum.like.value, self.table_comment) if self.table_comment else None
+        if isinstance(self.status, int):
+            self.status = (QueueEnum.eq.value, self.status)

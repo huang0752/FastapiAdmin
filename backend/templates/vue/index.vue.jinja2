@@ -777,7 +777,7 @@ async function handleBatchDelete() {
   }
 }
 
-async function runBatchStatus(status: string) {
+async function runBatchStatus(status: number) {
   const ids = selectedIds.value;
   if (ids.length === 0) {
     ElMessage.warning("请先在列表中勾选数据");
@@ -785,7 +785,7 @@ async function runBatchStatus(status: string) {
   }
   try {
     await ElMessageBox.confirm(
-      `确认对选中的 ${ids.length} 条数据${status === "0" ? "启用" : "停用"}？`,
+      `确认对选中的 ${ids.length} 条数据${status === 0 ? "启用" : "停用"}？`,
       "批量设置",
       { confirmButtonText: "确定", cancelButtonText: "取消", type: "warning" }
     );

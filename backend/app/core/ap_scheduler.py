@@ -55,6 +55,11 @@ JOB_STATUS_FAILED = 3
 JOB_STATUS_TIMEOUT = 4
 JOB_STATUS_CANCELLED = 5
 
+# 调度器状态常量（0:已停止 1:运行中 2:已暂停）
+SCHEDULER_STATUS_STOPPED = 0
+SCHEDULER_STATUS_RUNNING = 1
+SCHEDULER_STATUS_PAUSED = 2
+
 scheduler = AsyncIOScheduler()
 scheduler.configure(
     jobstores={
@@ -369,7 +374,7 @@ class SchedulerUtil:
         处理调度器启动事件
         """
         logger.info("调度器已启动")
-        cls._update_scheduler_status("running")
+        cls._update_scheduler_status(SCHEDULER_STATUS_RUNNING)
 
     @classmethod
     def _handle_scheduler_shutdown(cls, event: SchedulerEvent) -> None:
@@ -377,7 +382,7 @@ class SchedulerUtil:
         处理调度器关闭事件
         """
         logger.info("调度器已关闭")
-        cls._update_scheduler_status("stopped")
+        cls._update_scheduler_status(SCHEDULER_STATUS_STOPPED)
 
     @classmethod
     def _handle_scheduler_paused(cls, event: SchedulerEvent) -> None:
@@ -385,7 +390,7 @@ class SchedulerUtil:
         处理调度器暂停事件
         """
         logger.info("调度器已暂停")
-        cls._update_scheduler_status("paused")
+        cls._update_scheduler_status(SCHEDULER_STATUS_PAUSED)
 
     @classmethod
     def _handle_scheduler_resumed(cls, event: SchedulerEvent) -> None:
@@ -393,7 +398,7 @@ class SchedulerUtil:
         处理调度器恢复事件
         """
         logger.info("调度器已恢复运行")
-        cls._update_scheduler_status("running")
+        cls._update_scheduler_status(SCHEDULER_STATUS_RUNNING)
 
     @classmethod
     def _handle_executor_added(cls, event: SchedulerEvent) -> None:
@@ -472,12 +477,12 @@ class SchedulerUtil:
         logger.debug(f"收到未处理的事件: {event_type} (code: {event_code})")
 
     @classmethod
-    def _update_scheduler_status(cls, status: str) -> None:
+    def _update_scheduler_status(cls, status: int) -> None:
         """
         更新调度器状态到系统参数
 
         参数:
-        - status (str): 调度器状态 (running/stopped/paused)
+        - status (int): 调度器状态 (0: stopped / 1: running / 2: paused)
         """
         try:
             from sqlalchemy.orm import Session
@@ -492,12 +497,12 @@ class SchedulerUtil:
                     .first()
                 )
                 if param:
-                    param.config_value = status
+                    param.config_value = str(status)
                 else:
                     param = ParamsModel(
                         config_name="调度器状态",
                         config_key="scheduler_status",
-                        config_value=status,
+                        config_value=str(status),
                         config_type=True,
                     )
                     session.add(param)

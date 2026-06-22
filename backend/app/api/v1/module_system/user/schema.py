@@ -317,7 +317,7 @@ class UserQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
         pattern=r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$",
     )
     dept_id: int | None = Query(None, description="部门ID")
-    status: str | None = Query(None, description="是否可用")
+    status: int | None = Query(None, description="是否可用")
 
     def __post_init__(self) -> None:
         self.username = (QueueEnum.like.value, self.username)

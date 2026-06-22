@@ -26,7 +26,7 @@ WorkflowNodeTypeRouter = APIRouter(
 
 @WorkflowNodeTypeRouter.get(
     "/options",
-    summary="编排节点类型选项",
+    summary="节点类型选项",
     response_model=ResponseSchema[list[dict]],
 )
 async def get_workflow_node_type_options_controller(
@@ -34,12 +34,12 @@ async def get_workflow_node_type_options_controller(
 ) -> JSONResponse:
     service = WorkflowNodeTypeService(auth)
     result = await service.get_options()
-    return SuccessResponse(data=result, msg="获取编排节点类型选项成功")
+    return SuccessResponse(data=result, msg="获取节点类型选项成功")
 
 
 @WorkflowNodeTypeRouter.get(
     "/detail/{id}",
-    summary="编排节点类型详情",
+    summary="节点类型详情",
     response_model=ResponseSchema[WorkflowNodeTypeOutSchema],
 )
 async def get_workflow_node_type_detail_controller(
@@ -48,12 +48,12 @@ async def get_workflow_node_type_detail_controller(
 ) -> JSONResponse:
     service = WorkflowNodeTypeService(auth)
     result_dict = await service.get_detail(id=id)
-    return SuccessResponse(data=result_dict, msg="获取编排节点类型详情成功")
+    return SuccessResponse(data=result_dict, msg="获取节点类型详情成功")
 
 
 @WorkflowNodeTypeRouter.get(
     "/list",
-    summary="编排节点类型列表",
+    summary="节点类型列表",
     response_model=ResponseSchema[PageResultSchema[WorkflowNodeTypeOutSchema]],
 )
 async def get_workflow_node_type_list_controller(
@@ -71,12 +71,12 @@ async def get_workflow_node_type_list_controller(
         search=search,
         order_by=order_by,
     )
-    return SuccessResponse(data=result_dict, msg="查询编排节点类型列表成功")
+    return SuccessResponse(data=result_dict, msg="查询节点类型列表成功")
 
 
 @WorkflowNodeTypeRouter.post(
     "/create",
-    summary="创建编排节点类型",
+    summary="创建节点类型",
     response_model=ResponseSchema[WorkflowNodeTypeOutSchema],
 )
 async def create_workflow_node_type_controller(
@@ -85,12 +85,12 @@ async def create_workflow_node_type_controller(
 ) -> JSONResponse:
     service = WorkflowNodeTypeService(auth)
     result_dict = await service.create(data=data)
-    return SuccessResponse(data=result_dict, msg="创建编排节点类型成功")
+    return SuccessResponse(data=result_dict, msg="创建节点类型成功")
 
 
 @WorkflowNodeTypeRouter.put(
     "/update/{id}",
-    summary="更新编排节点类型",
+    summary="更新节点类型",
     response_model=ResponseSchema[WorkflowNodeTypeOutSchema],
 )
 async def update_workflow_node_type_controller(
@@ -100,12 +100,12 @@ async def update_workflow_node_type_controller(
 ) -> JSONResponse:
     service = WorkflowNodeTypeService(auth)
     result_dict = await service.update(id=id, data=data)
-    return SuccessResponse(data=result_dict, msg="更新编排节点类型成功")
+    return SuccessResponse(data=result_dict, msg="更新节点类型成功")
 
 
 @WorkflowNodeTypeRouter.delete(
     "/delete",
-    summary="删除编排节点类型",
+    summary="删除节点类型",
     response_model=ResponseSchema[None],
 )
 async def delete_workflow_node_type_controller(
@@ -114,12 +114,12 @@ async def delete_workflow_node_type_controller(
 ) -> JSONResponse:
     service = WorkflowNodeTypeService(auth)
     await service.delete(ids=ids)
-    return SuccessResponse(msg="删除编排节点类型成功")
+    return SuccessResponse(msg="删除节点类型成功")
 
 
 @WorkflowNodeTypeRouter.get(
     "/select",
-    summary="编排节点类型选择列表",
+    summary="节点类型选择列表",
     response_model=ResponseSchema[list[dict]],
 )
 async def get_workflow_node_type_select_controller(
@@ -127,4 +127,4 @@ async def get_workflow_node_type_select_controller(
 ) -> JSONResponse:
     service = WorkflowNodeTypeService(auth)
     result = await service.get_select()
-    return SuccessResponse(data=result, msg="获取编排节点类型选择列表成功")
+    return SuccessResponse(data=result, msg="获取节点类型选择列表成功")

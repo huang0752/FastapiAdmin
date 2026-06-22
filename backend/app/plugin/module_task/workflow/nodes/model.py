@@ -6,13 +6,13 @@ from app.core.base_model import ModelMixin, TenantMixin, UserMixin
 
 class WorkflowNodeTypeModel(ModelMixin, TenantMixin, UserMixin):
     """
-    编排节点类型：用于 Vue Flow 左侧 palette 与执行引擎解析。
+    节点类型：用于 Vue Flow 左侧 palette 与执行引擎解析。
     """
 
     __tablename__: str = "task_workflow_node_type"
     __table_args__ = (
         UniqueConstraint("tenant_id", "code"),
-        {"comment": "工作流编排节点类型（非定时任务节点）"},
+        {"comment": "工作流节点类型（非定时任务节点）"},
     )
     __loader_options__: list[str] = ["created_by", "updated_by", "deleted_by", "tenant_by"]
 

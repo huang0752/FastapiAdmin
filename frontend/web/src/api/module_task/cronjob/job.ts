@@ -121,7 +121,7 @@ const JobAPI = {
 export default JobAPI;
 
 export interface SchedulerStatus {
-  status: string;
+  status: number;
   is_running: boolean;
   job_count: number;
 }
@@ -138,6 +138,7 @@ export interface JobLogPageQuery extends PageQuery, UserByQueryParams {
   job_id?: string;
   job_name?: string;
   trigger_type?: string;
+  status?: number;
 }
 
 export interface JobLogTable extends BaseType {

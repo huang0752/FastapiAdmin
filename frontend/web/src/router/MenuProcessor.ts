@@ -104,7 +104,6 @@ function mapMenuNode(item: MenuTable, depth = 0): AppRouteRecord {
     title: item.title ?? "",
     icon: item.icon || undefined,
     hidden: !!item.hidden,
-    /** 与菜单 API `keep_alive` 一致；缺省 true 仅在后端未下发该字段时兜底 */
     keepAlive: item.keep_alive ?? true,
     affix: !!item.affix,
     fixedTab: !!item.affix,

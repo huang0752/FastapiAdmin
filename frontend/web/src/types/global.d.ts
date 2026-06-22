@@ -106,7 +106,6 @@ declare global {
    * 基础查询参数（基础层：状态 + 时间范围）
    */
   interface BaseQueryParams {
-    status?: number;
     created_time?: string[];
     updated_time?: string[];
   }
@@ -273,7 +272,7 @@ declare global {
   interface UserListItem {
     id: number;
     avatar: string;
-    status: string;
+    status: number;
     userName: string;
     userGender: string;
     nickName: string;

@@ -12,7 +12,7 @@
       :show-search="true"
       :disabled-search="false"
       :default-expanded="false"
-      :button-left-limit="0"
+      include-audit
       @search="handleSearchBarSearch"
       @reset="onResetSearch"
     />
@@ -831,6 +831,20 @@ const gencodeSearchItems = computed<SearchFormItem[]>(() => [
     type: "input",
     placeholder: "请输入表描述",
     clearable: true,
+    span: 6,
+  },
+  {
+    label: "状态",
+    key: "status",
+    type: "select",
+    props: {
+      placeholder: "请选择状态",
+      options: [
+        { label: "未生成", value: 0 },
+        { label: "已生成", value: 1 },
+      ],
+      clearable: true,
+    },
     span: 6,
   },
 ]);

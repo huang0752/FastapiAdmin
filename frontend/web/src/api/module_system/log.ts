@@ -40,9 +40,10 @@ const OperationLogAPI = {
 
 export default OperationLogAPI;
 
-export interface OperationLogPageQuery extends PageQuery {
+export interface OperationLogPageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {
   request_path?: string;
   creator_name?: string;
+  status?: number;
 }
 
 export interface OperationLogTable {
@@ -86,8 +87,9 @@ export const LoginLogAPI = {
   },
 };
 
-export interface LoginLogPageQuery extends PageQuery {
+export interface LoginLogPageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {
   username?: string;
+  status?: number;
 }
 
 export interface LoginLogTable {

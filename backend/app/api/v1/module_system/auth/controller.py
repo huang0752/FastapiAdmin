@@ -37,9 +37,7 @@ from .schema import (
     AutoLoginTokenSchema,
     AutoLoginUserSchema,
     CaptchaOutSchema,
-    ForgotPasswordSchema,
     LoginWithTenantsSchema,
-    ResetPasswordWithTokenSchema,
     SelectTenantOutSchema,
     SelectTenantSchema,
     TenantOptionSchema,
@@ -50,7 +48,6 @@ from .service import (
     AutoLoginService,
     CaptchaService,
     LoginService,
-    PasswordResetService,
     TenantRegisterService,
 )
 
@@ -314,29 +311,4 @@ async def tenant_register_controller(
     return SuccessResponse(data=result, msg=result.message)
 
 
-@AuthRouter.post(
-    "/forgot-password",
-    summary="忘记密码",
-    response_model=ResponseSchema[str],
-)
-async def forgot_password_controller(
-    data: ForgotPasswordSchema,
-    redis: Annotated[Redis, Depends(redis_getter)],
-    db: Annotated[AsyncSession, Depends(db_getter)],
-) -> JSONResponse:
-    msg = await PasswordResetService.forgot_password(redis=redis, db=db, email=data.email)
-    return SuccessResponse(data=msg, msg="邮件已发送")
 
-
-@AuthRouter.post(
-    "/reset-password",
-    summary="重置密码",
-    response_model=ResponseSchema[str],
-)
-async def reset_password_controller(
-    data: ResetPasswordWithTokenSchema,
-    redis: Annotated[Redis, Depends(redis_getter)],
-    db: Annotated[AsyncSession, Depends(db_getter)],
-) -> JSONResponse:
-    msg = await PasswordResetService.reset_password_with_token(redis=redis, db=db, token=data.token, new_password=data.new_password)
-    return SuccessResponse(data=msg, msg="密码已重置")

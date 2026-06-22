@@ -15,18 +15,11 @@
           :show-search="true"
           :disabled-search="false"
           :default-expanded="false"
+          include-audit
+          :audit-item-options="{ showTenantId: true }"
           @search="handleOpSearch"
           @reset="onOpResetSearch"
-        >
-          <template #created_id>
-            <FaUserTableSelect
-              :model-value="opSearchForm.created_id == null ? undefined : opSearchForm.created_id"
-              @update:model-value="(v: number | undefined) => (opSearchForm.created_id = v)"
-              @confirm-click="afterOpUserSelectSearch"
-              @clear-click="afterOpUserSelectSearch"
-            />
-          </template>
-        </FaSearchBar>
+        />
 
         <ElCard
           shadow="hover"
@@ -126,7 +119,8 @@
           :show-search="true"
           :disabled-search="false"
           :default-expanded="false"
-          :button-left-limit="0"
+          include-audit
+          :audit-item-options="{ showTenantId: true }"
           @search="handleLoginSearch"
           @reset="onLoginResetSearch"
         />
@@ -255,22 +249,6 @@ const opSearchItems = computed<SearchFormItem[]>(() => [
     clearable: true,
     span: 6,
   },
-  { label: "创建人", key: "created_id", type: "input", span: 6 },
-  {
-    label: "创建时间",
-    key: "created_time",
-    type: "datetimerange",
-    span: 6,
-    props: {
-      type: "datetimerange",
-      rangeSeparator: "至",
-      startPlaceholder: "开始日期",
-      endPlaceholder: "结束日期",
-      format: "YYYY-MM-DD HH:mm:ss",
-      valueFormat: "YYYY-MM-DD HH:mm:ss",
-      style: { width: "100%" },
-    },
-  },
 ]);
 
 function buildOpReplaceParams(p: OpSearchForm): Record<string, unknown> {
@@ -398,17 +376,6 @@ async function handleOpSearch(params: OpSearchForm) {
   opGetData();
 }
 
-async function applyOpSearchFromForm() {
-  await opSearchBarRef.value?.validate?.();
-  opReplaceSearchParams(buildOpReplaceParams(opSearchForm.value));
-  opGetData();
-}
-
-async function afterOpUserSelectSearch() {
-  await nextTick();
-  await applyOpSearchFromForm();
-}
-
 function onOpResetSearch() {
   opSearchForm.value = { request_path: undefined, created_id: undefined, created_time: undefined };
   void opResetSearchParams();
@@ -486,9 +453,9 @@ async function handleOpBatchDelete() {
 
 // ==================== 登录日志 ====================
 
-type LoginSearchForm = { username?: string; status?: number };
+type LoginSearchForm = { username?: string; status?: number; created_time?: string[] };
 
-const loginSearchForm = ref<LoginSearchForm>({ username: undefined, status: undefined });
+const loginSearchForm = ref<LoginSearchForm>({ username: undefined, status: undefined, created_time: undefined });
 const loginShowSearchBar = ref(true);
 const loginSearchBarRef = ref<InstanceType<typeof FaSearchBar> | null>(null);
 const loginSearchBarRules: Record<string, unknown> = {};
@@ -514,6 +481,21 @@ const loginSearchItems = computed<SearchFormItem[]>(() => [
     props: { placeholder: "请选择状态", options: loginStatusOptions.value, clearable: true },
     span: 6,
   },
+  {
+    label: "登录时间",
+    key: "created_time",
+    type: "datetimerange",
+    span: 6,
+    props: {
+      type: "datetimerange",
+      rangeSeparator: "至",
+      startPlaceholder: "开始日期",
+      endPlaceholder: "结束日期",
+      format: "YYYY-MM-DD HH:mm:ss",
+      valueFormat: "YYYY-MM-DD HH:mm:ss",
+      style: { width: "100%" },
+    },
+  },
 ]);
 
 function buildLoginReplaceParams(p: LoginSearchForm): Record<string, unknown> {
@@ -523,6 +505,8 @@ function buildLoginReplaceParams(p: LoginSearchForm): Record<string, unknown> {
       p.status !== undefined && p.status !== null && p.status !== ("" as unknown as number)
         ? Number(p.status)
         : undefined,
+    created_time:
+      Array.isArray(p.created_time) && p.created_time.length === 2 ? p.created_time : undefined,
   };
 }
 
@@ -614,7 +598,7 @@ async function handleLoginSearch(params: LoginSearchForm) {
 }
 
 function onLoginResetSearch() {
-  loginSearchForm.value = { username: undefined, status: undefined };
+  loginSearchForm.value = { username: undefined, status: undefined, created_time: undefined };
   void loginResetSearchParams();
 }
 

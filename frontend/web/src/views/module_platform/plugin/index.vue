@@ -12,6 +12,7 @@
       :show-search="true"
       :disabled-search="false"
       :default-expanded="false"
+      include-audit
       @search="handleSearchBarSearch"
       @reset="onResetSearch"
     />

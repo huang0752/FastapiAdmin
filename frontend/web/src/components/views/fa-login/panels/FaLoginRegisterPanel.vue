@@ -57,6 +57,18 @@
           </ElInput>
         </ElFormItem>
       </ElTooltip>
+      <ElFormItem v-if="showEmail" prop="email">
+        <ElInput
+          class="custom-height"
+          v-model.trim="registerForm.email"
+          clearable
+          :placeholder="$t('login.placeholder.email')"
+        >
+          <template #prefix>
+            <ElIcon><Message /></ElIcon>
+          </template>
+        </ElInput>
+      </ElFormItem>
       <ElFormItem>
         <div class="flex flex-wrap items-center gap-2">
           <ElCheckbox v-model="registerAgreementReadModel">
@@ -96,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import { Lock, User } from "@element-plus/icons-vue";
+import { Lock, Message, User } from "@element-plus/icons-vue";
 import type { RegisterForm } from "@/api/module_system/user";
 import type { FormRules } from "element-plus";
 
@@ -105,13 +117,14 @@ const registerForm = defineModel<RegisterForm>("registerForm", { required: true 
 defineOptions({ name: "FaLoginRegisterPanel" });
 
 interface Props {
-  registerRules: FormRules<RegisterForm>;
+  registerRules: FormRules<RegisterForm & { email: string }>;
   formKey: number | string;
   registerLoading: boolean;
   userAgreementHref: string;
+  showEmail?: boolean;
 }
 
-withDefaults(defineProps<Props>(), {});
+withDefaults(defineProps<Props>(), { showEmail: false });
 
 const registerAgreementReadModel = defineModel<boolean>("registerAgreementRead", {
   required: true,

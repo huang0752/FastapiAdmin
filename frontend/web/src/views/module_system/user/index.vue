@@ -32,18 +32,11 @@
           :show-search="true"
           :disabled-search="false"
           :default-expanded="false"
+          include-audit
+          :audit-item-options="{ showTenantId: true }"
           @search="handleSearchBarSearch"
           @reset="onResetSearch"
-        >
-          <template #created_id>
-            <FaUserTableSelect
-              :model-value="searchForm.created_id == null ? undefined : searchForm.created_id"
-              @update:model-value="(v: number | undefined) => (searchForm.created_id = v)"
-              @confirm-click="afterUserSelectSearch"
-              @clear-click="afterUserSelectSearch"
-            />
-          </template>
-        </FaSearchBar>
+        />
 
         <ElCard
           shadow="hover"
@@ -514,27 +507,6 @@ const userSearchItems = computed<SearchFormItem[]>(() => [
     },
     span: 6,
   },
-  {
-    label: "创建人",
-    key: "created_id",
-    type: "input",
-    span: 6,
-  },
-  {
-    label: "创建时间",
-    key: "created_time",
-    type: "datetimerange",
-    span: 6,
-    props: {
-      type: "datetimerange",
-      rangeSeparator: "至",
-      startPlaceholder: "开始日期",
-      endPlaceholder: "结束日期",
-      format: "YYYY-MM-DD HH:mm:ss",
-      valueFormat: "YYYY-MM-DD HH:mm:ss",
-      style: { width: "100%" },
-    },
-  },
 ]);
 
 const faTableRef = ref<{ elTableRef?: { clearSelection: () => void } } | null>(null);
@@ -552,7 +524,7 @@ async function handleResetPassword(row: UserInfo) {
       ElMessage.warning("密码至少需要6位字符，请重新输入");
       return;
     }
-    await UserAPI.resetUserPassword({ id: row.id!, password: value });
+    await UserAPI.resetUserPassword(row.id!, { password: value });
   } catch {
     // 用户取消
   }
@@ -789,17 +761,6 @@ async function handleSearchBarSearch(params: UserSearchForm) {
   await getData();
 }
 
-async function applyUserSearchFromForm() {
-  await searchBarRef.value?.validate?.();
-  replaceSearchParams(buildUserReplaceParams(searchForm.value));
-  await getData();
-}
-
-async function afterUserSelectSearch() {
-  await nextTick();
-  await applyUserSearchFromForm();
-}
-
 function onResetSearch() {
   searchForm.value = {
     username: undefined,
@@ -917,7 +878,7 @@ async function handleSubmit() {
     const id = formData.value.id;
     try {
       if (id) {
-        await UserAPI.updateUser(id, { id, ...formData.value });
+        await UserAPI.updateUser(id, formData.value);
         await refreshUpdate();
       } else {
         await UserAPI.createUser(formData.value);

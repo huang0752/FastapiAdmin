@@ -13,6 +13,7 @@
       :show-search="true"
       :disabled-search="false"
       :default-expanded="false"
+      include-audit
       @search="handleSearchBarSearch"
       @reset="onResetSearch"
     />
@@ -197,7 +198,7 @@ import type { EditorConfiguration } from "codemirror";
 import "codemirror/mode/python/python.js";
 import "codemirror/theme/dracula.css";
 
-const BATCH_DELETE_MSG = "确认删除选中的编排节点类型吗？";
+const BATCH_DELETE_MSG = "确认删除选中的节点类型吗？";
 
 type NodeTypeSearchForm = {
   name?: string;
@@ -255,6 +256,35 @@ const nodeTypeSearchItems = computed<SearchFormItem[]>(() => [
       ],
     },
     span: 6,
+  },
+  {
+    label: "状态",
+    key: "status",
+    type: "select",
+    props: {
+      placeholder: "请选择状态",
+      clearable: true,
+      options: [
+        { label: "启用", value: 0 },
+        { label: "停用", value: 1 },
+      ],
+    },
+    span: 6,
+  },
+  {
+    label: "创建时间",
+    key: "created_time",
+    type: "datetimerange",
+    span: 6,
+    props: {
+      type: "datetimerange",
+      rangeSeparator: "至",
+      startPlaceholder: "开始日期",
+      endPlaceholder: "结束日期",
+      format: "YYYY-MM-DD HH:mm:ss",
+      valueFormat: "YYYY-MM-DD HH:mm:ss",
+      style: { width: "100%" },
+    },
   },
 ]);
 

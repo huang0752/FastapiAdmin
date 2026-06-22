@@ -42,17 +42,16 @@ class WorkflowCreateSchema(BaseModel):
 class WorkflowUpdateSchema(WorkflowCreateSchema):
     """更新工作流"""
 
-    workflow_status: str | None = Field(default=None, max_length=32, description="draft/published/archived")
+    workflow_status: int | None = Field(default=None, description="0:草稿 / 1:已发布 / 2:已归档")
 
     @field_validator("workflow_status")
     @classmethod
-    def validate_workflow_status(cls, v: str | None) -> str | None:
+    def validate_workflow_status(cls, v: int | None) -> int | None:
         if v is None:
             return v
-        allowed = {"draft", "published", "archived"}
-        v = v.strip()
+        allowed = {0, 1, 2}
         if v not in allowed:
-            raise ValueError(f"流程状态必须为 {allowed}")
+            raise ValueError(f"流程状态必须为 {sorted(allowed)}")
         return v
 
 
@@ -68,7 +67,7 @@ class WorkflowOutSchema(BaseSchema, UserBySchema, TenantBySchema):
     updated_time: DateTimeStr | None = Field(default=None, description="更新时间")
     name: str = Field(description="流程名称")
     code: str = Field(description="流程编码")
-    status: str = Field(description="流程状态 draft/published/archived")
+    status: int = Field(description="流程状态 0:草稿 / 1:已发布 / 2:已归档")
     nodes: list | None = Field(default=None, description="节点")
     edges: list | None = Field(default=None, description="连线")
 
@@ -121,7 +120,7 @@ class WorkflowExecuteResultSchema(BaseModel):
 
     workflow_id: int = Field(..., description="工作流ID")
     workflow_name: str = Field(..., description="工作流名称")
-    status: str = Field(description="completed/failed")
+    status: int = Field(description="执行状态 0:失败 / 1:已完成")
     start_time: str | None = Field(default=None, description="开始时间")
     end_time: str | None = Field(default=None, description="结束时间")
     variables: dict | None = Field(default=None, description="变量")

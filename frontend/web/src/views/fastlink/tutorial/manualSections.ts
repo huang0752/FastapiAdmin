@@ -214,7 +214,7 @@ export const MANUAL_MODULES_AFTER_SYSTEM: ManualModuleSection[] = [
       },
       {
         anchor: "page-nodetype",
-        title: "编排节点类型",
+        title: "节点类型",
         path: "module_task/workflow/node-type/index.vue",
         notes: [
           "检索：FaSearchBar（可展开）。",

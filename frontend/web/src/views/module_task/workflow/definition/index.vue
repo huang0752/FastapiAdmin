@@ -13,6 +13,7 @@
       :show-search="true"
       :disabled-search="false"
       :default-expanded="false"
+      include-audit
       @search="handleSearchBarSearch"
       @reset="onResetSearch"
     />
@@ -55,7 +56,7 @@
         <template #workflow-operation="{ row }">
           <ElSpace class="flex">
             <ElButton
-              v-if="row.status === 'draft'"
+              v-if="row.status === 0"
               v-hasPerm="['module_task:workflow:definition:update']"
               type="success"
               size="small"
@@ -66,7 +67,7 @@
               发布
             </ElButton>
             <ElDropdown
-              v-if="row.status === 'published'"
+              v-if="row.status === 1"
               v-hasPerm="['module_task:workflow:definition:execute']"
               @command="(e: string) => handleExecute(e, row)"
             >
@@ -180,9 +181,9 @@ const workflowSearchItems = computed<SearchFormItem[]>(() => [
       placeholder: "请选择状态",
       clearable: true,
       options: [
-        { label: "草稿", value: "draft" },
-        { label: "已发布", value: "published" },
-        { label: "已归档", value: "archived" },
+        { label: "草稿", value: 0 },
+        { label: "已发布", value: 1 },
+        { label: "已归档", value: 2 },
       ],
     },
     span: 6,
@@ -285,9 +286,9 @@ const {
         minWidth: 100,
         align: "center",
         status: {
-          draft: { type: "info", text: "草稿" },
-          published: { type: "success", text: "已发布" },
-          archived: { type: "warning", text: "已归档" },
+          0: { type: "info", text: "草稿" },
+          1: { type: "success", text: "已发布" },
+          2: { type: "warning", text: "已归档" },
         },
       },
       {
@@ -392,7 +393,7 @@ async function handleExecute(action: string, record: WorkflowTable) {
     });
     if (res.data?.data) {
       const result = res.data.data;
-      ElMessage.success(`工作流执行${result.status === "completed" ? "成功" : "失败"}`);
+      ElMessage.success(`工作流执行${result.status === 0 ? "成功" : "失败"}`);
     }
     await refreshUpdate();
   } catch {

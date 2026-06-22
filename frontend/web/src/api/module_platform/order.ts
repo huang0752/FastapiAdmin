@@ -127,6 +127,7 @@ export default OrderAPI;
 
 export interface OrderPageQuery extends PageQuery, TenantByQueryParams {
   order_type?: string;
+  status?: number;
 }
 
 export interface OrderTable {
@@ -168,7 +169,9 @@ export interface PaymentRecordTable {
 
 // ─── Refund 类型 ─────────────────────────────────────────
 
-export interface RefundPageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {}
+export interface RefundPageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {
+  status?: number;
+}
 
 export interface RefundTable {
   id: number;

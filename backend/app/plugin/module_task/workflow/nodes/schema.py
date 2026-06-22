@@ -10,7 +10,7 @@ from app.core.base_schema import BaseSchema, TenantBySchema, UserBySchema
 
 
 class WorkflowNodeTypeCreateSchema(BaseModel):
-    """创建编排节点类型"""
+    """创建节点类型"""
 
     name: str = Field(..., max_length=128, description="显示名称")
     code: str = Field(..., max_length=64, description="节点编码")
@@ -56,7 +56,7 @@ class WorkflowNodeTypeCreateSchema(BaseModel):
 
 
 class WorkflowNodeTypeUpdateSchema(WorkflowNodeTypeCreateSchema):
-    """更新编排节点类型"""
+    """更新节点类型"""
 
 
 class WorkflowNodeTypeOutSchema(WorkflowNodeTypeCreateSchema, BaseSchema, UserBySchema, TenantBySchema):
@@ -73,9 +73,12 @@ class WorkflowNodeTypeQueryParam(BaseQueryParam, UserByQueryParam, TenantByQuery
     code: str | None = Query(None, description="编码")
     category: str | None = Query(None, description="分类")
     is_active: bool | None = Query(None, description="是否启用")
+    status: int | None = Query(None, ge=0, le=1, description="状态(0:启动 1:停用)")
 
     def __post_init__(self) -> None:
         self.name = (QueueEnum.like.value, self.name) if self.name else None
         self.code = (QueueEnum.like.value, self.code) if self.code else None
         self.category = (QueueEnum.eq.value, self.category) if self.category else None
         self.is_active = (QueueEnum.eq.value, self.is_active) if self.is_active is not None else None
+        if isinstance(self.status, int):
+            self.status = (QueueEnum.eq.value, self.status)

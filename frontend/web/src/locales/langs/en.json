@@ -466,7 +466,8 @@
     "placeholder": {
       "username": "Please enter account",
       "password": "Please enter password",
-      "confirmPassword": "Please enter password again"
+      "confirmPassword": "Please enter password again",
+      "email": "Please enter email"
     },
     "rule": {
       "confirmPasswordRequired": "Please enter your password again",

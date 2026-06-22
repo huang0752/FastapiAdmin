@@ -36,16 +36,16 @@ export const UserAPI = {
     });
   },
 
-  resetUserPassword(body: ResetPasswordForm) {
+  resetUserPassword(id: number, body: ResetPasswordForm) {
     return request<ApiResponse>({
-      url: `${API_PATH}/reset/password`,
+      url: `${API_PATH}/password/reset/${id}`,
       method: "put",
       data: body,
     });
   },
 
   registerUser(body: RegisterForm) {
-    return request<ApiResponse>({
+    return request<ApiResponse<UserInfo>>({
       url: `${API_PATH}/register`,
       method: "post",
       data: body,
@@ -54,7 +54,7 @@ export const UserAPI = {
 
   forgetPassword(body: ForgetPasswordForm) {
     return request<ApiResponse>({
-      url: `${API_PATH}/forget/password`,
+      url: `${API_PATH}/password/forget`,
       method: "post",
       data: body,
     });
@@ -68,9 +68,9 @@ export const UserAPI = {
     });
   },
 
-  detailUser(query: number) {
+  detailUser(id: number) {
     return request<ApiResponse<UserInfo>>({
-      url: `${API_PATH}/detail/${query}`,
+      url: `${API_PATH}/detail/${id}`,
       method: "get",
     });
   },
@@ -107,11 +107,11 @@ export const UserAPI = {
     });
   },
 
-  exportUser(body: UserPageQuery) {
+  exportUser(query: UserPageQuery) {
     return request<Blob>({
       url: `${API_PATH}/export`,
-      method: "post",
-      data: body,
+      method: "get",
+      params: query,
       responseType: "blob",
     });
   },
@@ -119,7 +119,7 @@ export const UserAPI = {
   downloadTemplateUser() {
     return request<ApiResponse>({
       url: `${API_PATH}/import/template`,
-      method: "post",
+      method: "get",
       responseType: "blob",
     });
   },
@@ -244,7 +244,6 @@ export interface PasswordFormState {
 }
 
 export interface ResetPasswordForm {
-  id: number;
   password: string;
 }
 

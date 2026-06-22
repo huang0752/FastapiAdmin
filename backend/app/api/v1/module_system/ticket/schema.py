@@ -85,6 +85,7 @@ class TicketQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
     title: str | None = None
     ticket_type: str | None = None
     assigned_id: int | None = None
+    status: int | None = Query(None, ge=0, le=3, description="状态(0:待处理 1:处理中 2:已完成 3:已关闭)")
 
     def __post_init__(self) -> None:
         if self.title:
@@ -93,3 +94,5 @@ class TicketQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
             self.ticket_type = (QueueEnum.eq.value, self.ticket_type)
         if self.assigned_id:
             self.assigned_id = (QueueEnum.eq.value, self.assigned_id)
+        if isinstance(self.status, int):
+            self.status = (QueueEnum.eq.value, self.status)

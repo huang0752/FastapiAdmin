@@ -65,22 +65,6 @@ class TestAuth:
     def test_auth_auto_login_token(self, test_client: TestClient, auth_headers: dict) -> None:
         assert_route(test_client, "POST", "/system/auth/auto-login/token?user_id=1", auth=auth_headers)
 
-    def test_auth_forgot_password(self, test_client: TestClient) -> None:
-        assert_route(
-            test_client,
-            "POST",
-            "/system/auth/forgot-password",
-            json={"username": "admin"},
-        )
-
-    def test_auth_reset_password(self, test_client: TestClient) -> None:
-        assert_route(
-            test_client,
-            "POST",
-            "/system/auth/reset-password",
-            json={"token": "mock_reset_token", "new_password": "newpass123"},
-        )
-
 
 class TestUser:
     """用户管理接口 — 数据验证。"""
@@ -142,7 +126,7 @@ class TestUser:
     def test_user_password_forget(self, test_client: TestClient) -> None:
         assert_route(
             test_client, "POST", "/system/user/password/forget",
-            json={"username": "admin"},
+            json={"username": "admin", "new_password": "newpass123"},
         )
 
     def test_user_password_reset(self, test_client: TestClient, auth_headers: dict) -> None:

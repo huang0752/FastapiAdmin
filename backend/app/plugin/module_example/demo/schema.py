@@ -87,7 +87,7 @@ class DemoQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
 
     name: str | None = Query(None, description="名称")
     description: str | None = Query(None, description="描述")
-    status: str | None = Query(None, description="是否启用")
+    status: int | None = Query(None, description="是否启用")
 
     def __post_init__(self) -> None:
         if self.name:

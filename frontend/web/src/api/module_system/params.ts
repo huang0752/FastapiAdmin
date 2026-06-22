@@ -86,6 +86,7 @@ export interface ConfigPageQuery extends PageQuery, UserByQueryParams {
   config_name?: string;
   config_key?: string;
   config_type?: boolean;
+  status?: number;
 }
 
 export interface ConfigTable extends BaseType {

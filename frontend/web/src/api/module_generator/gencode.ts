@@ -170,6 +170,7 @@ export interface GenTableColumnSchema extends BaseType {
 export interface GenTablePageQuery extends PageQuery, UserByQueryParams {
   table_name?: string;
   table_comment?: string;
+  status?: number;
 }
 
 /** 查询参数：DB 表 */

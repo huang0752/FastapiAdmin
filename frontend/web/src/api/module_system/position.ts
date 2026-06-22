@@ -64,6 +64,7 @@ export default PositionAPI;
 
 export interface PositionPageQuery extends PageQuery, UserByQueryParams {
   name?: string;
+  status?: number;
 }
 
 export interface PositionTable extends BaseType {

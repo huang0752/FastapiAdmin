@@ -213,7 +213,7 @@ class MenuQueryParam(BaseQueryParam):
     type: Literal[1, 2, 3, 4] | None = Query(None, description="菜单类型(1:目录 2:菜单 3:按钮 4:外链)")
     permission: str | None = Query(None, description="权限标识")
     description: str | None = Query(None, description="描述")
-    status: str | None = Query(None, description="是否启用")
+    status: int | None = Query(None, description="是否启用")
     menu_client: Literal["pc", "app"] | None = Query(
         None,
         description="管理端 Tab：pc=桌面端菜单 app=移动端菜单；不传则不过滤终端",

@@ -88,9 +88,12 @@ class PluginQueryParam(BaseQueryParam):
 
     name: str | None = Query(None, description="插件名称")
     category: str | None = Query(None, description="插件分类(tool/ai/monitor/business)")
+    status: int | None = Query(None, ge=0, le=1, description="状态(0:启动 1:停用)")
 
     def __post_init__(self) -> None:
         if self.name:
             self.name = (QueueEnum.like.value, self.name)
         if self.category:
             self.category = (QueueEnum.eq.value, self.category)
+        if isinstance(self.status, int):
+            self.status = (QueueEnum.eq.value, self.status)

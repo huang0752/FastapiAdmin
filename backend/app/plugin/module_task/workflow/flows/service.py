@@ -18,6 +18,16 @@ from .schema import (
 )
 
 
+# 工作流状态常量（与 WorkflowModel.status 保持一致：0:草稿 1:已发布 2:已归档）
+WORKFLOW_STATUS_DRAFT = 0
+WORKFLOW_STATUS_PUBLISHED = 1
+WORKFLOW_STATUS_ARCHIVED = 2
+
+# 工作流执行结果状态（0:失败 1:已完成）
+WORKFLOW_EXEC_STATUS_FAILED = 0
+WORKFLOW_EXEC_STATUS_COMPLETED = 1
+
+
 class WorkflowService:
     """工作流：画布存储 + 发布校验 + 分层并行执行"""
 
@@ -110,7 +120,7 @@ class WorkflowService:
             description=obj.description,
             nodes=obj.nodes,
             edges=obj.edges,
-            workflow_status="published",
+            workflow_status=WORKFLOW_STATUS_PUBLISHED,
         )
         updated = await WorkflowCRUD(self.auth).update_obj_crud(id=id, data=data)
         if not updated:
@@ -121,7 +131,7 @@ class WorkflowService:
         obj = await WorkflowCRUD(self.auth).get_obj_by_id_crud(id=body.workflow_id)
         if not obj:
             raise CustomException(msg="工作流不存在")
-        if obj.workflow_status != "published":
+        if obj.workflow_status != WORKFLOW_STATUS_PUBLISHED:
             raise CustomException(msg="仅已发布的工作流可执行")
 
         nodes = obj.nodes or []
@@ -137,9 +147,9 @@ class WorkflowService:
         for code in codes_set:
             node_type = type_map.get(code)
             if not node_type:
-                raise CustomException(msg=f"编排节点类型未注册（请在「工作流编排节点类型」中维护，非定时任务节点）: {code}")
+                raise CustomException(msg=f"节点类型未注册（请在「工作流节点类型」中维护，非定时任务节点）: {code}")
             if not node_type.func or not str(node_type.func).strip():
-                raise CustomException(msg=f"编排节点类型未配置 func 代码块: {code}")
+                raise CustomException(msg=f"节点类型未配置 func 代码块: {code}")
             templates[code] = {
                 "func": node_type.func,
                 "args": node_type.args,
@@ -165,7 +175,7 @@ class WorkflowService:
             err = WorkflowExecuteResultSchema(
                 workflow_id=obj.id,
                 workflow_name=obj.name,
-                status="failed",
+                status=WORKFLOW_EXEC_STATUS_FAILED,
                 start_time=start,
                 end_time=end,
                 variables=variables,
@@ -178,7 +188,7 @@ class WorkflowService:
         ok = WorkflowExecuteResultSchema(
             workflow_id=obj.id,
             workflow_name=obj.name,
-            status="completed",
+            status=WORKFLOW_EXEC_STATUS_COMPLETED,
             start_time=start,
             end_time=end,
             variables=variables,
