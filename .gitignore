@@ -78,5 +78,8 @@ frontend/app/*
 
 .plan
 CLAUDE.md
-AGENTS.md
 .codebuddy
+
+电付通视频截图/
+backend/static/upload/
+docs/product/
