@@ -22,7 +22,7 @@ class ChatSessionCRUD:
     def __init__(self, auth: AuthSchema) -> None:
         """初始化CRUD数据层"""
         self.auth = auth
-        self.user_id = auth.user.username if auth and auth.user else "user"
+        self.user_id = f"{auth.tenant_id}:{auth.user.id}" if auth and auth.user and auth.tenant_id else "user"
         self.team_id = str(auth.user.dept_id) if auth and auth.user and hasattr(auth.user, "dept_id") and auth.user.dept_id else None
         self.db = self._get_db()
 

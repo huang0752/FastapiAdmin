@@ -223,7 +223,7 @@ class ParamsService:
         out = ParamsOutSchema.model_validate(obj)
 
         # 同步redis
-        redis_key = f"{RedisInitKeyConfig.SYSTEM_CONFIG.key}:{self.auth.user.tenant_id}:{data.config_key}"
+        redis_key = f"{RedisInitKeyConfig.SYSTEM_CONFIG.key}:{self.auth.tenant_id}:{data.config_key}"
         try:
             redis_payload = out.model_dump(mode="json")
             value = json.dumps(redis_payload, ensure_ascii=False)
@@ -264,7 +264,7 @@ class ParamsService:
         redis_payload = out.model_dump(mode="json")
 
         # 同步redis
-        redis_key = f"{RedisInitKeyConfig.SYSTEM_CONFIG.key}:{self.auth.user.tenant_id}:{new_obj.config_key}"
+        redis_key = f"{RedisInitKeyConfig.SYSTEM_CONFIG.key}:{self.auth.tenant_id}:{new_obj.config_key}"
         try:
             value = json.dumps(redis_payload, ensure_ascii=False)
             result = await RedisCURD(redis).set(
@@ -280,7 +280,7 @@ class ParamsService:
             raise CustomException(msg="同步配置到缓存失败") from e
 
         # 失效中间件内存缓存，让下次请求重新加载
-        _invalidate_mid_config_cache(self.auth.user.tenant_id)
+        _invalidate_mid_config_cache(self.auth.tenant_id)
 
         return out
 
@@ -311,7 +311,7 @@ class ParamsService:
 
         # 同步删除Redis缓存（使用删除前已获取的对象信息）
         for obj in objs:
-            redis_key = f"{RedisInitKeyConfig.SYSTEM_CONFIG.key}:{self.auth.user.tenant_id}:{obj.config_key}"
+            redis_key = f"{RedisInitKeyConfig.SYSTEM_CONFIG.key}:{self.auth.tenant_id}:{obj.config_key}"
             try:
                 await RedisCURD(redis).delete(redis_key)
             except Exception as e:
@@ -319,7 +319,7 @@ class ParamsService:
                 raise CustomException(msg="同步删除缓存失败") from e
 
         # 失效中间件内存缓存
-        _invalidate_mid_config_cache(self.auth.user.tenant_id)
+        _invalidate_mid_config_cache(self.auth.tenant_id)
 
     async def batch_set_status(self, ids: list[int], status: int) -> None:
         """

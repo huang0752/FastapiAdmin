@@ -352,7 +352,9 @@ class CRUDBase[ModelType: MappedBase, CreateSchemaType: BaseModel, UpdateSchemaT
                 if hasattr(obj, "tenant_id"):
                     # 非超管始终使用当前租户；超管仅当未显式指定时自动填充
                     if not self.auth.user.is_superuser or getattr(obj, "tenant_id", None) is None:
-                        setattr(obj, "tenant_id", self.auth.tenant_id or self.auth.user.tenant_id)
+                        if self.auth.tenant_id is None:
+                            raise CustomException(msg="租户上下文缺失", code=10403, status_code=403)
+                        setattr(obj, "tenant_id", self.auth.tenant_id)
                 if hasattr(obj, "created_id"):
                     setattr(obj, "created_id", self.auth.user.id)
                 if hasattr(obj, "updated_id"):
@@ -390,7 +392,10 @@ class CRUDBase[ModelType: MappedBase, CreateSchemaType: BaseModel, UpdateSchemaT
             if self.auth and self.auth.user and not self.auth.user.is_superuser:
                 if hasattr(obj, "tenant_id"):
                     obj_tid = getattr(obj, "tenant_id", None)
-                    if obj_tid is not None and obj_tid != self.auth.user.tenant_id:
+                    current_tid = self.auth.tenant_id
+                    if current_tid is None:
+                        raise CustomException(msg="租户上下文缺失")
+                    if obj_tid is not None and obj_tid != current_tid:
                         is_platform = getattr(self.model, "__platform_data_shared__", False)
                         if is_platform and obj_tid == 1:
                             raise CustomException(msg="平台数据仅管理员可修改")
@@ -489,7 +494,7 @@ class CRUDBase[ModelType: MappedBase, CreateSchemaType: BaseModel, UpdateSchemaT
     def _platform_shared_conditions(self) -> list[ColumnElement]:
         if not self.auth or not self.auth.user:
             return []
-        tid = self.auth.user.tenant_id
+        tid = self.auth.tenant_id
         if tid is not None and tid != 1:
             return [
                 (getattr(self.model, "tenant_id") == tid)
@@ -504,6 +509,7 @@ class CRUDBase[ModelType: MappedBase, CreateSchemaType: BaseModel, UpdateSchemaT
             tid = self.auth.tenant_id
             if tid is not None:
                 return sql.where(getattr(self.model, "tenant_id") == tid)
+            raise CustomException(msg="租户上下文缺失")
         return sql
 
     async def __build_conditions(self, **kwargs) -> list[ColumnElement]:
@@ -518,6 +524,8 @@ class CRUDBase[ModelType: MappedBase, CreateSchemaType: BaseModel, UpdateSchemaT
                 tid = self.auth.tenant_id
                 if tid is not None:
                     conditions.append(getattr(self.model, "tenant_id") == tid)
+                else:
+                    raise CustomException(msg="租户上下文缺失")
 
         for key, value in kwargs.items():
             if value is None or value == "":
