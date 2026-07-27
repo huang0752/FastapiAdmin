@@ -1,22 +1,25 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.common.response import ResponseSchema, SuccessResponse
+from app.common.response import ResponseSchema, StreamResponse, SuccessResponse
 from app.core.base_params import PaginationQueryParam
 from app.core.base_schema import AuthSchema, PageResultSchema
 from app.core.dependencies import AuthPermission
 from app.core.router_class import OperationLogRoute
+from app.utils.common_util import bytes2file_response
 
 from .schema import (
     TicketBatchSchema,
+    TicketCommentCreateSchema,
+    TicketCommentOutSchema,
     TicketCreateSchema,
     TicketOutSchema,
     TicketQueryParam,
     TicketUpdateSchema,
 )
-from .service import TicketService
+from .service import TicketCommentService, TicketService
 
 TicketRouter = APIRouter(route_class=OperationLogRoute, prefix="/ticket", tags=["系统管理", "工单管理"])
 
@@ -24,7 +27,7 @@ TicketRouter = APIRouter(route_class=OperationLogRoute, prefix="/ticket", tags=[
 async def ticket_list_controller(
     search: Annotated[TicketQueryParam, Depends()],
     page: Annotated[PaginationQueryParam, Depends()],
-    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_system:ticket:list"]))],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_system:ticket:query"]))],
 ) -> JSONResponse:
     result = await TicketService(auth).page(
         page_no=page.page_no,
@@ -62,7 +65,7 @@ async def ticket_update_controller(
 @TicketRouter.put("/batch", summary="批量更新工单", response_model=ResponseSchema)
 async def ticket_batch_update_controller(
     data: TicketBatchSchema,
-    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_system:ticket:update"]))],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_system:ticket:patch"]))],
 ) -> JSONResponse:
     await TicketService(auth).batch(data=data)
     return SuccessResponse(msg="批量操作成功")
@@ -74,3 +77,51 @@ async def ticket_delete_controller(
 ) -> JSONResponse:
     await TicketService(auth).delete(ids=ids)
     return SuccessResponse(msg="删除成功")
+
+
+@TicketRouter.get("/export", summary="导出工单")
+async def ticket_export_controller(
+    search: Annotated[TicketQueryParam, Depends()],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_system:ticket:export"]))],
+) -> StreamingResponse:
+    ticket_list = await TicketService(auth).get_list(search=search)
+    export_result = TicketService.export_list(
+        ticket_list=[item.model_dump() for item in ticket_list]
+    )
+    return StreamResponse(
+        data=bytes2file_response(export_result),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=ticket.xlsx"},
+    )
+
+
+@TicketRouter.get(
+    "/{ticket_id}/comments",
+    summary="工单评论列表",
+    response_model=ResponseSchema[PageResultSchema[TicketCommentOutSchema]],
+)
+async def ticket_comment_list_controller(
+    ticket_id: int,
+    page: Annotated[PaginationQueryParam, Depends()],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_system:ticket:detail"]))],
+) -> JSONResponse:
+    result = await TicketCommentService(auth).page(
+        ticket_id=ticket_id,
+        page_no=page.page_no,
+        page_size=page.page_size,
+    )
+    return SuccessResponse(data=result, msg="查询成功")
+
+
+@TicketRouter.post(
+    "/{ticket_id}/comments",
+    summary="创建工单评论",
+    response_model=ResponseSchema[TicketCommentOutSchema],
+)
+async def ticket_comment_create_controller(
+    ticket_id: int,
+    data: TicketCommentCreateSchema,
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_system:ticket:detail"]))],
+) -> JSONResponse:
+    result = await TicketCommentService(auth).create(ticket_id=ticket_id, data=data)
+    return SuccessResponse(data=result, msg="评论成功")

@@ -6,7 +6,19 @@
 from conftest import assert_route  # noqa: F401
 from fastapi.testclient import TestClient
 
+from app.api.v1.module_system.ticket.controller import TicketRouter
 from app.config.setting import settings
+from app.core.dependencies import AuthPermission
+
+
+def _ticket_auth_permissions(path: str, method: str) -> list[str]:
+    for route in TicketRouter.routes:
+        if getattr(route, "path", None) != path or method not in getattr(route, "methods", set()):
+            continue
+        for dependency in route.dependant.dependencies:
+            if isinstance(dependency.call, AuthPermission):
+                return dependency.call.permissions
+    raise AssertionError(f"未找到工单路由: {method} {path}")
 
 
 class TestAuth:
@@ -550,6 +562,18 @@ class TestLog:
 class TestTicket:
     """工单管理接口 — 数据验证。"""
 
+    def test_ticket_route_permissions_match_seed_permissions(self) -> None:
+        expected = {
+            ("GET", "/ticket/list"): ["module_system:ticket:query"],
+            ("PUT", "/ticket/batch"): ["module_system:ticket:patch"],
+            ("GET", "/ticket/export"): ["module_system:ticket:export"],
+            ("GET", "/ticket/{ticket_id}/comments"): ["module_system:ticket:detail"],
+            ("POST", "/ticket/{ticket_id}/comments"): ["module_system:ticket:detail"],
+        }
+
+        for (method, path), permissions in expected.items():
+            assert _ticket_auth_permissions(path, method) == permissions
+
     def test_ticket_list(self, test_client: TestClient, auth_headers: dict) -> None:
         assert_route(test_client, "GET", "/system/ticket/list", auth=auth_headers)
 
@@ -573,3 +597,119 @@ class TestTicket:
 
     def test_ticket_batch(self, test_client: TestClient, auth_headers: dict) -> None:
         assert_route(test_client, "PUT", "/system/ticket/batch", auth=auth_headers)
+
+    def test_ticket_export(self, test_client: TestClient, auth_headers: dict) -> None:
+        response = test_client.get("/system/ticket/export", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"].startswith(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        assert response.content.startswith(b"PK")
+
+    def test_ticket_comment_create_and_list(self, test_client: TestClient, auth_headers: dict) -> None:
+        create_ticket = test_client.post(
+            "/system/ticket/create",
+            headers=auth_headers,
+            json={"title": "评论接口测试工单", "ticket_type": "bug", "ticket_content": "待评论内容"},
+        )
+        assert create_ticket.status_code == 200, create_ticket.text
+        ticket_id = create_ticket.json()["data"]["id"]
+
+        create_comment = test_client.post(
+            f"/system/ticket/{ticket_id}/comments",
+            headers=auth_headers,
+            json={"content": "第一条评论"},
+        )
+        assert create_comment.status_code == 200, create_comment.text
+        comment = create_comment.json()["data"]
+        assert comment["ticket_id"] == ticket_id
+        assert comment["tenant_id"] == create_ticket.json()["data"]["tenant_id"]
+        assert comment["content"] == "第一条评论"
+
+        comment_list = test_client.get(
+            f"/system/ticket/{ticket_id}/comments",
+            headers=auth_headers,
+            params={"page_no": 1, "page_size": 50},
+        )
+        assert comment_list.status_code == 200, comment_list.text
+        result = comment_list.json()["data"]
+        assert result["total"] == 1
+        assert result["items"][0]["id"] == comment["id"]
+
+    def test_ticket_comments_are_tenant_isolated(self, test_client: TestClient) -> None:
+        old_register = settings.AUTH_LOGIN_REGISTER_ENABLE
+        settings.AUTH_LOGIN_REGISTER_ENABLE = True
+        try:
+            tenants = []
+            for suffix in ("a", "b"):
+                register = test_client.post(
+                    "/system/auth/tenant/register",
+                    json={
+                        "username": f"ticket_tenant_{suffix}",
+                        "password": "admin123",
+                        "email": f"ticket_tenant_{suffix}@example.com",
+                        "tenant_name": f"工单隔离租户{suffix.upper()}",
+                    },
+                )
+                assert register.status_code == 200, register.text
+                tenants.append(register.json()["data"])
+        finally:
+            settings.AUTH_LOGIN_REGISTER_ENABLE = old_register
+
+        async def assert_isolation() -> None:
+            from sqlalchemy import select
+
+            from app.api.v1.module_system.ticket.schema import TicketCommentCreateSchema, TicketCreateSchema
+            from app.api.v1.module_system.ticket.service import TicketCommentService, TicketService
+            from app.api.v1.module_system.user.model import UserModel
+            from app.core.base_schema import AuthSchema
+            from app.core.database import async_db_session
+            from app.core.exceptions import CustomException
+
+            async with async_db_session() as db:
+                users = []
+                for tenant in tenants:
+                    result = await db.execute(select(UserModel).where(UserModel.id == tenant["user_id"]))
+                    users.append(result.scalar_one())
+
+                auth_a = AuthSchema(user=users[0], db=db, tenant_id=tenants[0]["tenant_id"])
+                auth_b = AuthSchema(user=users[1], db=db, tenant_id=tenants[1]["tenant_id"])
+                ticket = await TicketService(auth_a).create(
+                    TicketCreateSchema(title="租户A工单", ticket_type="bug", ticket_content="隔离测试")
+                )
+                comment = await TicketCommentService(auth_a).create(
+                    ticket_id=ticket.id,
+                    data=TicketCommentCreateSchema(content="租户A评论"),
+                )
+                assert comment.tenant_id == tenants[0]["tenant_id"]
+
+                platform_user = (
+                    await db.execute(select(UserModel).where(UserModel.is_superuser.is_(True)))
+                ).scalars().first()
+                platform_auth = AuthSchema(user=platform_user, db=db, tenant_id=1)
+                platform_comment = await TicketCommentService(platform_auth).create(
+                    ticket_id=ticket.id,
+                    data=TicketCommentCreateSchema(content="平台协助评论"),
+                )
+                assert platform_comment.tenant_id == tenants[0]["tenant_id"]
+
+                tenant_b_tickets = await TicketService(auth_b).get_list()
+                assert all(item.tenant_id == tenants[1]["tenant_id"] for item in tenant_b_tickets)
+                assert all(item.id != ticket.id for item in tenant_b_tickets)
+
+                import pytest
+
+                with pytest.raises(CustomException):
+                    await TicketCommentService(auth_b).page(ticket_id=ticket.id, page_no=1, page_size=50)
+                with pytest.raises(CustomException):
+                    await TicketCommentService(auth_b).create(
+                        ticket_id=ticket.id,
+                        data=TicketCommentCreateSchema(content="越权评论"),
+                    )
+
+                await db.rollback()
+
+        import asyncio
+
+        asyncio.run(assert_isolation())

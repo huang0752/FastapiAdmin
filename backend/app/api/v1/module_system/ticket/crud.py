@@ -1,8 +1,10 @@
+from typing import Any
+
 from app.core.base_crud import CRUDBase
 from app.core.base_schema import AuthSchema
 
-from .model import TicketModel
-from .schema import TicketCreateSchema, TicketUpdateSchema
+from .model import TicketCommentModel, TicketModel
+from .schema import TicketCommentCreateSchema, TicketCreateSchema, TicketUpdateSchema
 
 
 class TicketCRUD(CRUDBase[TicketModel, TicketCreateSchema, TicketUpdateSchema]):
@@ -10,3 +12,10 @@ class TicketCRUD(CRUDBase[TicketModel, TicketCreateSchema, TicketUpdateSchema]):
 
     def __init__(self, auth: AuthSchema) -> None:
         super().__init__(model=TicketModel, auth=auth)
+
+
+class TicketCommentCRUD(CRUDBase[TicketCommentModel, TicketCommentCreateSchema, Any]):
+    """工单评论 CRUD。"""
+
+    def __init__(self, auth: AuthSchema) -> None:
+        super().__init__(model=TicketCommentModel, auth=auth)

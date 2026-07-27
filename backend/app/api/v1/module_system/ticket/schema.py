@@ -79,6 +79,29 @@ class TicketBatchSchema(BaseModel):
         return v
 
 
+class TicketCommentCreateSchema(BaseModel):
+    """创建工单评论。"""
+
+    content: str = Field(..., min_length=1, max_length=65535, description="评论内容")
+
+    @field_validator("content")
+    @classmethod
+    def _validate_content(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("评论内容不能为空")
+        return value
+
+
+class TicketCommentOutSchema(BaseSchema, UserBySchema, TenantBySchema):
+    """工单评论响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    ticket_id: int = Field(..., description="工单ID")
+    content: str = Field(..., description="评论内容")
+
+
 @dataclass
 class TicketQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
     """工单查询参数"""

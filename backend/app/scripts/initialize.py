@@ -28,7 +28,7 @@ from app.api.v1.module_system.notice.model import BusinessNotificationModel, Not
 from app.api.v1.module_system.params.model import ParamsModel
 from app.api.v1.module_system.position.model import PositionModel
 from app.api.v1.module_system.role.model import RoleModel
-from app.api.v1.module_system.ticket.model import TicketModel
+from app.api.v1.module_system.ticket.model import TicketCommentModel, TicketModel
 from app.api.v1.module_system.user.model import UserModel, UserRolesModel
 from app.config.path_conf import SCRIPT_DIR
 from app.core.assembly import get_assembly, known_plugin_module_codes, plugin_code_candidates
@@ -81,6 +81,7 @@ class InitializeData:
         NoticeReadModel,
         BusinessNotificationModel,
         TicketModel,
+        TicketCommentModel,
         # ── 日志表（追加写入） ──
         LoginLogModel,
         OperationLogModel,

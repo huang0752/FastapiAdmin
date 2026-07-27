@@ -106,6 +106,56 @@
             <p v-else class="ticket-html-empty">暂无回复</p>
           </template>
         </FaDescriptions>
+
+        <ElDivider content-position="left">
+          <span class="comment-divider-title">
+            <FaSvgIcon icon="ri:chat-3-line" />
+            评论（{{ commentsTotal }}）
+          </span>
+        </ElDivider>
+        <div class="comment-section">
+          <ElScrollbar max-height="280px" class="comment-list-scroll">
+            <div v-if="commentsLoading" class="comment-loading">
+              <ElSkeleton :rows="2" animated />
+            </div>
+            <template v-else-if="comments.length">
+              <div v-for="comment in comments" :key="comment.id" class="comment-item">
+                <div class="comment-avatar">
+                  <FaSvgIcon icon="ri:user-6-fill" />
+                </div>
+                <div class="comment-body">
+                  <div class="comment-meta">
+                    <span class="comment-author">{{ comment.created_by?.name || "匿名" }}</span>
+                    <span class="comment-time">{{ comment.created_time?.slice(0, 16) ?? "" }}</span>
+                  </div>
+                  <div class="comment-content" v-html="sanitizeComment(comment.content)" />
+                </div>
+              </div>
+            </template>
+            <ElEmpty v-else description="暂无评论" :image-size="60" />
+          </ElScrollbar>
+
+          <div class="comment-input-row">
+            <ElInput
+              v-model="commentInput"
+              type="textarea"
+              :rows="2"
+              maxlength="65535"
+              show-word-limit
+              placeholder="输入评论内容..."
+              :disabled="commentSubmitting"
+              resize="none"
+            />
+            <ElButton
+              type="primary"
+              :loading="commentSubmitting"
+              :disabled="!commentInput.trim()"
+              @click="handleSubmitComment"
+            >
+              发表评论
+            </ElButton>
+          </div>
+        </div>
       </template>
       <template v-else>
         <FaForm
@@ -191,6 +241,9 @@ import { confirmDelete, confirmBatchDelete, confirmToggleStatus } from "@/hooks/
 import { cleanEmptyArrayParams, stripPaginationParams } from "@/utils/query";
 import type { ColumnOption } from "@/types/component";
 import TicketAPI, {
+  createTicketComment,
+  getTicketComments,
+  type TicketCommentTable,
   type TicketForm,
   type TicketPageQuery,
   type TicketTable,
@@ -202,7 +255,19 @@ import type { SearchFormItem } from "@/components/forms/fa-search-bar/index.vue"
 import type FaSearchBar from "@/components/forms/fa-search-bar/index.vue";
 import type { FormItem } from "@/components/forms/fa-form/index.vue";
 import type FaForm from "@/components/forms/fa-form/index.vue";
-import { ElMessage, ElSelect, ElOption, ElRadioGroup, ElRadio, ElScrollbar } from "element-plus";
+import {
+  ElButton,
+  ElDivider,
+  ElEmpty,
+  ElInput,
+  ElMessage,
+  ElOption,
+  ElRadio,
+  ElRadioGroup,
+  ElScrollbar,
+  ElSelect,
+  ElSkeleton,
+} from "element-plus";
 import DOMPurify from "dompurify";
 
 defineOptions({
@@ -447,6 +512,12 @@ async function handleAdd() {
   }
 }
 
+async function openTicketDetail(id: number) {
+  await handleOpenDialog("detail", id);
+  commentInput.value = "";
+  await loadComments(id);
+}
+
 const ticketDialogFormItems = computed<FormItem[]>(() => [
   {
     label: "工单标题",
@@ -651,7 +722,7 @@ function buildTicketRowActions(row: TicketTable): TableOperationAction[] {
       artType: "view",
       perm: "module_system:ticket:detail",
       run: () => {
-        if (row.id != null) void handleOpenDialog("detail", row.id);
+        if (row.id != null) void openTicketDetail(row.id);
       },
     },
     {
@@ -737,6 +808,48 @@ async function handleMoreClick(status: number) {
     moreLoading.value = false;
   }
 }
+
+const comments = ref<TicketCommentTable[]>([]);
+const commentsTotal = ref(0);
+const commentsLoading = ref(false);
+const commentInput = ref("");
+const commentSubmitting = ref(false);
+
+async function loadComments(ticketId: number) {
+  commentsLoading.value = true;
+  try {
+    const response = await getTicketComments(ticketId, { page_no: 1, page_size: 50 });
+    const result = response.data?.data;
+    comments.value = result?.items ?? [];
+    commentsTotal.value = result?.total ?? 0;
+  } catch {
+    comments.value = [];
+    commentsTotal.value = 0;
+  } finally {
+    commentsLoading.value = false;
+  }
+}
+
+function sanitizeComment(content: string): string {
+  return DOMPurify.sanitize(content || "");
+}
+
+async function handleSubmitComment() {
+  const ticketId = detailFormData.value.id;
+  const content = commentInput.value.trim();
+  if (!ticketId || !content) return;
+
+  commentSubmitting.value = true;
+  try {
+    await createTicketComment(ticketId, { content });
+    commentInput.value = "";
+    await loadComments(ticketId);
+  } catch {
+    // 错误消息由请求拦截器统一展示
+  } finally {
+    commentSubmitting.value = false;
+  }
+}
 </script>
 
 <style scoped lang="scss">
@@ -794,5 +907,93 @@ async function handleMoreClick(status: number) {
 .ticket-html-preview :deep(img) {
   max-width: 100%;
   height: auto;
+}
+
+.comment-divider-title {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.comment-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+}
+
+.comment-list-scroll {
+  padding: 0 4px;
+}
+
+.comment-loading {
+  padding: 12px 0;
+}
+
+.comment-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.comment-avatar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-radius: 50%;
+}
+
+.comment-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.comment-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.comment-author {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.comment-time {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.comment-content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+  overflow-wrap: anywhere;
+}
+
+.comment-input-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+
+  :deep(.el-textarea) {
+    flex: 1;
+  }
 }
 </style>

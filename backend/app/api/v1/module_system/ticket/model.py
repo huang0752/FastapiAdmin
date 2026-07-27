@@ -47,3 +47,24 @@ class TicketModel(ModelMixin, TenantMixin, UserMixin):
         if content and content.strip():
             return content.strip()
         return content
+
+
+class TicketCommentModel(ModelMixin, TenantMixin, UserMixin):
+    """工单评论模型。"""
+
+    __tablename__: str = "sys_ticket_comment"
+    __table_args__: dict[str, str] = {"comment": "工单评论表"}
+    __loader_options__: list[str] = [
+        "created_by",
+        "updated_by",
+        "deleted_by",
+        "tenant_by",
+    ]
+
+    ticket_id: Mapped[int] = mapped_column(
+        ForeignKey("sys_ticket.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="工单ID",
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False, comment="评论内容")

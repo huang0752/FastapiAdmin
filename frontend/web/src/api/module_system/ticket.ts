@@ -2,6 +2,22 @@ import { request } from "@utils";
 
 const API_PATH = "/system/ticket";
 
+export function getTicketComments(ticketId: number, params?: TicketCommentPageQuery) {
+  return request<ApiResponse<PageResult<TicketCommentTable>>>({
+    url: `${API_PATH}/${ticketId}/comments`,
+    method: "get",
+    params,
+  });
+}
+
+export function createTicketComment(ticketId: number, data: TicketCommentCreateForm) {
+  return request<ApiResponse<TicketCommentTable>>({
+    url: `${API_PATH}/${ticketId}/comments`,
+    method: "post",
+    data,
+  });
+}
+
 const TicketAPI = {
   listTicket(query?: TicketPageQuery) {
     return request<ApiResponse<PageResult<TicketTable>>>({
@@ -87,4 +103,17 @@ export interface TicketForm extends BaseFormType {
   assigned_id?: number;
   status?: number;
   description?: string;
+}
+
+export interface TicketCommentTable extends BaseType {
+  ticket_id: number;
+  content: string;
+  created_by?: CommonType;
+  tenant_by?: CommonType;
+}
+
+export type TicketCommentPageQuery = PageQuery;
+
+export interface TicketCommentCreateForm {
+  content: string;
 }

@@ -1,13 +1,18 @@
 
+from typing import Any
+
 from sqlalchemy import select
 
 from app.api.v1.module_system.user.model import UserModel
-from app.core.base_schema import AuthSchema
+from app.core.base_schema import AuthSchema, PageResultSchema
 from app.core.exceptions import CustomException
+from app.utils.excel_util import ExcelUtil
 
-from .crud import TicketCRUD
+from .crud import TicketCommentCRUD, TicketCRUD
 from .schema import (
     TicketBatchSchema,
+    TicketCommentCreateSchema,
+    TicketCommentOutSchema,
     TicketCreateSchema,
     TicketOutSchema,
     TicketQueryParam,
@@ -130,3 +135,75 @@ class TicketService:
                 raise CustomException(msg=f"工单[{tid}]不存在")
             self._validate_status_transition(obj, data.status)
         await TicketCRUD(self.auth).set_crud(ids=data.ids, status=data.status)
+
+    async def get_list(
+        self,
+        search: TicketQueryParam | None = None,
+        order_by: list[dict[str, str]] | None = None,
+    ) -> list[TicketOutSchema]:
+        obj_list = await TicketCRUD(self.auth).get_list(
+            search=vars(search) if search else None,
+            order_by=order_by or [{"created_time": "desc"}],
+        )
+        return [TicketOutSchema.model_validate(obj) for obj in obj_list]
+
+    @staticmethod
+    def export_list(ticket_list: list[dict[str, Any]]) -> bytes:
+        """导出工单列表。"""
+
+        mapping_dict = {
+            "id": "工单编号",
+            "title": "工单标题",
+            "ticket_type": "工单类型",
+            "summary": "工单摘要",
+            "status": "工单状态",
+            "description": "备注",
+            "created_time": "创建时间",
+            "updated_time": "更新时间",
+        }
+        type_labels = {
+            "suggestion": "建议",
+            "bug": "缺陷",
+            "optimize": "优化",
+            "other": "其他",
+        }
+        export_data = [item.copy() for item in ticket_list]
+        for item in export_data:
+            ticket_type = item.get("ticket_type")
+            item["ticket_type"] = type_labels.get(getattr(ticket_type, "value", ticket_type), ticket_type)
+            item["status"] = _TICKET_STATUS_LABELS.get(item.get("status"), item.get("status"))
+        return ExcelUtil.export_list2excel(list_data=export_data, mapping_dict=mapping_dict)
+
+
+class TicketCommentService:
+    """带父工单校验和租户隔离的评论服务。"""
+
+    def __init__(self, auth: AuthSchema) -> None:
+        self.auth = auth
+
+    async def page(
+        self,
+        ticket_id: int,
+        page_no: int,
+        page_size: int,
+    ) -> PageResultSchema[TicketCommentOutSchema]:
+        await TicketCRUD(self.auth).get_or_404(id=ticket_id, msg="工单不存在")
+        return await TicketCommentCRUD(self.auth).page(
+            offset=(page_no - 1) * page_size,
+            limit=page_size,
+            order_by=[{"created_time": "desc"}],
+            search={"ticket_id": ("eq", ticket_id)},
+            out_schema=TicketCommentOutSchema,
+        )
+
+    async def create(
+        self,
+        ticket_id: int,
+        data: TicketCommentCreateSchema,
+    ) -> TicketCommentOutSchema:
+        ticket = await TicketCRUD(self.auth).get_or_404(id=ticket_id, msg="工单不存在")
+        obj = await TicketCommentCRUD(self.auth).create(
+            data=data.model_dump()
+            | {"ticket_id": ticket_id, "tenant_id": ticket.tenant_id}
+        )
+        return TicketCommentOutSchema.model_validate(obj)
