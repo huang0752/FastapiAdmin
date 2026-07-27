@@ -483,7 +483,10 @@ const demoDialogFormItems: FormItem[] = [
 const formData = ref<DemoForm>(createInitialFormData());
 
 const rules = reactive({
-  name: [{ required: true, message: "请输入名称", trigger: "blur" }],
+  name: [
+    { required: true, message: "请输入名称", trigger: "blur" },
+    { min: 2, max: 50, message: "名称长度必须在2-50个字符之间", trigger: "blur" },
+  ],
   status: [{ required: true, message: "请选择状态", trigger: "blur" }],
 });
 

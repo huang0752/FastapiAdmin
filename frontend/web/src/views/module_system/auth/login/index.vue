@@ -653,10 +653,10 @@ watch(
 const handleSubmit = async () => {
   if (!accountFormRef.value) return;
 
-  try {
-    const valid = await accountFormRef.value.validate?.();
-    if (!valid) return;
+  const valid = await accountFormRef.value.validate?.().catch(() => false);
+  if (!valid) return;
 
+  try {
     if (!isPassing.value) {
       isClickPass.value = true;
       return;

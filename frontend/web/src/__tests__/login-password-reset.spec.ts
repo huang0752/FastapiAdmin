@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick, reactive } from "vue";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import FaLoginAccountForm from "@/components/views/fa-login/forms/FaLoginAccountForm.vue";
 import FaLoginForgetPanel from "@/components/views/fa-login/panels/FaLoginForgetPanel.vue";
 import type { CaptchaInfo } from "@/api/module_system/auth";
@@ -127,6 +129,24 @@ describe("login password reset", () => {
     const wrapper = mountAccountForm();
 
     expect(wrapper.find('[data-test="oauth-section"]').exists()).toBe(false);
+  });
+
+  it("treats account form validation rejection as an expected invalid result", () => {
+    const loginViewSource = readFileSync(
+      resolve(process.cwd(), "src/views/module_system/auth/login/index.vue"),
+      "utf8"
+    );
+    const handleSubmitSource = loginViewSource.slice(
+      loginViewSource.indexOf("const handleSubmit = async () =>"),
+      loginViewSource.indexOf("async function submitRegister()")
+    );
+
+    expect(handleSubmitSource).toContain(
+      "const valid = await accountFormRef.value.validate?.().catch(() => false);"
+    );
+    expect(handleSubmitSource.indexOf("const valid =")).toBeLessThan(
+      handleSubmitSource.indexOf("try {")
+    );
   });
 
   it("renders email and code fields for reset password", async () => {
