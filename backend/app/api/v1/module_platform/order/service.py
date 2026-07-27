@@ -363,6 +363,7 @@ class PaymentService:
         """
         from app.api.v1.module_platform.package.model import PackageModel
         from app.api.v1.module_platform.tenant.model import TenantModel
+        from app.api.v1.module_platform.tenant.service import TenantService
 
         if order.order_type == "plugin":
             await PaymentService._activate_plugin(auth, order)
@@ -383,10 +384,10 @@ class PaymentService:
         duration = timedelta(days=30 * period_months)
 
         if order.order_type == "new":
-            tenant.package_id = order.package_id
             tenant.start_time = now
             tenant.end_time = now + duration
             tenant.status = 0
+            await TenantService(auth).apply_package_change(order.tenant_id, order.package_id)
             logger.info(f"租户[{tenant.name}]新开通 {pkg.name}，有效期至 {tenant.end_time}")
 
         elif order.order_type == "renew":
@@ -398,7 +399,7 @@ class PaymentService:
         elif order.order_type in ("upgrade", "downgrade"):
             if order.order_type == "downgrade":
                 await PaymentService._check_downgrade_quota(auth, order.tenant_id, pkg)
-            tenant.package_id = order.package_id
+            await TenantService(auth).apply_package_change(order.tenant_id, order.package_id)
             tenant.status = 0
             logger.info(f"租户[{tenant.name}]套餐变更 {'升级' if order.order_type == 'upgrade' else '降级'} → {pkg.name}")
 

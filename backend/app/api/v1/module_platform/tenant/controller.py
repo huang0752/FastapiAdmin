@@ -9,7 +9,7 @@ from app.core import cache_util
 from app.core.base_params import PaginationQueryParam
 from app.core.base_schema import AuthSchema, PageResultSchema
 from app.core.cache_util import cache
-from app.core.dependencies import AuthPermission, get_current_user, redis_getter
+from app.core.dependencies import AuthPermission, redis_getter
 from app.core.router_class import OperationLogRoute
 
 from .permissions import (
@@ -185,7 +185,7 @@ async def remove_tenant_user_controller(
     response_model=ResponseSchema[list[TenantConfigOutSchema]],
 )
 async def get_self_brand_config_controller(
-    auth: Annotated[AuthSchema, Depends(get_current_user)],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_platform:workspace:query"]))],
 ) -> JSONResponse:
     result = await TenantService(auth).get_self_brand_config_items()
     return SuccessResponse(data=result, msg="获取品牌配置成功")
@@ -198,7 +198,7 @@ async def get_self_brand_config_controller(
 async def update_self_brand_config_controller(
     data: Annotated[list[TenantConfigItem], Body(..., description="品牌配置项列表")],
     redis: Annotated[Redis, Depends(redis_getter)],
-    auth: Annotated[AuthSchema, Depends(get_current_user)],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_platform:workspace:update"]))],
 ) -> JSONResponse:
     result = await TenantService(auth).update_self_brand_config(redis=redis, config=data)
     await cache_util.clear(namespace=_TENANT_NS)

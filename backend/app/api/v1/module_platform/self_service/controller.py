@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from app.common.response import ResponseSchema, SuccessResponse
 from app.core.base_params import PaginationQueryParam
 from app.core.base_schema import AuthSchema
-from app.core.dependencies import AuthPermission, get_current_user
+from app.core.dependencies import AuthPermission
 from app.core.router_class import OperationLogRoute
 
 from .schema import (
@@ -110,7 +110,7 @@ async def order_detail_controller(
     response_model=ResponseSchema[WorkspaceOut],
 )
 async def tenant_workspace_controller(
-    auth: Annotated[AuthSchema, Depends(get_current_user)],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_platform:workspace:query"]))],
 ) -> JSONResponse:
     result = await SelfService.get_workspace_data(auth=auth, tenant_id=auth.tenant_id)
     return SuccessResponse(data=result, msg="查询成功")

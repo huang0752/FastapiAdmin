@@ -2,6 +2,7 @@
 import json
 import secrets
 import string
+from dataclasses import dataclass
 
 import sqlalchemy as sa
 from redis.asyncio.client import Redis
@@ -51,6 +52,16 @@ TENANT_BRAND_CONFIG_ALIASES = {
 TENANT_BRAND_CONFIG_FIELDS = {field: alias for alias, field in TENANT_BRAND_CONFIG_ALIASES.items()}
 
 
+@dataclass(frozen=True)
+class PackageChangePlan:
+    """套餐变更的纯计算结果，预览与实际应用共享。"""
+
+    current_menu_ids: set[int]
+    final_menu_ids: set[int]
+    removed_menu_ids: set[int]
+    added_menu_ids: set[int]
+
+
 class TenantService:
     """
     租户管理服务（查询操作租户可见，写操作仅超级管理员可操作）
@@ -62,6 +73,163 @@ class TenantService:
 
     def __init__(self, auth: AuthSchema) -> None:
         self.auth = auth
+
+    async def _replace_tenant_member_rbac(self, tenant_id: int, user_id: int, role_code: str) -> None:
+        """让成员身份成为租户内 RBAC 绑定的唯一事实来源。"""
+        from app.api.v1.module_platform.package.service import PackageService
+        from app.api.v1.module_system.role.model import RoleMenusModel, RoleModel
+        from app.api.v1.module_system.user.model import UserRolesModel
+
+        tenant_role_ids = set(
+            (
+                await self.auth.db.execute(
+                    sa.select(RoleModel.id).where(RoleModel.tenant_id == tenant_id)
+                )
+            ).scalars().all()
+        )
+        if tenant_role_ids:
+            await self.auth.db.execute(
+                sa.delete(UserRolesModel).where(
+                    UserRolesModel.user_id == user_id,
+                    UserRolesModel.role_id.in_(tenant_role_ids),
+                )
+            )
+
+        role_meta = {
+            "owner": ("租户管理员", 1, 4, "租户 owner 角色"),
+            "admin": ("租户管理员", 2, 4, "租户 admin 角色"),
+            "member": ("租户成员", 999, 1, "租户 member 角色"),
+        }
+        name, order, data_scope, description = role_meta[role_code]
+        role = (
+            await self.auth.db.execute(
+                sa.select(RoleModel)
+                .where(RoleModel.tenant_id == tenant_id, RoleModel.code == role_code)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if role is None:
+            role = RoleModel(
+                name=name,
+                code=role_code,
+                tenant_id=tenant_id,
+                order=order,
+                status=0,
+                data_scope=data_scope,
+                description=description,
+            )
+            self.auth.db.add(role)
+            await self.auth.db.flush()
+        else:
+            role.status = 0
+            role.data_scope = data_scope
+
+        self.auth.db.add(UserRolesModel(user_id=user_id, role_id=role.id))
+
+        if role_code in {"owner", "admin"}:
+            available_ids = set(
+                await PackageService(self.auth).get_tenant_available_menu_ids(tenant_id)
+            )
+            current_ids = set(
+                (
+                    await self.auth.db.execute(
+                        sa.select(RoleMenusModel.menu_id).where(RoleMenusModel.role_id == role.id)
+                    )
+                ).scalars().all()
+            )
+            for menu_id in available_ids - current_ids:
+                self.auth.db.add(RoleMenusModel(role_id=role.id, menu_id=menu_id))
+        await self.auth.db.flush()
+
+    async def _remove_tenant_member_rbac(self, tenant_id: int, user_id: int) -> None:
+        """撤销用户在指定租户内的全部角色，不影响其他租户。"""
+        from app.api.v1.module_system.role.model import RoleModel
+        from app.api.v1.module_system.user.model import UserRolesModel
+
+        tenant_role_ids = set(
+            (
+                await self.auth.db.execute(
+                    sa.select(RoleModel.id).where(RoleModel.tenant_id == tenant_id)
+                )
+            ).scalars().all()
+        )
+        if tenant_role_ids:
+            await self.auth.db.execute(
+                sa.delete(UserRolesModel).where(
+                    UserRolesModel.user_id == user_id,
+                    UserRolesModel.role_id.in_(tenant_role_ids),
+                )
+            )
+        await self.auth.db.flush()
+
+    @staticmethod
+    def _plan_package_change(
+        *,
+        current_menu_ids: list[int] | set[int],
+        package_menu_ids: list[int] | set[int],
+        owner_minimum_menu_ids: set[int],
+    ) -> PackageChangePlan:
+        """计算套餐变更菜单差异，始终保留 owner 最低管理权限。"""
+        current_ids = set(current_menu_ids)
+        final_ids = set(package_menu_ids) | set(owner_minimum_menu_ids)
+        return PackageChangePlan(
+            current_menu_ids=current_ids,
+            final_menu_ids=final_ids,
+            removed_menu_ids=current_ids - final_ids,
+            added_menu_ids=final_ids - current_ids,
+        )
+
+    async def plan_package_change(self, tenant_id: int, new_package_id: int) -> PackageChangePlan:
+        """加载当前授权并生成可供预览和执行复用的套餐变更计划。"""
+        from app.api.v1.module_platform.package.model import PackageModel
+        from app.api.v1.module_platform.package.service import PackageService
+
+        if self.auth.db is None:
+            raise CustomException(msg="数据库会话不存在")
+        tenant = await self.auth.db.get(TenantModel, tenant_id)
+        if not tenant:
+            raise CustomException(msg="该数据不存在")
+        package = await self.auth.db.get(PackageModel, new_package_id)
+        if not package:
+            raise CustomException(msg="该数据不存在")
+        if package.status != 0:
+            raise CustomException(msg="目标套餐已停用")
+
+        package_service = PackageService(self.auth)
+        current_menu_ids = await package_service.get_tenant_available_menu_ids(tenant_id)
+        package_menu_ids = await package_service.get_package_menu_ids(new_package_id)
+        owner_minimum_menu_ids = await PackageService.get_owner_minimum_menu_ids(self.auth.db)
+        return self._plan_package_change(
+            current_menu_ids=current_menu_ids,
+            package_menu_ids=package_menu_ids,
+            owner_minimum_menu_ids=owner_minimum_menu_ids,
+        )
+
+    async def apply_package_change(self, tenant_id: int, new_package_id: int) -> PackageChangePlan:
+        """原子应用套餐与角色菜单授权，并立即失效权限缓存。"""
+        from app.api.v1.module_platform.package.service import PackageService
+
+        if self.auth.db is None:
+            raise CustomException(msg="数据库会话不存在")
+        plan = await self.plan_package_change(tenant_id, new_package_id)
+        tenant = await self.auth.db.get(TenantModel, tenant_id)
+        if not tenant:
+            raise CustomException(msg="该数据不存在")
+
+        tenant.package_id = new_package_id
+        await PackageService.sync_tenant_role_menus(
+            self.auth.db,
+            tenant_id,
+            plan.final_menu_ids,
+            owner_menu_ids=plan.final_menu_ids,
+        )
+        PackageService.invalidate_tenant_menu_cache(tenant_id, self.auth)
+        await self.auth.db.flush()
+        logger.info(
+            f"租户[{tenant_id}]套餐变更：package_id={new_package_id}, "
+            f"available_menus={len(plan.final_menu_ids)}"
+        )
+        return plan
 
     @staticmethod
     async def ensure_tenant_owner(
@@ -269,8 +437,6 @@ class TenantService:
         if id == 1:
             if data.code is not None and data.code != obj.code:
                 raise CustomException(msg="系统租户编码不可修改")
-            if data.status is not None and data.status != TenantStatus.ACTIVE:
-                raise CustomException(msg="系统租户必须保持正常状态")
 
         # 套餐变更：仅超管可操作，防止租户管理员自行升级/降级套餐
         if data.package_id is not None and data.package_id != old_package_id:
@@ -286,23 +452,14 @@ class TenantService:
             if exist and exist.id != id:
                 raise CustomException(msg="更新失败，编码重复")
 
-        updated = await TenantCRUD(self.auth).update(id=id, data=data)
+        update_data = data.model_dump(exclude_unset=True, exclude={"package_id"})
+        updated = await TenantCRUD(self.auth).update(id=id, data=update_data)
         if not updated:
             raise CustomException(msg="更新失败")
 
-        # 套餐变更后：收缩所有角色越权菜单，并把新增菜单补给 owner。
+        # 套餐变更统一走同一应用入口，避免平台修改与支付激活行为漂移。
         if data.package_id is not None and data.package_id != old_package_id:
-            from app.api.v1.module_platform.package.service import PackageService
-
-            available_ids = set(await PackageService(self.auth).get_tenant_available_menu_ids(id))
-            await PackageService.sync_tenant_role_menus(
-                self.auth.db,
-                id,
-                available_ids,
-                owner_menu_ids=available_ids,
-            )
-            PackageService.invalidate_tenant_menu_cache(id, self.auth)
-            logger.info(f"租户[{id}]套餐变更：角色菜单已同步, available_menus={len(available_ids)}")
+            await self.apply_package_change(id, data.package_id)
 
         result = TenantOutSchema.model_validate(updated)
         return result
@@ -477,6 +634,7 @@ class TenantService:
         )
         self.auth.db.add(tu)
         await self.auth.db.flush()
+        await self._replace_tenant_member_rbac(tenant_id, data.user_id, data.role)
 
         logger.info(f"向租户[{tenant.name}]添加用户[{user.username}]成功, role={data.role}")
 
@@ -522,6 +680,7 @@ class TenantService:
             if owner_count <= 1:
                 raise CustomException(msg="租户至少需要保留一个拥有者(owner)")
 
+        await self._remove_tenant_member_rbac(tenant_id, user_id)
         await self.auth.db.delete(tu)
         await self.auth.db.flush()
 
@@ -918,7 +1077,6 @@ class TenantService:
 
         from app.api.v1.module_platform.menu.model import MenuModel
         from app.api.v1.module_platform.package.crud import PackageCRUD
-        from app.api.v1.module_platform.package.service import PackageService
         from app.api.v1.module_system.role.model import RoleMenusModel, RoleModel
         from app.api.v1.module_system.user.model import UserModel
 
@@ -930,16 +1088,9 @@ class TenantService:
         if not new_package:
             raise CustomException(msg="该数据不存在")
 
-        # 当前可用菜单
-        current_menu_ids = await PackageService(self.auth).get_tenant_available_menu_ids(tenant_id)
-
-        # 新套餐可用菜单（直接取套餐菜单，不再包含自定义授权）
-        new_menu_ids = set(await PackageService(self.auth).get_package_menu_ids(new_package_id))
-        final_menu_ids = new_menu_ids  # 不再合并租户自定义菜单
-
-        # 差异计算
-        removed_ids = current_menu_ids - final_menu_ids
-        added_ids = final_menu_ids - current_menu_ids
+        plan = await self.plan_package_change(tenant_id, new_package_id)
+        removed_ids = plan.removed_menu_ids
+        added_ids = plan.added_menu_ids
 
         removed_menus = []
         added_menus = []
@@ -1018,7 +1169,7 @@ class TenantService:
         PRD §9 到期阶段：
           grace(1)   → 到期后第 1-7 天，仅提醒
           suspended(2) → 到期后第 8-14 天，禁用登录
-          frozen(3)     → 到期后第 15-30 天，只读模式
+          frozen(3)     → 到期后第 15-30 天，禁止登录与访问
           expired(4)    → 第 31 天起，归档候选
         """
         from datetime import datetime

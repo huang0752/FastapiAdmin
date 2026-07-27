@@ -14,6 +14,8 @@ from .schema import (
     RoleUpdateSchema,
 )
 
+TENANT_GOVERNANCE_ROLE_CODES = frozenset({"owner", "admin", "member"})
+
 
 class RoleService:
     """
@@ -24,6 +26,12 @@ class RoleService:
 
     def __init__(self, auth: AuthSchema) -> None:
         self.auth = auth
+
+    @staticmethod
+    def _reject_governance_roles(roles) -> None:
+        reserved = sorted(role.code for role in roles if role.code in TENANT_GOVERNANCE_ROLE_CODES)
+        if reserved:
+            raise CustomException(msg=f"租户治理角色由成员与套餐服务维护，禁止直接修改: {reserved}")
 
     async def detail(self, id: int) -> RoleOutSchema:
         """
@@ -93,6 +101,9 @@ class RoleService:
         返回:
         - RoleOutSchema: 新创建的角色响应模型
         """
+        if data.code in TENANT_GOVERNANCE_ROLE_CODES:
+            raise CustomException(msg="租户治理角色由成员与套餐服务维护，禁止直接创建")
+
         role = await RoleCRUD(self.auth).get(name=data.name)
         if role:
             raise CustomException(msg="创建失败，该数据已存在")
@@ -117,7 +128,10 @@ class RoleService:
         返回:
         - RoleOutSchema: 更新后的角色响应模型
         """
-        _ = await RoleCRUD(self.auth).get_or_404(id=id, msg="更新失败，该数据不存在")
+        role = await RoleCRUD(self.auth).get_or_404(id=id, msg="更新失败，该数据不存在")
+        self._reject_governance_roles([role])
+        if data.code in TENANT_GOVERNANCE_ROLE_CODES:
+            raise CustomException(msg="普通角色不可使用租户治理角色编码")
         exist_role = await RoleCRUD(self.auth).get(name=data.name)
         if exist_role and exist_role.id != id:
             raise CustomException(msg="更新失败，名称已存在")
@@ -144,6 +158,7 @@ class RoleService:
         roles = await RoleCRUD(self.auth).get_list(search={"id": ("in", ids)})
         if len(roles) != len(ids):
             raise CustomException(msg="删除失败，部分ID不存在")
+        self._reject_governance_roles(roles)
 
         await RoleCRUD(self.auth).delete(ids=ids)
 
@@ -157,6 +172,11 @@ class RoleService:
         返回:
         - None
         """
+        roles = await RoleCRUD(self.auth).get_list(search={"id": ("in", data.role_ids)})
+        if len(roles) != len(data.role_ids):
+            raise CustomException(msg="该数据不存在")
+        self._reject_governance_roles(roles)
+
         # 设置角色菜单权限
         await RoleCRUD(self.auth).set_role_menus_crud(role_ids=data.role_ids, menu_ids=data.menu_ids)
 
@@ -184,6 +204,7 @@ class RoleService:
         for rid in data.ids:
             if rid not in role_map:
                 raise CustomException(msg="该数据不存在")
+        self._reject_governance_roles(roles)
         await RoleCRUD(self.auth).set(ids=data.ids, status=data.status)
 
     @staticmethod

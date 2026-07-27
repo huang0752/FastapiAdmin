@@ -1,6 +1,7 @@
 
 import platform
 import socket
+import sys
 import time
 from pathlib import Path
 
@@ -67,23 +68,58 @@ class ServerService:
 
     @staticmethod
     def _get_python_info() -> PyInfoSchema:
-        current_process = psutil.Process()
         memory = psutil.virtual_memory()
-        process_memory = current_process.memory_info()
+        available_memory = max(memory.available, 0)
+        process_name = platform.python_implementation() or "Python"
+        executable_path = sys.executable or "未知"
+        start_time_text = "未知"
+        run_time = "未知"
+        process_memory_used = 0
 
-        start_time = current_process.create_time()
-        run_time = ServerService._calculate_run_time(start_time)
+        try:
+            current_process = psutil.Process()
+        except (psutil.Error, OSError):
+            current_process = None
+
+        if current_process is not None:
+            try:
+                process_name = current_process.name() or process_name
+            except (psutil.Error, OSError):
+                pass
+
+            try:
+                process_memory_used = max(current_process.memory_info().rss, 0)
+            except (psutil.Error, OSError):
+                pass
+
+            try:
+                process_start_time = current_process.create_time()
+                start_time_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(process_start_time))
+                run_time = ServerService._calculate_run_time(process_start_time)
+            except (psutil.Error, OSError, OverflowError, ValueError):
+                pass
+
+            try:
+                readable_executable_path = current_process.exe()
+                if readable_executable_path:
+                    executable_path = str(Path(readable_executable_path))
+            except (psutil.Error, OSError):
+                pass
+
+        memory_free = max(available_memory - process_memory_used, 0)
+        memory_usage = round((process_memory_used / available_memory) * 100, 2) if available_memory else 0.0
+        memory_usage = min(memory_usage, 100.0)
 
         return PyInfoSchema(
-            name=current_process.name(),
+            name=process_name,
             version=platform.python_version(),
-            start_time=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time)),
+            start_time=start_time_text,
             run_time=run_time,
-            home=str(Path(current_process.exe())),
-            memory_total=bytes2human(memory.available),
-            memory_used=bytes2human(process_memory.rss),
-            memory_free=bytes2human(memory.available - process_memory.rss),
-            memory_usage=round((process_memory.rss / memory.available) * 100, 2),
+            home=executable_path,
+            memory_total=bytes2human(available_memory),
+            memory_used=bytes2human(process_memory_used),
+            memory_free=bytes2human(memory_free),
+            memory_usage=memory_usage,
         )
 
     @staticmethod

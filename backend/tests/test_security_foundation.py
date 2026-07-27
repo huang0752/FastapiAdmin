@@ -75,6 +75,7 @@ async def _get_membership(username: str, tenant_id: int) -> TenantUserModel | No
 
 _OWNER_REQUIRED_PERMISSIONS = {
     "module_platform:workspace:query",
+    "module_platform:workspace:update",
     "module_system:dept:create",
     "module_system:dept:delete",
     "module_system:dept:query",
@@ -617,15 +618,14 @@ def test_tenant_create_schema_starts_only_in_active_status() -> None:
         TenantCreateSchema(name="非法初始状态", code="BadTenant", status=1)
 
 
-def test_tenant_update_and_query_accept_all_lifecycle_statuses() -> None:
+def test_tenant_update_rejects_lifecycle_status_and_query_accepts_all() -> None:
     for status in range(6):
-        assert TenantUpdateSchema(status=status).status == status
+        with pytest.raises(ValueError, match="状态迁移"):
+            TenantUpdateSchema(status=status)
         query = TenantQueryParam(status=status)
         assert query.status is not None
         assert query.status[-1] == status
 
-    with pytest.raises(ValueError):
-        TenantUpdateSchema(status=6)
     with pytest.raises(ValueError):
         TenantQueryParam(status=6)
 

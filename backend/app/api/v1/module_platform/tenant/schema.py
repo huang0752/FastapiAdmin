@@ -11,17 +11,11 @@ from app.core.validator import DateTimeStr, email_validator, mobile_validator
 from .model import TENANT_STATUS_DESCRIPTION, TenantStatus
 
 
-class TenantCreateSchema(BaseModel):
-    """新增租户"""
+class TenantBaseSchema(BaseModel):
+    """租户可编辑基础字段。"""
 
     name: str = Field(..., min_length=1, max_length=100, description="租户名称")
     code: str = Field(..., min_length=2, max_length=100, description="租户编码")
-    status: int = Field(
-        default=TenantStatus.ACTIVE,
-        ge=TenantStatus.ACTIVE,
-        le=TenantStatus.ARCHIVED,
-        description=f"初始{TENANT_STATUS_DESCRIPTION}，创建时仅支持 0:正常",
-    )
     description: str | None = Field(default=None, description="描述")
     start_time: DateTimeStr | None = Field(default=None, description="开始时间")
     end_time: DateTimeStr | None = Field(default=None, description="结束时间")
@@ -61,13 +55,6 @@ class TenantCreateSchema(BaseModel):
             raise ValueError("租户编码仅允许字母和数字")
         return v
 
-    @field_validator("status")
-    @classmethod
-    def _validate_status(cls, v: int) -> int:
-        if v != TenantStatus.ACTIVE:
-            raise ValueError("新建租户状态仅支持 0(正常)")
-        return v
-
     @field_validator("contact_phone")
     @classmethod
     def _validate_contact_phone(cls, v: str | None) -> str | None:
@@ -87,17 +74,31 @@ class TenantCreateSchema(BaseModel):
         return self
 
 
-class TenantUpdateSchema(TenantCreateSchema):
+class TenantCreateSchema(TenantBaseSchema):
+    """新增租户。"""
+
+    status: int = Field(
+        default=TenantStatus.ACTIVE,
+        ge=TenantStatus.ACTIVE,
+        le=TenantStatus.ARCHIVED,
+        description=f"初始{TENANT_STATUS_DESCRIPTION}，创建时仅支持 0:正常",
+    )
+
+    @field_validator("status")
+    @classmethod
+    def _validate_status(cls, v: int) -> int:
+        if v != TenantStatus.ACTIVE:
+            raise ValueError("新建租户状态仅支持 0(正常)")
+        return v
+
+
+class TenantUpdateSchema(TenantBaseSchema):
     """更新租户"""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(default=None, max_length=100, description="租户名称")  # type: ignore[assignment]
     code: str | None = Field(default=None, max_length=100, description="租户编码")  # type: ignore[assignment]
-    status: int | None = Field(
-        default=None,
-        ge=TenantStatus.ACTIVE,
-        le=TenantStatus.ARCHIVED,
-        description=TENANT_STATUS_DESCRIPTION,
-    )
     description: str | None = Field(default=None, description="描述")
     start_time: DateTimeStr | None = Field(default=None, description="开始时间")
     end_time: DateTimeStr | None = Field(default=None, description="结束时间")
@@ -129,16 +130,12 @@ class TenantUpdateSchema(TenantCreateSchema):
             raise ValueError("租户编码仅允许字母和数字")
         return v
 
-    @field_validator("status")
+    @model_validator(mode="before")
     @classmethod
-    def _validate_status(cls, v: int | None) -> int | None:
-        if v is None:
-            return v
-        try:
-            TenantStatus(v)
-        except ValueError as exc:
-            raise ValueError(TENANT_STATUS_DESCRIPTION) from exc
-        return v
+    def _reject_lifecycle_status(cls, data):
+        if isinstance(data, dict) and "status" in data:
+            raise ValueError("租户状态迁移请使用专用状态接口")
+        return data
 
     @field_validator("contact_phone")
     @classmethod

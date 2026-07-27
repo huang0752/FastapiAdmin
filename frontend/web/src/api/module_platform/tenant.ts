@@ -294,7 +294,6 @@ export interface TenantUpdateForm extends BaseFormType {
   privacy?: string;
   clause?: string;
   git_code?: string;
-  status?: TenantStatus;
   description?: string;
 }
 

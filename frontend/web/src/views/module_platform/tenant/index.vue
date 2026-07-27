@@ -656,9 +656,7 @@ const basicFormItems = computed<FormItem[]>(() => [
           : resolveNextTenantManualStatus(formData.value.status) === null
             ? TENANT_STATUS_OPTIONS
             : TENANT_MANUAL_STATUS_OPTIONS,
-      disabled:
-        dialogVisible.type === "update" &&
-        resolveNextTenantManualStatus(formData.value.status) === null,
+      disabled: dialogVisible.type === "update",
     },
   },
   {
@@ -841,7 +839,6 @@ async function handleSubmit() {
       const payload: TenantUpdateForm = {
         name: formData.value.name,
         code: formData.value.code,
-        status: formData.value.status,
         description: formData.value.description,
         package_id: formData.value.package_id,
         start_time: formData.value.start_time,

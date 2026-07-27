@@ -24,6 +24,7 @@ from .schema import (
 OWNER_REQUIRED_MENU_PERMISSIONS = frozenset(
     {
         "module_platform:workspace:query",
+        "module_platform:workspace:update",
         "module_system:dept:create",
         "module_system:dept:delete",
         "module_system:dept:detail",
@@ -197,7 +198,7 @@ class PackageService:
         available_ids: set[int],
         owner_menu_ids: set[int] | None = None,
     ) -> None:
-        """移除所有角色越权菜单，并把新增可用菜单同步给 owner 角色。"""
+        """移除所有角色越权菜单，并把新增可用菜单同步给 owner/admin。"""
         from app.api.v1.module_system.role.model import RoleMenusModel, RoleModel
 
         role_ids = set(
@@ -211,24 +212,26 @@ class PackageService:
                 delete_stmt = delete_stmt.where(RoleMenusModel.menu_id.notin_(available_ids))
             await db.execute(delete_stmt)
 
-        owner_role = (
+        governance_roles = (
             await db.execute(
                 select(RoleModel)
-                .where(RoleModel.tenant_id == tenant_id, RoleModel.code == "owner")
-                .limit(1)
+                .where(
+                    RoleModel.tenant_id == tenant_id,
+                    RoleModel.code.in_({"owner", "admin"}),
+                )
             )
-        ).scalar_one_or_none()
-        if owner_role:
+        ).scalars().all()
+        for governance_role in governance_roles:
             target_ids = owner_menu_ids if owner_menu_ids is not None else available_ids
             current_ids = set(
                 (
                     await db.execute(
-                        select(RoleMenusModel.menu_id).where(RoleMenusModel.role_id == owner_role.id)
+                        select(RoleMenusModel.menu_id).where(RoleMenusModel.role_id == governance_role.id)
                     )
                 ).scalars().all()
             )
             for menu_id in target_ids - current_ids:
-                db.add(RoleMenusModel(role_id=owner_role.id, menu_id=menu_id))
+                db.add(RoleMenusModel(role_id=governance_role.id, menu_id=menu_id))
         await db.flush()
 
     @require_superadmin

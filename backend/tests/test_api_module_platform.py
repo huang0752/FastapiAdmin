@@ -272,7 +272,8 @@ class TestPackage:
     def test_package_status_batch(self, test_client: TestClient, auth_headers: dict) -> None:
         assert_route(
             test_client, "PATCH", "/platform/package/status/batch", auth=auth_headers,
-            json={"ids": [1], "status": 1},
+            # 路由冒烟测试不应停用后续订单用例依赖的基础套餐。
+            json={"ids": [9999], "status": 1},
         )
 
 
