@@ -54,7 +54,7 @@ async def gen_table_list_controller(
 async def get_gen_db_table_list_controller(
     page: Annotated[PaginationQueryParam, Depends()],
     search: Annotated[GenTableQueryParam, Depends()],
-    auth: Annotated[AuthSchema, Depends(AuthPermission(["*:*:*"]))],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_generator:dblist:query"]))],
 ) -> JSONResponse:
     result_dict = await GenTableService(auth).get_gen_db_table_page(
         page_no=page.page_no,
@@ -71,7 +71,7 @@ async def get_gen_db_table_list_controller(
 )
 async def import_gen_table_controller(
     table_names: Annotated[list[str], Body(description="表名列表")],
-    auth: Annotated[AuthSchema, Depends(AuthPermission(["*:*:*"]))],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_generator:gencode:import"]))],
 ) -> JSONResponse:
     svc = GenTableService(auth)
     add_gen_table_list = await svc.get_gen_db_table_list_by_name(table_names)
@@ -138,7 +138,7 @@ async def delete_gen_table_controller(
 )
 async def batch_gen_code_controller(
     table_names: Annotated[list[str], Body(description="表名列表")],
-    auth: Annotated[AuthSchema, Depends(AuthPermission(["*:*:*"]))],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_generator:gencode:operate"]))],
 ) -> StreamResponse:
     batch_gen_code_result, failed_tables = await GenTableService(auth).batch_gen_code(table_names)
     headers = {"Content-Disposition": "attachment; filename=code.zip"}

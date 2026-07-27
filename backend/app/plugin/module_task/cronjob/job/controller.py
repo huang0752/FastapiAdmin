@@ -20,7 +20,7 @@ JobRouter = APIRouter(route_class=OperationLogRoute, prefix="/cronjob/job", tags
     "/scheduler/status",
     summary="获取调度器状态",
     response_model=ResponseSchema[dict],
-    dependencies=[Depends(AuthPermission(["*:*:*"]))],
+    dependencies=[Depends(AuthPermission(["module_task:cronjob:job:query"]))],
 )
 async def get_scheduler_status_controller() -> JSONResponse:
     data = JobService.get_scheduler_status()
@@ -31,7 +31,7 @@ async def get_scheduler_status_controller() -> JSONResponse:
     "/scheduler/jobs",
     summary="获取调度器任务列表",
     response_model=ResponseSchema[list[dict]],
-    dependencies=[Depends(AuthPermission(["*:*:*"]))],
+    dependencies=[Depends(AuthPermission(["module_task:cronjob:job:query"]))],
 )
 async def get_scheduler_jobs_controller() -> JSONResponse:
     data = JobService.get_scheduler_jobs()
@@ -97,7 +97,7 @@ async def clear_jobs_controller() -> JSONResponse:
     "/scheduler/console",
     summary="获取调度器控制台信息",
     response_model=ResponseSchema[str],
-    dependencies=[Depends(AuthPermission(["*:*:*"]))],
+    dependencies=[Depends(AuthPermission(["module_task:cronjob:job:query"]))],
 )
 async def get_scheduler_console_controller() -> JSONResponse:
     console_output = SchedulerUtil.print_jobs()

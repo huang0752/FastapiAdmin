@@ -30,6 +30,9 @@ SCRIPT_DIR: Path = BASE_DIR / "app" / "scripts" / "data"
 # 产品能力装配配置目录
 ASSEMBLY_DIR: Path = BASE_DIR / "app" / "assemblies"
 
+# 可选插件目录
+PLUGIN_DIR: Path = BASE_DIR / "app" / "plugin"
+
 # Seed pack 配置目录
 SEEDS_DIR: Path = BASE_DIR / "app" / "scripts" / "seeds"
 

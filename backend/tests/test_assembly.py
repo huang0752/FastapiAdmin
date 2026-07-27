@@ -4,7 +4,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config.setting import settings
-from app.core.assembly import AssemblyConfig, load_assembly_from_file, reset_assembly_cache
+from app.core.assembly import (
+    AssemblyConfig,
+    known_plugin_module_codes,
+    load_assembly_from_file,
+    plugin_code_candidates,
+    reset_assembly_cache,
+)
 from app.scripts.initialize import InitializeData
 
 
@@ -41,6 +47,22 @@ flags = { ai_assistant = false }
     assert not assembly.is_route_group_enabled("pricing")
     assert assembly.seed_packs == ["minimal"]
     assert assembly.frontend_summary()["featureFlags"]["aiAssistant"] is False
+
+
+def test_plugin_module_codes_are_discovered_from_plugin_directory(tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "plugin"
+    (plugin_dir / "module_ai").mkdir(parents=True)
+    (plugin_dir / "module_custom").mkdir()
+    (plugin_dir / "common").mkdir()
+    (plugin_dir / "module_file.py").write_text("", encoding="utf-8")
+
+    module_codes = known_plugin_module_codes(plugin_dir)
+
+    assert "module_ai" in module_codes
+    assert "module_custom" in module_codes
+    assert "common" not in module_codes
+    assert "module_file.py" not in module_codes
+    assert plugin_code_candidates("module_custom") == ["module_custom", "custom"]
 
 
 def test_disabled_plugin_is_not_registered_in_dynamic_router(tmp_path: Path) -> None:

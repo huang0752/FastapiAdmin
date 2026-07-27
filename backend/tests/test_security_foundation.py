@@ -22,6 +22,7 @@ from app.api.v1.module_system.user.model import UserModel
 from app.config.setting import settings
 from app.core.base_schema import AuthSchema, JWTPayloadSchema
 from app.core.database import async_db_session
+from app.core.dependencies import AuthPermission
 from app.core.discover import validate_dynamic_plugin_access
 from app.core.exceptions import CustomException
 from app.core.security import create_access_token
@@ -94,6 +95,71 @@ def _route_dependency_names(app, path: str, method: str = "GET") -> list[str]:
             for dep in route.dependant.dependencies
         ]
     return []
+
+
+def _route_auth_permissions(app, path: str, method: str) -> list[str]:
+    for route in app.routes:
+        if getattr(route, "path", None) != path or method not in (getattr(route, "methods", None) or set()):
+            continue
+        permissions = [
+            dependency.call.permissions
+            for dependency in route.dependant.dependencies
+            if isinstance(dependency.call, AuthPermission)
+        ]
+        assert len(permissions) == 1, f"{method} {path} 应且只应声明一个 AuthPermission"
+        return permissions[0]
+    raise AssertionError(f"未找到路由: {method} {path}")
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "permissions"),
+    [
+        ("GET", "/generator/gencode/db/list", ["module_generator:dblist:query"]),
+        ("POST", "/generator/gencode/import", ["module_generator:gencode:import"]),
+        ("PATCH", "/generator/gencode/batch/output", ["module_generator:gencode:operate"]),
+        ("GET", "/task/cronjob/job/scheduler/status", ["module_task:cronjob:job:query"]),
+        ("GET", "/task/cronjob/job/scheduler/jobs", ["module_task:cronjob:job:query"]),
+        ("GET", "/task/cronjob/job/scheduler/console", ["module_task:cronjob:job:query"]),
+        ("POST", "/task/cronjob/node/create", ["module_task:cronjob:node:create"]),
+        ("PUT", "/task/cronjob/node/update/{id}", ["module_task:cronjob:node:update"]),
+        ("DELETE", "/task/cronjob/node/delete", ["module_task:cronjob:node:delete"]),
+        ("PATCH", "/task/cronjob/node/status/batch", ["module_task:cronjob:node:update"]),
+    ],
+)
+def test_delegable_framework_routes_keep_granular_permissions(
+    test_client: TestClient,
+    method: str,
+    path: str,
+    permissions: list[str],
+) -> None:
+    assert _route_auth_permissions(test_client.app, path, method) == permissions
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/generator/gencode/create"),
+        ("POST", "/generator/gencode/output/{table_name}"),
+        ("POST", "/task/cronjob/job/scheduler/start"),
+        ("POST", "/task/cronjob/job/scheduler/pause"),
+        ("POST", "/task/cronjob/job/scheduler/resume"),
+        ("POST", "/task/cronjob/job/scheduler/shutdown"),
+        ("DELETE", "/task/cronjob/job/scheduler/jobs/clear"),
+        ("POST", "/task/cronjob/job/scheduler/sync"),
+        ("POST", "/task/cronjob/job/task/pause/{job_id}"),
+        ("POST", "/task/cronjob/job/task/resume/{job_id}"),
+        ("POST", "/task/cronjob/job/task/run/{job_id}"),
+        ("DELETE", "/task/cronjob/job/task/remove/{job_id}"),
+        ("DELETE", "/task/cronjob/node/clear"),
+        ("POST", "/task/cronjob/node/execute/{id}"),
+    ],
+)
+def test_high_risk_framework_routes_remain_superuser_only(
+    test_client: TestClient,
+    method: str,
+    path: str,
+) -> None:
+    assert _route_auth_permissions(test_client.app, path, method) == ["*:*:*"]
 
 
 def test_public_user_register_requires_authentication(test_client: TestClient) -> None:

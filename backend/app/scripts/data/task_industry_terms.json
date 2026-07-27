@@ -1,16 +1,1 @@
-[
-  {
-    "term": "SKU",
-    "module": "wms",
-    "industry": "warehouse",
-    "aliases": ["库存单位", "商品编码"],
-    "description": "库存管理中的最小可识别商品单位。"
-  },
-  {
-    "term": "库位",
-    "module": "wms",
-    "industry": "warehouse",
-    "aliases": ["Location", "Bin"],
-    "description": "仓库内用于定位库存的存储位置。"
-  }
-]
+[]

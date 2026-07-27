@@ -25,9 +25,7 @@ async def industry_sample_packs_controller(
 @IndustryRouter.get("/terms", summary="查询行业词库", response_model=ResponseSchema[list[IndustryTermOut]])
 async def industry_terms_controller(
     auth: Annotated[AuthSchema, Depends(AuthPermission())],
-    wms: Annotated[bool, Query(description="兼容前端快捷过滤，true 时等价于 module=wms")] = False,
     module: Annotated[str | None, Query(description="业务模块")] = None,
 ) -> JSONResponse:
     _ = auth
-    effective_module = "wms" if wms else module
-    return SuccessResponse(data=IndustrySampleService.terms(module=effective_module), msg="查询行业词库成功")
+    return SuccessResponse(data=IndustrySampleService.terms(module=module), msg="查询行业词库成功")

@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from app.config.path_conf import ASSEMBLY_DIR, BASE_DIR
+from app.config.path_conf import ASSEMBLY_DIR, BASE_DIR, PLUGIN_DIR
 from app.config.setting import settings
 from app.core.logger import logger
 
@@ -58,13 +58,30 @@ def _normalize_module_code(code: str) -> str:
     return code if code.startswith("module_") else f"module_{code}"
 
 
-def known_plugin_module_codes() -> list[str]:
-    return list(PLUGIN_CODE_ALIASES)
+def known_plugin_module_codes(plugin_dir: Path | None = None) -> list[str]:
+    """返回框架已知的插件模块编码。
+
+    内置别名用于兼容历史 seed 中的插件编码；目录扫描让第三方
+    ``module_*`` 插件无需修改框架常量即可参与 assembly 裁剪。
+    """
+    module_codes = set(PLUGIN_CODE_ALIASES)
+    directory = plugin_dir or PLUGIN_DIR
+    if directory.is_dir():
+        module_codes.update(
+            path.name
+            for path in directory.iterdir()
+            if path.is_dir() and path.name.startswith("module_") and len(path.name) > len("module_")
+        )
+    return sorted(module_codes)
 
 
 def plugin_code_candidates(module_code: str) -> list[str]:
     normalized = _normalize_module_code(module_code)
-    return [normalized, *PLUGIN_CODE_ALIASES.get(normalized, ())]
+    candidates = [normalized, *PLUGIN_CODE_ALIASES.get(normalized, ())]
+    short_code = normalized.removeprefix("module_")
+    if short_code and short_code not in candidates:
+        candidates.append(short_code)
+    return candidates
 
 
 def _to_camel_case(value: str) -> str:

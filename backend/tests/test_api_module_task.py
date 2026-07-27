@@ -220,10 +220,10 @@ class TestBusinessTask:
             "/task/business/task/create",
             headers=auth_headers,
             json={
-                "module": "wms",
-                "biz_type": "inventory_import",
-                "biz_id": "IMP-001",
-                "title": "库存导入",
+                "module": "sample",
+                "biz_type": "data_import",
+                "biz_id": "IMPORT-001",
+                "title": "样例数据导入",
                 "payload": {"file": "demo.xlsx"},
             },
         )
@@ -231,8 +231,8 @@ class TestBusinessTask:
         task = create_resp.json()["data"]
         assert task["status"] == "pending"
         assert task["progress"] == 0
-        assert task["module"] == "wms"
-        assert task["biz_type"] == "inventory_import"
+        assert task["module"] == "sample"
+        assert task["biz_type"] == "data_import"
 
         update_resp = test_client.patch(
             f"/task/business/task/status/{task['id']}",
@@ -294,7 +294,7 @@ class TestBusinessTask:
         create_resp = test_client.post(
             "/task/business/task/create",
             headers=auth_headers,
-            json={"module": "wms", "biz_type": "stocktake", "title": "盘点"},
+            json={"module": "sample", "biz_type": "data_check", "title": "样例校验"},
         )
         assert create_resp.status_code == 200, create_resp.text
         task_id = create_resp.json()["data"]["id"]
@@ -321,11 +321,11 @@ class TestDemoBatchAndIndustrySamples:
         trigger_resp = test_client.post(
             "/task/demo-batch/trigger",
             headers=auth_headers,
-            json={"module": "wms", "scenario": "starter"},
+            json={"module": "sample", "scenario": "starter"},
         )
         assert trigger_resp.status_code == 200, trigger_resp.text
         batch = trigger_resp.json()["data"]
-        assert batch["module"] == "wms"
+        assert batch["module"] == "sample"
         assert batch["scenario"] == "starter"
         assert batch["is_demo"] is True
         assert batch["demo_batch_id"]
@@ -338,13 +338,22 @@ class TestDemoBatchAndIndustrySamples:
         assert clean_resp.status_code == 200, clean_resp.text
         assert clean_resp.json()["data"]["demo_batch_id"] == batch["demo_batch_id"]
 
-    def test_industry_sample_pack_routes(self, test_client: TestClient, auth_headers: dict) -> None:
+    def test_framework_does_not_ship_product_sample_data(self, test_client: TestClient, auth_headers: dict) -> None:
         packs_resp = test_client.get("/task/industry/sample-packs", headers=auth_headers)
         assert packs_resp.status_code == 200, packs_resp.text
-        packs = packs_resp.json()["data"]
-        assert any(pack["code"] == "wms_starter" for pack in packs)
+        assert packs_resp.json()["data"] == []
 
-        terms_resp = test_client.get("/task/industry/terms?wms=true", headers=auth_headers)
+        terms_resp = test_client.get("/task/industry/terms?module=sample", headers=auth_headers)
         assert terms_resp.status_code == 200, terms_resp.text
-        terms = terms_resp.json()["data"]
-        assert any(term["term"] == "SKU" for term in terms)
+        assert terms_resp.json()["data"] == []
+
+    def test_industry_terms_only_exposes_generic_module_filter(self, test_client: TestClient) -> None:
+        operation = test_client.app.openapi()["paths"]["/task/industry/terms"]["get"]
+        query_parameters = {
+            parameter["name"]
+            for parameter in operation.get("parameters", [])
+            if parameter.get("in") == "query"
+        }
+
+        assert "module" in query_parameters
+        assert "wms" not in query_parameters
