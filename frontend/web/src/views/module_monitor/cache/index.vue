@@ -494,6 +494,7 @@ onUnmounted(() => {
   gap: 16px;
   height: 100%;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .chart-card {
@@ -521,6 +522,7 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .cache-mgmt-col {
