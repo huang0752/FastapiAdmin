@@ -327,6 +327,34 @@ def test_non_superuser_can_read_own_current_info(test_client: TestClient, auth_h
     assert body["data"]["username"] == username
 
 
+def test_superuser_can_read_current_info_after_switching_tenant(test_client: TestClient) -> None:
+    login = _login(test_client, "admin", "admin123")
+    original_headers = {"Authorization": f"Bearer {login['access_token']}"}
+    tenants_resp = test_client.get("/system/auth/tenants", headers=original_headers)
+    assert tenants_resp.status_code == 200, tenants_resp.text
+    target_tenant = next(
+        tenant for tenant in tenants_resp.json()["data"] if tenant["id"] != 1
+    )
+
+    switch_resp = test_client.post(
+        "/system/auth/select-tenant",
+        headers=original_headers,
+        json={"tenant_id": target_tenant["id"]},
+    )
+    assert switch_resp.status_code == 200, switch_resp.text
+    switched_headers = {
+        "Authorization": f"Bearer {switch_resp.json()['data']['access_token']}"
+    }
+
+    current_resp = test_client.get(
+        "/system/user/current/info",
+        headers=switched_headers,
+    )
+
+    assert current_resp.status_code == 200, current_resp.text
+    assert current_resp.json()["data"]["username"] == "admin"
+
+
 def test_non_superuser_without_permission_cannot_query_users(test_client: TestClient, auth_headers: dict[str, str]) -> None:
     username = _unique("normal_no_perm")
     password = "normal123"

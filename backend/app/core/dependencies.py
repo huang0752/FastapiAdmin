@@ -180,8 +180,13 @@ async def _load_user_from_db(db: AsyncSession, user_id: int, tenant_id: int):
         .options(
             selectinload(UserModel.dept),
             selectinload(UserModel.roles).selectinload(RoleModel.menus),
+            selectinload(UserModel.roles).selectinload(RoleModel.created_by),
+            selectinload(UserModel.roles).selectinload(RoleModel.updated_by),
+            selectinload(UserModel.roles).selectinload(RoleModel.deleted_by),
             selectinload(UserModel.positions),
             selectinload(UserModel.created_by),
+            selectinload(UserModel.updated_by),
+            selectinload(UserModel.deleted_by),
         )
         .where(UserModel.id == user_id, UserModel.is_deleted == False)  # noqa: E712
     )

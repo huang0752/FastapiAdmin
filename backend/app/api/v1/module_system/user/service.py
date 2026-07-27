@@ -220,10 +220,14 @@ class UserService:
     async def current_info(self) -> UserOutSchema:
         if not self.auth.user or not self.auth.user.id:
             raise CustomException(msg="该数据不存在")
-        user = await UserCRUD(self.auth).get(id=self.auth.user.id)
+        # 认证依赖已经按全局用户 ID 加载并按当前租户收敛了组织关系。
+        # 多租户成员切换后，用户主记录仍可能归属其初始租户；此处若再走
+        # UserCRUD，会被当前租户条件过滤为 None，导致当前用户信息序列化失败。
+        user = self.auth.user
         user_dict = UserOutSchema.model_validate(user)
-        if user and user.dept:
-            user_dict.dept_name = user.dept.name
+        dept = getattr(user, "dept", None)
+        if dept:
+            user_dict.dept_name = dept.name
 
         _pc_only = {"client": "pc"}
         if self.auth.is_platform_global:
