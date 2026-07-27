@@ -1,46 +1,102 @@
 [
   {
-    "package_id": 1,
-    "menu_id": 7
+    "package_code": "basic",
+    "menus": [
+      {"permission": "module_platform:workspace:query"},
+      {"permission": "module_system:dept:query"},
+      {"permission": "module_system:dept:create"},
+      {"permission": "module_system:dept:update"},
+      {"permission": "module_system:dept:delete"},
+      {"permission": "module_system:position:query"},
+      {"permission": "module_system:position:create"},
+      {"permission": "module_system:position:update"},
+      {"permission": "module_system:position:delete"},
+      {"permission": "module_system:position:patch"},
+      {"permission": "module_system:position:detail"},
+      {"permission": "module_system:role:query"},
+      {"permission": "module_system:role:create"},
+      {"permission": "module_system:role:update"},
+      {"permission": "module_system:role:delete"},
+      {"permission": "module_system:role:permission"},
+      {"permission": "module_system:user:query"},
+      {"permission": "module_system:user:create"},
+      {"permission": "module_system:user:update"},
+      {"permission": "module_system:user:delete"}
+    ]
   },
   {
-    "package_id": 1,
-    "menu_id": 8
+    "package_code": "standard",
+    "menus": [
+      {"permission": "module_platform:workspace:query"},
+      {"permission": "module_system:dept:query"},
+      {"permission": "module_system:dept:create"},
+      {"permission": "module_system:dept:update"},
+      {"permission": "module_system:dept:delete"},
+      {"permission": "module_system:position:query"},
+      {"permission": "module_system:position:create"},
+      {"permission": "module_system:position:update"},
+      {"permission": "module_system:position:delete"},
+      {"permission": "module_system:position:patch"},
+      {"permission": "module_system:position:detail"},
+      {"permission": "module_system:role:query"},
+      {"permission": "module_system:role:create"},
+      {"permission": "module_system:role:update"},
+      {"permission": "module_system:role:delete"},
+      {"permission": "module_system:role:permission"},
+      {"permission": "module_system:user:query"},
+      {"permission": "module_system:user:create"},
+      {"permission": "module_system:user:update"},
+      {"permission": "module_system:user:delete"}
+    ]
   },
   {
-    "package_id": 1,
-    "menu_id": 9
+    "package_code": "pro",
+    "menus": [
+      {"permission": "module_platform:workspace:query"},
+      {"permission": "module_system:dept:query"},
+      {"permission": "module_system:dept:create"},
+      {"permission": "module_system:dept:update"},
+      {"permission": "module_system:dept:delete"},
+      {"permission": "module_system:position:query"},
+      {"permission": "module_system:position:create"},
+      {"permission": "module_system:position:update"},
+      {"permission": "module_system:position:delete"},
+      {"permission": "module_system:position:patch"},
+      {"permission": "module_system:position:detail"},
+      {"permission": "module_system:role:query"},
+      {"permission": "module_system:role:create"},
+      {"permission": "module_system:role:update"},
+      {"permission": "module_system:role:delete"},
+      {"permission": "module_system:role:permission"},
+      {"permission": "module_system:user:query"},
+      {"permission": "module_system:user:create"},
+      {"permission": "module_system:user:update"},
+      {"permission": "module_system:user:delete"}
+    ]
   },
   {
-    "package_id": 1,
-    "menu_id": 10
-  },
-  {
-    "package_id": 2,
-    "menu_id": 2
-  },
-  {
-    "package_id": 2,
-    "menu_id": 5
-  },
-  {
-    "package_id": 2,
-    "menu_id": 6
-  },
-  {
-    "package_id": 2,
-    "menu_id": 7
-  },
-  {
-    "package_id": 2,
-    "menu_id": 8
-  },
-  {
-    "package_id": 2,
-    "menu_id": 9
-  },
-  {
-    "package_id": 2,
-    "menu_id": 10
+    "package_code": "enterprise",
+    "menus": [
+      {"permission": "module_platform:workspace:query"},
+      {"permission": "module_system:dept:query"},
+      {"permission": "module_system:dept:create"},
+      {"permission": "module_system:dept:update"},
+      {"permission": "module_system:dept:delete"},
+      {"permission": "module_system:position:query"},
+      {"permission": "module_system:position:create"},
+      {"permission": "module_system:position:update"},
+      {"permission": "module_system:position:delete"},
+      {"permission": "module_system:position:patch"},
+      {"permission": "module_system:position:detail"},
+      {"permission": "module_system:role:query"},
+      {"permission": "module_system:role:create"},
+      {"permission": "module_system:role:update"},
+      {"permission": "module_system:role:delete"},
+      {"permission": "module_system:role:permission"},
+      {"permission": "module_system:user:query"},
+      {"permission": "module_system:user:create"},
+      {"permission": "module_system:user:update"},
+      {"permission": "module_system:user:delete"}
+    ]
   }
 ]

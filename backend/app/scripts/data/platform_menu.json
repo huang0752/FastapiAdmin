@@ -1036,7 +1036,7 @@
             "active_path": null,
             "show_badge": false,
             "show_text_badge": null,
-            "scope": "platform"
+            "scope": "tenant"
           }
         ],
         "link": null,
@@ -1046,7 +1046,7 @@
         "show_badge": false,
         "show_text_badge": null,
         "client": "pc",
-        "scope": "platform"
+        "scope": "tenant"
       },
       {
         "name": "插件市场",

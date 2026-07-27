@@ -7,6 +7,7 @@ from typing import NewType
 import ua_parser
 from fastapi import BackgroundTasks, Request
 from redis.asyncio.client import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.module_monitor.online.schema import OnlineOutSchema
@@ -66,6 +67,7 @@ async def _write_login_log(
     request_os: str | None = None,
     request_browser: str | None = None,
     msg: str | None = None,
+    tenant_id: int = 1,
 ) -> int | None:
     """写入登录日志；返回日志 ID（用于后台补全归属地）。"""
     from app.api.v1.module_system.log.crud import LoginLogCRUD
@@ -76,8 +78,8 @@ async def _write_login_log(
     try:
         async with async_db_session() as session:
             async with session.begin():
-                _auth = AuthSchema(db=session, check_data_scope=False)
-                obj = await LoginLogCRUD(_auth).create(data=LoginLogCreateSchema(
+                _auth = AuthSchema(db=session, tenant_id=tenant_id, check_data_scope=False)
+                payload = LoginLogCreateSchema(
                     username=username,
                     status=status,
                     login_ip=login_ip,
@@ -85,10 +87,25 @@ async def _write_login_log(
                     request_os=request_os,
                     request_browser=request_browser,
                     msg=msg,
-                ))
+                ).model_dump()
+                payload["tenant_id"] = tenant_id
+                obj = await LoginLogCRUD(_auth).create(data=payload)
                 return obj.id if obj else None
     except Exception:
         return None
+
+
+async def get_unique_user_by_username(db: AsyncSession, username: str) -> UserModel | None:
+    """按用户名做全局唯一查询；跨租户重名时拒绝猜测账号归属。"""
+    stmt = (
+        select(UserModel)
+        .where(UserModel.username == username, UserModel.is_deleted.is_(False))
+        .limit(2)
+    )
+    users = list((await db.execute(stmt)).scalars().all())
+    if len(users) > 1:
+        raise CustomException(msg="账号标识不唯一，请联系管理员", status_code=400)
+    return users[0] if users else None
 
 
 async def _async_fill_login_location(
@@ -156,7 +173,7 @@ class LoginService:
             )
 
         auth = AuthSchema(db=db, check_data_scope=False)
-        user = await UserCRUD(auth).get(username=login_form.username)
+        user = await get_unique_user_by_username(db, login_form.username)
 
         if not user:
             await _write_login_log(
@@ -179,6 +196,7 @@ class LoginService:
                 request_os=_login_os,
                 request_browser=_login_browser,
                 msg="账号或密码错误",
+                tenant_id=user.tenant_id,
             )
             raise CustomException(msg="账号或密码错误")
         if user.status == 1:
@@ -190,14 +208,13 @@ class LoginService:
                 request_os=_login_os,
                 request_browser=_login_browser,
                 msg="用户已被停用",
+                tenant_id=user.tenant_id,
             )
             raise CustomException(msg="用户已被停用")
 
-        from sqlalchemy import select
-
         from app.api.v1.module_platform.tenant.model import TenantModel
 
-        tenant_stmt = select(TenantModel).where(TenantModel.id == user.tenant_id, TenantModel.status == 0, TenantModel.is_deleted.is_(False)).limit(1)
+        tenant_stmt = select(TenantModel).where(TenantModel.id == user.tenant_id, TenantModel.status.in_((0, 1)), TenantModel.is_deleted.is_(False)).limit(1)
         tenant_result = await auth.db.execute(tenant_stmt)
         if not tenant_result.scalar_one_or_none():
             await _write_login_log(
@@ -208,10 +225,17 @@ class LoginService:
                 request_os=_login_os,
                 request_browser=_login_browser,
                 msg="所属租户已被禁用",
+                tenant_id=user.tenant_id,
             )
-            raise CustomException(msg="所属租户已被禁用，请联系平台管理员")
+            raise CustomException(msg="所属租户已被禁用，请联系平台管理员", code=10401, status_code=401)
 
-        await UserCRUD(auth).update_last_login(id=user.id)
+        user_auth = AuthSchema(
+            db=db,
+            user=user,
+            tenant_id=user.tenant_id,
+            check_data_scope=False,
+        )
+        await UserCRUD(user_auth).update_last_login(id=user.id)
 
         if not user:
             raise CustomException(msg="用户不存在")
@@ -244,6 +268,7 @@ class LoginService:
             request_os=_login_os,
             request_browser=_login_browser,
             msg="登录成功",
+            tenant_id=user.tenant_id,
         )
         # 登录成功后异步补全归属地，不阻塞返回
         if log_id and login_location == "归属地查询中":
@@ -372,7 +397,7 @@ class LoginService:
         if not session_id or not user_id or not tenant_id:
             raise CustomException(msg="非法凭证,无法获取会话编号、用户ID或租户ID", code=10401, status_code=401)
 
-        auth = AuthSchema(db=db, check_data_scope=False)
+        auth = AuthSchema(db=db, tenant_id=tenant_id, check_data_scope=False)
         user = await UserCRUD(auth).get(id=user_id)
         if not user:
             raise CustomException(msg="刷新token失败，用户不存在", code=10401, status_code=401)
@@ -381,11 +406,11 @@ class LoginService:
 
         from sqlalchemy import select
 
-        from app.api.v1.module_platform.tenant.model import TenantModel, TenantUserModel
+        from app.api.v1.module_platform.tenant.model import TenantModel
 
         tenant_stmt = (
             select(TenantModel)
-            .where(TenantModel.id == tenant_id, TenantModel.status == 0, TenantModel.is_deleted.is_(False))
+            .where(TenantModel.id == tenant_id, TenantModel.status.in_((0, 1)), TenantModel.is_deleted.is_(False))
             .limit(1)
         )
         tenant_result = await db.execute(tenant_stmt)
@@ -476,14 +501,14 @@ class LoginService:
         """获取用户关联的租户列表"""
         from sqlalchemy import select
 
-        from app.api.v1.module_platform.tenant.model import TenantModel, TenantUserModel
+        from app.api.v1.module_platform.tenant.model import TenantModel
 
         uid = user_id or (self.auth.user.id if self.auth.user else None)
         if not uid:
             return []
 
         if self.auth.user and self.auth.user.is_superuser:
-            stmt = select(TenantModel).where(TenantModel.status == 0, TenantModel.is_deleted.is_(False)).order_by(TenantModel.sort, TenantModel.id)
+            stmt = select(TenantModel).where(TenantModel.status.in_((0, 1)), TenantModel.is_deleted.is_(False)).order_by(TenantModel.sort, TenantModel.id)
             result = await self.auth.db.execute(stmt)
             tenant_objs = result.scalars().all()
             return [TenantOptionSchema(id=t.id, name=t.name, code=t.code) for t in tenant_objs]
@@ -493,7 +518,7 @@ class LoginService:
             .join(TenantUserModel, TenantUserModel.tenant_id == TenantModel.id)
             .where(
                 TenantUserModel.user_id == uid,
-                TenantModel.status == 0,
+                TenantModel.status.in_((0, 1)),
                 TenantModel.is_deleted.is_(False),
             )
             .order_by(TenantUserModel.is_default.desc(), TenantModel.sort, TenantModel.id)
@@ -511,7 +536,7 @@ class LoginService:
         """选择租户：验证用户归属并签发含租户上下文的新 JWT Token"""
         from sqlalchemy import select
 
-        from app.api.v1.module_platform.tenant.model import TenantModel, TenantUserModel
+        from app.api.v1.module_platform.tenant.model import TenantModel
 
         if not self.auth.user:
             raise CustomException(msg="未认证用户")
@@ -529,7 +554,7 @@ class LoginService:
             if not result.scalar_one_or_none():
                 raise CustomException(msg="您不属于该租户，无法切换")
 
-        tenant_stmt = select(TenantModel).where(TenantModel.id == tenant_id, TenantModel.status == 0, TenantModel.is_deleted.is_(False)).limit(1)
+        tenant_stmt = select(TenantModel).where(TenantModel.id == tenant_id, TenantModel.status.in_((0, 1)), TenantModel.is_deleted.is_(False)).limit(1)
         result = await self.auth.db.execute(tenant_stmt)
         tenant = result.scalar_one_or_none()
         if not tenant:
@@ -778,10 +803,10 @@ class TenantRegisterService:
         from sqlalchemy import func, select
         from sqlalchemy.exc import IntegrityError
 
-        from app.api.v1.module_platform.package.model import PackageMenuModel, PackageModel
+        from app.api.v1.module_platform.package.model import PackageModel
         from app.api.v1.module_platform.tenant.model import TenantModel
-        from app.api.v1.module_system.role.model import RoleMenusModel, RoleModel
-        from app.api.v1.module_system.user.model import UserModel, UserRolesModel
+        from app.api.v1.module_platform.tenant.service import TenantService
+        from app.api.v1.module_system.user.model import UserModel
 
         exists_stmt = (
             select(func.count())
@@ -826,35 +851,7 @@ class TenantRegisterService:
         db.add(user)
         await db.flush()
 
-        owner_role = RoleModel(
-            name="租户管理员",
-            code="owner",
-            tenant_id=tenant.id,
-            order=1,
-            data_scope=4,
-            description="自助注册创建的管理员角色",
-        )
-        db.add(owner_role)
-        await db.flush()
-
-        user_role = UserRolesModel(user_id=user.id, role_id=owner_role.id)
-        db.add(user_role)
-        db.add(
-            TenantUserModel(
-                user_id=user.id,
-                tenant_id=tenant.id,
-                role="owner",
-                is_default=1,
-            )
-        )
-
-        if default_pkg:
-            pkg_menu_stmt = select(PackageMenuModel).where(
-                PackageMenuModel.package_id == default_pkg.id,
-            )
-            pkg_menus = (await db.execute(pkg_menu_stmt)).scalars().all()
-            for pm in pkg_menus:
-                db.add(RoleMenusModel(role_id=owner_role.id, menu_id=pm.menu_id))
+        await TenantService.ensure_tenant_owner(db, tenant.id, user.id)
 
         try:
             await db.commit()

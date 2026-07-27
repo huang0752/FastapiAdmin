@@ -6,19 +6,33 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from starlette.requests import Request
 
+from app.api.v1.module_platform.menu.model import MenuModel
 from app.api.v1.module_platform.package.model import PackagePluginModel
+from app.api.v1.module_platform.package.schema import PackageMenuSetSchema, PackagePluginSetSchema
+from app.api.v1.module_platform.package.service import PackageService
 from app.api.v1.module_platform.plugin.model import PluginModel, TenantPluginModel
-from app.api.v1.module_platform.tenant.model import TenantUserModel
-from app.api.v1.module_system.user.model import UserModel
+from app.api.v1.module_platform.tenant.model import TenantModel, TenantUserModel
+from app.api.v1.module_platform.tenant.schema import (
+    TenantCreateSchema,
+    TenantOutSchema,
+    TenantQueryParam,
+    TenantUpdateSchema,
+)
+from app.api.v1.module_platform.tenant.service import TenantService
+from app.api.v1.module_system.role.model import RoleMenusModel, RoleModel
+from app.api.v1.module_system.user.model import UserModel, UserRolesModel
 from app.config.setting import settings
 from app.core.base_schema import AuthSchema, JWTPayloadSchema
 from app.core.database import async_db_session
@@ -57,6 +71,75 @@ async def _get_membership(username: str, tenant_id: int) -> TenantUserModel | No
                 .limit(1)
             )
         ).scalar_one_or_none()
+
+
+_OWNER_REQUIRED_PERMISSIONS = {
+    "module_platform:workspace:query",
+    "module_system:dept:create",
+    "module_system:dept:delete",
+    "module_system:dept:query",
+    "module_system:dept:update",
+    "module_system:position:create",
+    "module_system:position:delete",
+    "module_system:position:detail",
+    "module_system:position:patch",
+    "module_system:position:query",
+    "module_system:position:update",
+    "module_system:role:create",
+    "module_system:role:delete",
+    "module_system:role:permission",
+    "module_system:role:query",
+    "module_system:role:update",
+    "module_system:user:create",
+    "module_system:user:delete",
+    "module_system:user:query",
+    "module_system:user:update",
+}
+
+
+async def _get_owner_access(username: str, tenant_id: int) -> tuple[TenantUserModel | None, list[RoleModel], set[str]]:
+    async with async_db_session() as db:
+        user = (
+            await db.execute(select(UserModel).where(UserModel.username == username).limit(1))
+        ).scalar_one()
+        membership = (
+            await db.execute(
+                select(TenantUserModel)
+                .where(TenantUserModel.user_id == user.id, TenantUserModel.tenant_id == tenant_id)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        owner_roles = (
+            await db.execute(
+                select(RoleModel)
+                .join(UserRolesModel, UserRolesModel.role_id == RoleModel.id)
+                .where(
+                    UserRolesModel.user_id == user.id,
+                    RoleModel.tenant_id == tenant_id,
+                    RoleModel.code == "owner",
+                )
+            )
+        ).scalars().all()
+        if not owner_roles:
+            return membership, [], set()
+        menu_rows = (
+            await db.execute(
+                select(MenuModel.permission, MenuModel.scope)
+                .join(RoleMenusModel, RoleMenusModel.menu_id == MenuModel.id)
+                .where(RoleMenusModel.role_id == owner_roles[0].id)
+            )
+        ).all()
+        assert all(scope == "tenant" for _, scope in menu_rows)
+        return membership, owner_roles, {permission for permission, _ in menu_rows if permission}
+
+
+def _assert_owner_access(username: str, tenant_id: int) -> None:
+    membership, owner_roles, permissions = asyncio.run(_get_owner_access(username, tenant_id))
+    assert membership is not None
+    assert membership.role == "owner"
+    assert membership.is_default == 1
+    assert len(owner_roles) == 1
+    assert _OWNER_REQUIRED_PERMISSIONS <= permissions
 
 
 def _create_user(test_client: TestClient, auth_headers: dict[str, str], username: str, password: str, mobile: str | None = None) -> None:
@@ -360,12 +443,22 @@ def test_tenant_register_creates_membership_and_allows_login(test_client: TestCl
 
     assert info_resp.status_code == 200, info_resp.text
     assert info_resp.json()["data"]["username"] == username
+    _assert_owner_access(username, register_resp.json()["data"]["tenant_id"])
 
 
 def test_platform_tenant_create_adds_initial_admin_membership(
     test_client: TestClient,
     auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.api.v1.module_platform.tenant import service as tenant_service_module
+
+    log_messages: list[str] = []
+    monkeypatch.setattr(
+        tenant_service_module.logger,
+        "info",
+        lambda message, *args, **kwargs: log_messages.append(str(message)),
+    )
     suffix = str(time.time_ns() % 1_000_000_000_000)
     code = f"T{suffix}"
 
@@ -375,15 +468,385 @@ def test_platform_tenant_create_adds_initial_admin_membership(
         json={"name": f"租户{suffix}", "code": code},
     )
     assert resp.status_code == 200, resp.text
-    tenant_id = resp.json()["data"]["id"]
+    response_data = resp.json()["data"]
+    tenant_id = response_data["id"]
+    credentials = response_data["initial_admin"]
 
-    import asyncio
+    assert credentials["username"] == f"{code}_admin"
+    assert len(credentials["password"]) == 12
+    assert credentials["password"] not in "\n".join(log_messages)
+    _login(test_client, credentials["username"], credentials["password"])
 
-    membership = asyncio.run(_get_membership(f"{code}_admin", tenant_id))
+    _assert_owner_access(f"{code}_admin", tenant_id)
 
-    assert membership is not None
-    assert membership.role == "owner"
-    assert membership.is_default == 1
+
+async def _verify_package_mutations_require_superadmin() -> None:
+    async with async_db_session() as db:
+        auth = AuthSchema(db=db, tenant_id=2, check_data_scope=False)
+        auth.user = SimpleNamespace(is_superuser=False)
+        calls = (
+            PackageService(auth).set_menus(999999, PackageMenuSetSchema(menu_ids=[])),
+            PackageService(auth).set_plugins(999999, PackagePluginSetSchema(plugin_ids=[])),
+        )
+        statuses: list[int | None] = []
+        for call in calls:
+            try:
+                await call
+            except CustomException as exc:
+                statuses.append(exc.status_code)
+            else:
+                statuses.append(None)
+        assert statuses == [403, 403]
+        await db.rollback()
+
+
+def test_package_mutations_require_superadmin_at_service_boundary() -> None:
+    asyncio.run(_verify_package_mutations_require_superadmin())
+
+
+async def _set_tenant_status(tenant_id: int, status: int) -> None:
+    async with async_db_session() as db:
+        await db.execute(
+            update(TenantModel)
+            .where(TenantModel.id == tenant_id)
+            .values(status=status)
+        )
+        await db.commit()
+
+
+def test_grace_tenant_can_login_refresh_and_use_session_but_expired_cannot(
+    test_client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    suffix = str(time.time_ns() % 1_000_000_000_000)
+    code = f"G{suffix}"
+    create_resp = test_client.post(
+        "/platform/tenant/create",
+        headers=auth_headers,
+        json={"name": f"宽限期租户{suffix}", "code": code},
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    response_data = create_resp.json()["data"]
+    tenant_id = response_data["id"]
+    credentials = response_data["initial_admin"]
+
+    asyncio.run(_set_tenant_status(tenant_id, 1))
+    grace_login = _login(test_client, credentials["username"], credentials["password"])
+    current_resp = test_client.get(
+        "/system/user/current/info",
+        headers={"Authorization": f"Bearer {grace_login['access_token']}"},
+    )
+    refresh_resp = test_client.post(
+        "/system/auth/token/refresh",
+        json={"refresh_token": grace_login["refresh_token"]},
+    )
+    assert current_resp.status_code == 200, current_resp.text
+    assert refresh_resp.status_code == 200, refresh_resp.text
+    refreshed = refresh_resp.json()["data"]
+
+    asyncio.run(_set_tenant_status(tenant_id, 2))
+    denied_login = test_client.post(
+        "/system/auth/login",
+        data={
+            "username": credentials["username"],
+            "password": credentials["password"],
+            "login_type": "PC端",
+        },
+    )
+    denied_session = test_client.get(
+        "/system/user/current/info",
+        headers={"Authorization": f"Bearer {refreshed['access_token']}"},
+    )
+    denied_refresh = test_client.post(
+        "/system/auth/token/refresh",
+        json={"refresh_token": refreshed["refresh_token"]},
+    )
+    assert denied_login.status_code == 401
+    assert denied_session.status_code == 401
+    assert denied_refresh.status_code == 401
+
+
+async def _verify_ownerless_membership_is_not_promoted() -> None:
+    from app.scripts.initialize import InitializeData
+
+    suffix = str(time.time_ns() % 1_000_000_000_000)
+    async with async_db_session() as db:
+        tenant = TenantModel(name=f"无 owner 租户{suffix}", code=f"O{suffix}", status=0)
+        db.add(tenant)
+        await db.flush()
+        user = UserModel(
+            username=f"ownerless_{suffix}",
+            password="not-a-plaintext-password",
+            name="普通成员",
+            tenant_id=tenant.id,
+            is_superuser=False,
+            status=0,
+        )
+        db.add(user)
+        await db.flush()
+        membership = TenantUserModel(
+            user_id=user.id,
+            tenant_id=tenant.id,
+            role="member",
+            is_default=1,
+        )
+        db.add(membership)
+        await db.flush()
+
+        await InitializeData()._InitializeData__backfill_tenant_memberships(db)
+        await db.refresh(membership)
+        owner_role = (
+            await db.execute(
+                select(RoleModel)
+                .where(RoleModel.tenant_id == tenant.id, RoleModel.code == "owner")
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        assert membership.role == "member"
+        assert owner_role is None
+        await db.rollback()
+
+
+def test_initializer_does_not_promote_first_user_for_ownerless_tenant() -> None:
+    asyncio.run(_verify_ownerless_membership_is_not_promoted())
+
+
+def test_tenant_create_schema_starts_only_in_active_status() -> None:
+    TenantCreateSchema(name="正常租户", code="NormalTenant", status=0)
+    with pytest.raises(ValueError):
+        TenantCreateSchema(name="非法初始状态", code="BadTenant", status=1)
+
+
+def test_tenant_update_and_query_accept_all_lifecycle_statuses() -> None:
+    for status in range(6):
+        assert TenantUpdateSchema(status=status).status == status
+        query = TenantQueryParam(status=status)
+        assert query.status is not None
+        assert query.status[-1] == status
+
+    with pytest.raises(ValueError):
+        TenantUpdateSchema(status=6)
+    with pytest.raises(ValueError):
+        TenantQueryParam(status=6)
+
+
+def test_tenant_out_serializes_all_lifecycle_statuses() -> None:
+    for status in range(6):
+        payload = TenantOutSchema(name="生命周期租户", code="Lifecycle", status=status)
+        assert payload.model_dump()["status"] == status
+
+
+def test_tenant_batch_status_accepts_only_active_or_suspended() -> None:
+    from app.api.v1.module_platform.tenant.schema import TenantBatchStatusSchema
+
+    assert TenantBatchStatusSchema(ids=[2], status=0).status == 0
+    assert TenantBatchStatusSchema(ids=[2], status=2).status == 2
+    with pytest.raises(ValueError):
+        TenantBatchStatusSchema(ids=[2], status=1)
+
+
+async def _verify_tenant_manual_status_toggle() -> None:
+    suffix = str(time.time_ns() % 1_000_000_000_000)
+    async with async_db_session() as db:
+        tenant = TenantModel(name=f"手工暂停租户{suffix}", code=f"M{suffix}", status=0)
+        db.add(tenant)
+        await db.flush()
+        auth = AuthSchema(db=db, tenant_id=1, check_data_scope=False)
+        auth.user = SimpleNamespace(is_superuser=True)
+        service = TenantService(auth)
+
+        await service.toggle_status(tenant.id)
+        await db.refresh(tenant)
+        assert tenant.status == 2
+
+        await service.toggle_status(tenant.id)
+        await db.refresh(tenant)
+        assert tenant.status == 0
+        await db.rollback()
+
+
+def test_tenant_manual_toggle_uses_suspended_not_grace(test_client: TestClient) -> None:
+    asyncio.run(_verify_tenant_manual_status_toggle())
+
+
+async def _resolve_package_menu_seed() -> None:
+    from app.scripts.initialize import InitializeData
+
+    async with async_db_session() as db:
+        dept = (
+            await db.execute(select(MenuModel).where(MenuModel.route_name == "Dept").limit(1))
+        ).scalar_one()
+        assert dept.parent_id is not None
+
+        rows = await InitializeData().resolve_package_menu_seed(
+            db,
+            [{"package_code": "basic", "menus": [{"route_name": "Dept"}]}],
+        )
+        resolved_ids = {row["menu_id"] for row in rows}
+        assert dept.id in resolved_ids
+        assert dept.parent_id in resolved_ids
+
+        platform_menu = (
+            await db.execute(
+                select(MenuModel)
+                .where(
+                    MenuModel.scope == "platform",
+                    MenuModel.route_name.is_not(None),
+                )
+                .limit(1)
+            )
+        ).scalar_one()
+        with pytest.raises(ValueError, match="platform"):
+            await InitializeData().resolve_package_menu_seed(
+                db,
+                [{"package_code": "basic", "menus": [{"route_name": platform_menu.route_name}]}],
+            )
+
+
+def test_package_menu_seed_uses_stable_identities_and_resolves_parents() -> None:
+    seed_path = Path(__file__).parents[1] / "app/scripts/data/platform_package_menu.json"
+    seed_rows = json.loads(seed_path.read_text(encoding="utf-8"))
+
+    assert seed_rows
+    assert all("package_code" in row and row.get("menus") for row in seed_rows)
+    assert all("menu_id" not in row and "package_id" not in row for row in seed_rows)
+    asyncio.run(_resolve_package_menu_seed())
+
+
+async def _verify_package_menu_sync() -> None:
+    from app.core.dependencies import _package_menu_cache
+
+    async with async_db_session() as db:
+        auth = AuthSchema(db=db, tenant_id=1, check_data_scope=False)
+        auth.user = SimpleNamespace(is_superuser=True)
+        owner_role = (
+            await db.execute(
+                select(RoleModel)
+                .where(RoleModel.tenant_id == 2, RoleModel.code == "owner")
+                .limit(1)
+            )
+        ).scalar_one()
+        staff_role = (
+            await db.execute(
+                select(RoleModel)
+                .where(RoleModel.tenant_id == 2, RoleModel.code == "TEST_STAFF")
+                .limit(1)
+            )
+        ).scalar_one()
+        optional_menu = (
+            await db.execute(select(MenuModel).where(MenuModel.route_name == "Dict").limit(1))
+        ).scalar_one()
+        assert optional_menu.parent_id is not None
+
+        await db.execute(
+            delete(RoleMenusModel).where(
+                RoleMenusModel.role_id.in_([owner_role.id, staff_role.id]),
+                RoleMenusModel.menu_id == optional_menu.id,
+            )
+        )
+        _package_menu_cache[2] = (time.time(), [999999])
+        await PackageService(auth).set_menus(2, PackageMenuSetSchema(menu_ids=[optional_menu.id]))
+
+        owner_ids = set(
+            (
+                await db.execute(
+                    select(RoleMenusModel.menu_id).where(RoleMenusModel.role_id == owner_role.id)
+                )
+            ).scalars().all()
+        )
+        assert {optional_menu.id, optional_menu.parent_id} <= owner_ids
+        assert 2 not in _package_menu_cache
+
+        if optional_menu.id not in set(
+            (
+                await db.execute(
+                    select(RoleMenusModel.menu_id).where(RoleMenusModel.role_id == staff_role.id)
+                )
+            ).scalars().all()
+        ):
+            db.add(RoleMenusModel(role_id=staff_role.id, menu_id=optional_menu.id))
+            await db.flush()
+
+        _package_menu_cache[2] = (time.time(), [optional_menu.id])
+        await PackageService(auth).set_menus(2, PackageMenuSetSchema(menu_ids=[]))
+
+        owner_ids = set(
+            (
+                await db.execute(
+                    select(RoleMenusModel.menu_id).where(RoleMenusModel.role_id == owner_role.id)
+                )
+            ).scalars().all()
+        )
+        owner_permissions = set(
+            (
+                await db.execute(
+                    select(MenuModel.permission)
+                    .join(RoleMenusModel, RoleMenusModel.menu_id == MenuModel.id)
+                    .where(RoleMenusModel.role_id == owner_role.id)
+                )
+            ).scalars().all()
+        )
+        staff_ids = set(
+            (
+                await db.execute(
+                    select(RoleMenusModel.menu_id).where(RoleMenusModel.role_id == staff_role.id)
+                )
+            ).scalars().all()
+        )
+        assert optional_menu.id not in owner_ids
+        assert optional_menu.id not in staff_ids
+        assert _OWNER_REQUIRED_PERMISSIONS <= owner_permissions
+        assert 2 not in _package_menu_cache
+        await db.rollback()
+
+
+def test_package_menu_changes_sync_owner_roles_and_invalidate_cache() -> None:
+    asyncio.run(_verify_package_menu_sync())
+
+
+async def _verify_expiry_transitions() -> None:
+    now = datetime.now()
+    suffix = str(time.time_ns() % 1_000_000_000)
+    expected_by_code = {
+        f"E{suffix}A": (2, 1),
+        f"E{suffix}B": (8, 2),
+        f"E{suffix}C": (15, 3),
+        f"E{suffix}D": (31, 4),
+    }
+    async with async_db_session() as db:
+        for index, (code, (days_past, expected_status)) in enumerate(expected_by_code.items()):
+            db.add(
+                TenantModel(
+                    name=f"到期状态测试{suffix}{index}",
+                    code=code,
+                    end_time=now - timedelta(days=days_past),
+                    status=max(0, expected_status - 1),
+                )
+            )
+        await db.commit()
+
+    try:
+        await TenantService.check_tenant_expiry()
+        async with async_db_session() as db:
+            rows = (
+                await db.execute(
+                    select(TenantModel.code, TenantModel.status).where(
+                        TenantModel.code.in_(expected_by_code)
+                    )
+                )
+            ).all()
+            assert dict(rows) == {
+                code: expected_status
+                for code, (_, expected_status) in expected_by_code.items()
+            }
+    finally:
+        async with async_db_session() as db:
+            await db.execute(delete(TenantModel).where(TenantModel.code.in_(expected_by_code)))
+            await db.commit()
+
+
+def test_expiry_state_machine_advances_transitional_tenants() -> None:
+    asyncio.run(_verify_expiry_transitions())
 
 
 def test_oauth_unsupported_provider_does_not_redirect_to_untrusted_uri(test_client: TestClient) -> None:

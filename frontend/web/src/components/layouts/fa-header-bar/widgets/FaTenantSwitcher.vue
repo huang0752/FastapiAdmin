@@ -71,12 +71,17 @@
 import { ref, computed } from "vue";
 import { ElMessage } from "element-plus";
 import { Loading } from "@element-plus/icons-vue";
-import { useUserStore } from "@stores";
+import { useDictStore, useNoticeStore, useUserStore, useWorktabStore } from "@stores";
 import { storeToRefs } from "pinia";
+import { router } from "@/router";
+import { clearTableRequestCaches } from "@/hooks/core/useTable";
 
 defineOptions({ name: "FaTenantSwitcher" });
 
 const userStore = useUserStore();
+const worktabStore = useWorktabStore();
+const dictStore = useDictStore();
+const noticeStore = useNoticeStore();
 const { tenantList, currentTenant } = storeToRefs(userStore);
 
 const dropdownVisible = ref(false);
@@ -94,11 +99,23 @@ async function handleSwitch(tenantId: number) {
     return;
   }
   switching.value = true;
+  dropdownVisible.value = false;
   try {
+    const { resetDynamicRoutesSync } = await import("@/router/beforeEach");
+    resetDynamicRoutesSync();
+    userStore.clearUserInfo();
+    userStore.prems = [];
+    userStore.searchHistory = [];
+    worktabStore.clearAll();
+    dictStore.clearDictData();
+    noticeStore.clearUserInfo();
+    sessionStorage.removeItem("iframeRoutes");
+    clearTableRequestCaches();
+
     await userStore.selectTenant(tenantId);
-    setTimeout(() => window.location.reload(), 200);
+    router.go(0);
   } catch {
-    switching.value = false;
+    router.go(0);
   }
 }
 </script>

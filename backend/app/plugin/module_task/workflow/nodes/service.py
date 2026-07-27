@@ -1,5 +1,6 @@
 
 from app.core.base_schema import AuthSchema
+from app.core.dependencies import require_superadmin
 from app.core.exceptions import CustomException
 
 from .crud import WorkflowNodeTypeCRUD
@@ -16,6 +17,10 @@ class WorkflowNodeTypeService:
 
     def __init__(self, auth: AuthSchema) -> None:
         self.auth = auth
+
+    def _ensure_platform_global(self) -> None:
+        if not self.auth.is_platform_global:
+            raise CustomException(msg="仅平台管理员可操作", code=10403, status_code=403)
 
     @staticmethod
     def _out(obj) -> WorkflowNodeTypeOutSchema:
@@ -73,7 +78,9 @@ class WorkflowNodeTypeService:
         result.items = [WorkflowNodeTypeOutSchema.model_validate(item).model_dump(mode="json") for item in result.items]
         return result
 
+    @require_superadmin
     async def create(self, data: WorkflowNodeTypeCreateSchema) -> WorkflowNodeTypeOutSchema:
+        self._ensure_platform_global()
         exist = await WorkflowNodeTypeCRUD(self.auth).get(code=data.code)
         if exist:
             raise CustomException(msg="节点编码已存在")
@@ -82,7 +89,9 @@ class WorkflowNodeTypeService:
             raise CustomException(msg="创建失败")
         return self._out(obj)
 
+    @require_superadmin
     async def update(self, id: int, data: WorkflowNodeTypeUpdateSchema) -> WorkflowNodeTypeOutSchema:
+        self._ensure_platform_global()
         exist = await WorkflowNodeTypeCRUD(self.auth).get_obj_by_id_crud(id=id)
         if not exist:
             raise CustomException(msg="节点类型不存在")
@@ -95,7 +104,9 @@ class WorkflowNodeTypeService:
             raise CustomException(msg="更新失败")
         return self._out(obj)
 
+    @require_superadmin
     async def delete(self, ids: list[int]) -> None:
+        self._ensure_platform_global()
         if not ids:
             raise CustomException(msg="删除ID不能为空")
         await WorkflowNodeTypeCRUD(self.auth).delete_obj_crud(ids=ids)

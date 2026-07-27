@@ -350,20 +350,34 @@ def reload_dynamic_router() -> APIRouter:
 
 def _purge_plugin_modules() -> None:
     """
-    从 sys.modules 中清除所有 app.plugin.module_* 模块，
-    使下一次 importlib.import_module 时重新执行模块代码。
+    从 ``sys.modules`` 中清除可安全热重载的插件模块。
+
+    SQLAlchemy 的声明式模型一旦注册到全局 ``Base.metadata``，便不能在同一
+    进程中重新执行对应 ``model.py``，否则会重复声明同名表。这里保留
+    ``model`` / ``models`` 模块，仅刷新 controller、service、schema 等业务
+    模块。涉及 ORM 模型定义的插件变更必须通过进程重启生效。
     """
     prefix = "app.plugin.module_"
     purged: list[str] = []
+    preserved_models: list[str] = []
     for mod_name in list(sys.modules):
-        if mod_name.startswith(prefix):
-            del sys.modules[mod_name]
-            purged.append(mod_name)
+        if not mod_name.startswith(prefix):
+            continue
+        if mod_name.rsplit(".", 1)[-1] in {"model", "models"}:
+            preserved_models.append(mod_name)
+            continue
+        del sys.modules[mod_name]
+        purged.append(mod_name)
 
     if purged:
         logger.info(f"🧹 已清除 {len(purged)} 个插件模块缓存，将重新导入")
     else:
         logger.info("🧹 未发现需要清除的插件模块缓存")
+    if preserved_models:
+        logger.info(
+            "🧱 已保留 {} 个 ORM 模型模块；模型定义变更需重启进程",
+            len(preserved_models),
+        )
 
 
 def _import_failure_hint(exc: BaseException) -> str:

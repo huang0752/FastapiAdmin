@@ -2,6 +2,66 @@ import { request, NO_AUTH_FLAG } from "@utils";
 
 const API_PATH = "/platform/tenant";
 
+export const TENANT_STATUS = {
+  ACTIVE: 0,
+  GRACE: 1,
+  SUSPENDED: 2,
+  FROZEN: 3,
+  EXPIRED: 4,
+  ARCHIVED: 5,
+} as const;
+
+export type TenantStatus = (typeof TENANT_STATUS)[keyof typeof TENANT_STATUS];
+export type TenantManualStatus = typeof TENANT_STATUS.ACTIVE | typeof TENANT_STATUS.SUSPENDED;
+
+type TenantStatusMeta = {
+  type: "primary" | "success" | "warning" | "danger" | "info";
+  text: string;
+};
+
+export const TENANT_STATUS_META = {
+  [TENANT_STATUS.ACTIVE]: { type: "success", text: "正常" },
+  [TENANT_STATUS.GRACE]: { type: "warning", text: "宽限期" },
+  [TENANT_STATUS.SUSPENDED]: { type: "danger", text: "暂停" },
+  [TENANT_STATUS.FROZEN]: { type: "danger", text: "冻结" },
+  [TENANT_STATUS.EXPIRED]: { type: "info", text: "过期" },
+  [TENANT_STATUS.ARCHIVED]: { type: "info", text: "归档" },
+} satisfies Record<TenantStatus, TenantStatusMeta>;
+
+export const TENANT_STATUS_OPTIONS: Array<{ label: string; value: TenantStatus }> = [
+  { label: "正常", value: TENANT_STATUS.ACTIVE },
+  { label: "宽限期", value: TENANT_STATUS.GRACE },
+  { label: "暂停", value: TENANT_STATUS.SUSPENDED },
+  { label: "冻结", value: TENANT_STATUS.FROZEN },
+  { label: "过期", value: TENANT_STATUS.EXPIRED },
+  { label: "归档", value: TENANT_STATUS.ARCHIVED },
+];
+
+export const TENANT_MANUAL_STATUS_OPTIONS: Array<{
+  label: string;
+  value: TenantManualStatus;
+}> = [
+  { label: "正常", value: TENANT_STATUS.ACTIVE },
+  { label: "暂停", value: TENANT_STATUS.SUSPENDED },
+];
+
+export interface TenantBatchStatusForm {
+  ids: number[];
+  status: TenantManualStatus;
+}
+
+export function resolveNextTenantManualStatus(status?: number): TenantManualStatus | null {
+  if (status === TENANT_STATUS.ACTIVE) return TENANT_STATUS.SUSPENDED;
+  if (status === TENANT_STATUS.SUSPENDED) return TENANT_STATUS.ACTIVE;
+  return null;
+}
+
+function assertTenantManualStatus(status: number): asserts status is TenantManualStatus {
+  if (status !== TENANT_STATUS.ACTIVE && status !== TENANT_STATUS.SUSPENDED) {
+    throw new Error("租户手工状态仅支持正常(0)或暂停(2)");
+  }
+}
+
 const TenantAPI = {
   listTenant(query?: TenantPageQuery) {
     return request<ApiResponse<PageResult<TenantTable>>>({
@@ -43,7 +103,8 @@ const TenantAPI = {
   },
 
   /** 批量修改租户状态 */
-  batchTenantStatus(body: BatchType) {
+  batchTenantStatus(body: TenantBatchStatusForm) {
+    assertTenantManualStatus(body.status);
     return request<ApiResponse>({
       url: `${API_PATH}/status/batch`,
       method: "patch",
@@ -51,12 +112,9 @@ const TenantAPI = {
     });
   },
 
-  /** 切换单个租户启用/禁用状态 */
-  toggleTenantStatus(id: number) {
-    return request<ApiResponse>({
-      url: `${API_PATH}/status/${id}`,
-      method: "put",
-    });
+  /** 显式设置单个租户的正常/暂停状态 */
+  toggleTenantStatus(id: number, status: TenantManualStatus) {
+    return this.batchTenantStatus({ ids: [id], status });
   },
 
   /** 租户续期 */
@@ -133,7 +191,7 @@ export default TenantAPI;
 export interface TenantPageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {
   name?: string;
   code?: string;
-  status?: number;
+  status?: TenantStatus;
 }
 
 export interface TenantTable extends BaseType {
@@ -158,7 +216,7 @@ export interface TenantTable extends BaseType {
   privacy?: string;
   clause?: string;
   git_code?: string;
-  status?: number;
+  status?: TenantStatus;
   description?: string;
 }
 
@@ -184,7 +242,7 @@ export interface TenantForm extends BaseFormType {
   privacy?: string;
   clause?: string;
   git_code?: string;
-  status?: number;
+  status?: TenantStatus;
   description?: string;
 }
 
@@ -210,7 +268,7 @@ export interface TenantCreateForm extends BaseFormType {
   privacy?: string;
   clause?: string;
   git_code?: string;
-  status?: number;
+  status?: TenantStatus;
   description?: string;
 }
 
@@ -236,7 +294,7 @@ export interface TenantUpdateForm extends BaseFormType {
   privacy?: string;
   clause?: string;
   git_code?: string;
-  status?: number;
+  status?: TenantStatus;
   description?: string;
 }
 

@@ -1,7 +1,9 @@
 
 import sqlalchemy as sa
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.module_platform.menu.model import MenuModel
 from app.api.v1.module_platform.tenant.model import TenantModel
 from app.core.base_schema import AuthSchema
 from app.core.dependencies import require_superadmin
@@ -17,6 +19,37 @@ from .schema import (
     PackagePluginSetSchema,
     PackageQueryParam,
     PackageUpdateSchema,
+)
+
+OWNER_REQUIRED_MENU_PERMISSIONS = frozenset(
+    {
+        "module_platform:workspace:query",
+        "module_system:dept:create",
+        "module_system:dept:delete",
+        "module_system:dept:detail",
+        "module_system:dept:patch",
+        "module_system:dept:query",
+        "module_system:dept:update",
+        "module_system:position:create",
+        "module_system:position:delete",
+        "module_system:position:detail",
+        "module_system:position:patch",
+        "module_system:position:query",
+        "module_system:position:update",
+        "module_system:role:create",
+        "module_system:role:delete",
+        "module_system:role:detail",
+        "module_system:role:patch",
+        "module_system:role:permission",
+        "module_system:role:query",
+        "module_system:role:update",
+        "module_system:user:create",
+        "module_system:user:delete",
+        "module_system:user:detail",
+        "module_system:user:patch",
+        "module_system:user:query",
+        "module_system:user:update",
+    }
 )
 
 
@@ -107,45 +140,173 @@ class PackageService:
         result = await self.auth.db.execute(stmt)
         return [row[0] for row in result.all()]
 
+    @staticmethod
+    async def expand_tenant_menu_ids(db: AsyncSession, menu_ids: set[int] | list[int]) -> set[int]:
+        """校验租户菜单范围并递归补齐父级目录。"""
+        pending = set(menu_ids)
+        resolved: set[int] = set()
+        while pending:
+            menus = (
+                await db.execute(select(MenuModel).where(MenuModel.id.in_(pending)))
+            ).scalars().all()
+            found_ids = {menu.id for menu in menus}
+            missing_ids = pending - found_ids
+            if missing_ids:
+                raise CustomException(msg=f"菜单不存在: {sorted(missing_ids)}")
+            platform_ids = sorted(menu.id for menu in menus if menu.scope != "tenant")
+            if platform_ids:
+                raise CustomException(msg=f"套餐不可包含 platform scope 菜单: {platform_ids}")
+            resolved.update(found_ids)
+            pending = {
+                menu.parent_id
+                for menu in menus
+                if menu.parent_id is not None and menu.parent_id not in resolved
+            }
+        return resolved
+
+    @staticmethod
+    async def get_owner_minimum_menu_ids(db: AsyncSession) -> set[int]:
+        """解析租户 owner 必备的组织管理与自助服务菜单。"""
+        menus = (
+            await db.execute(
+                select(MenuModel).where(
+                    MenuModel.permission.in_(OWNER_REQUIRED_MENU_PERMISSIONS),
+                    MenuModel.status == 0,
+                )
+            )
+        ).scalars().all()
+        found_permissions = {menu.permission for menu in menus}
+        missing = sorted(OWNER_REQUIRED_MENU_PERMISSIONS - found_permissions)
+        if missing:
+            raise CustomException(msg=f"租户 owner 必备菜单缺失: {missing}")
+        return await PackageService.expand_tenant_menu_ids(db, {menu.id for menu in menus})
+
+    @staticmethod
+    def invalidate_tenant_menu_cache(tenant_id: int, auth: AuthSchema | None = None) -> None:
+        """套餐或租户套餐变更后立即失效进程级与请求级菜单缓存。"""
+        from app.core.dependencies import _package_menu_cache
+
+        _package_menu_cache.pop(tenant_id, None)
+        if auth is not None and hasattr(auth, "_cached_package_menu_ids"):
+            delattr(auth, "_cached_package_menu_ids")
+
+    @staticmethod
+    async def sync_tenant_role_menus(
+        db: AsyncSession,
+        tenant_id: int,
+        available_ids: set[int],
+        owner_menu_ids: set[int] | None = None,
+    ) -> None:
+        """移除所有角色越权菜单，并把新增可用菜单同步给 owner 角色。"""
+        from app.api.v1.module_system.role.model import RoleMenusModel, RoleModel
+
+        role_ids = set(
+            (
+                await db.execute(select(RoleModel.id).where(RoleModel.tenant_id == tenant_id))
+            ).scalars().all()
+        )
+        if role_ids:
+            delete_stmt = sa.delete(RoleMenusModel).where(RoleMenusModel.role_id.in_(role_ids))
+            if available_ids:
+                delete_stmt = delete_stmt.where(RoleMenusModel.menu_id.notin_(available_ids))
+            await db.execute(delete_stmt)
+
+        owner_role = (
+            await db.execute(
+                select(RoleModel)
+                .where(RoleModel.tenant_id == tenant_id, RoleModel.code == "owner")
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if owner_role:
+            target_ids = owner_menu_ids if owner_menu_ids is not None else available_ids
+            current_ids = set(
+                (
+                    await db.execute(
+                        select(RoleMenusModel.menu_id).where(RoleMenusModel.role_id == owner_role.id)
+                    )
+                ).scalars().all()
+            )
+            for menu_id in target_ids - current_ids:
+                db.add(RoleMenusModel(role_id=owner_role.id, menu_id=menu_id))
+        await db.flush()
+
+    @require_superadmin
     async def set_menus(self, package_id: int, data: PackageMenuSetSchema) -> None:
+        await PackageCRUD(self.auth).get_or_404(id=package_id)
+        resolved_ids = await self.expand_tenant_menu_ids(self.auth.db, data.menu_ids)
         await self.auth.db.execute(sa.delete(PackageMenuModel).where(PackageMenuModel.package_id == package_id))
-        for menu_id in data.menu_ids:
+        for menu_id in resolved_ids:
             self.auth.db.add(PackageMenuModel(package_id=package_id, menu_id=menu_id))
         await self.auth.db.flush()
-        logger.info(f"套餐[{package_id}]菜单权限已设置, count={len(data.menu_ids)}")
+
+        tenant_ids = set(
+            (
+                await self.auth.db.execute(
+                    select(TenantModel.id).where(TenantModel.package_id == package_id)
+                )
+            ).scalars().all()
+        )
+        owner_minimum_ids = await self.get_owner_minimum_menu_ids(self.auth.db)
+        available_ids = resolved_ids | owner_minimum_ids
+        for tenant_id in tenant_ids:
+            await self.sync_tenant_role_menus(
+                self.auth.db,
+                tenant_id,
+                available_ids,
+                owner_menu_ids=available_ids,
+            )
+            self.invalidate_tenant_menu_cache(tenant_id, self.auth)
+        logger.info(f"套餐[{package_id}]菜单权限已设置, count={len(resolved_ids)}, tenants={len(tenant_ids)}")
 
     async def get_package_menu_ids(self, package_id: int) -> list[int]:
-        stmt = select(PackageMenuModel.menu_id).where(PackageMenuModel.package_id == package_id)
+        stmt = (
+            select(PackageMenuModel.menu_id)
+            .join(MenuModel, MenuModel.id == PackageMenuModel.menu_id)
+            .where(
+                PackageMenuModel.package_id == package_id,
+                MenuModel.scope == "tenant",
+                MenuModel.status == 0,
+            )
+        )
         result = await self.auth.db.execute(stmt)
         return [row[0] for row in result.all()]
 
     async def get_tenant_available_menu_ids(self, tenant_id: int) -> list[int]:
-        from app.api.v1.module_platform.menu.model import MenuModel
-        from app.api.v1.module_platform.tenant.model import TenantModel
+        auth = self.auth if isinstance(self, PackageService) else self
 
         if tenant_id == 1:
             menu_stmt = select(MenuModel.id).where(MenuModel.status == 0)
-            result = await self.auth.db.execute(menu_stmt)
+            result = await auth.db.execute(menu_stmt)
             return [row[0] for row in result.all()]
 
         stmt = select(TenantModel).where(TenantModel.id == tenant_id).limit(1)
-        result = await self.auth.db.execute(stmt)
+        result = await auth.db.execute(stmt)
         tenant = result.scalar_one_or_none()
         if not tenant:
             return []
 
+        owner_minimum_ids = await PackageService.get_owner_minimum_menu_ids(auth.db)
         if not tenant.package_id:
-            return []
+            return sorted(owner_minimum_ids)
 
         pkg_stmt = select(PackageModel.status).where(PackageModel.id == tenant.package_id).limit(1)
-        pkg_result = await self.auth.db.execute(pkg_stmt)
+        pkg_result = await auth.db.execute(pkg_stmt)
         pkg_status = pkg_result.scalar_one_or_none()
         if pkg_status != 0:
-            return []
+            return sorted(owner_minimum_ids)
 
-        menu_stmt = select(PackageMenuModel.menu_id).where(PackageMenuModel.package_id == tenant.package_id)
-        result = await self.auth.db.execute(menu_stmt)
-        return [row[0] for row in result.all()]
+        menu_stmt = (
+            select(PackageMenuModel.menu_id)
+            .join(MenuModel, MenuModel.id == PackageMenuModel.menu_id)
+            .where(
+                PackageMenuModel.package_id == tenant.package_id,
+                MenuModel.scope == "tenant",
+                MenuModel.status == 0,
+            )
+        )
+        result = await auth.db.execute(menu_stmt)
+        return sorted(owner_minimum_ids | set(result.scalars().all()))
 
     async def get_tenant_available_plugin_ids(self, tenant_id: int) -> list[int]:
         from app.api.v1.module_platform.tenant.model import TenantModel
@@ -171,6 +332,7 @@ class PackageService:
         result = await self.auth.db.execute(stmt)
         return [row[0] for row in result.all()]
 
+    @require_superadmin
     async def set_plugins(self, package_id: int, data: PackagePluginSetSchema) -> None:
         await self.auth.db.execute(sa.delete(PackagePluginModel).where(PackagePluginModel.package_id == package_id))
         for plugin_id in data.plugin_ids:

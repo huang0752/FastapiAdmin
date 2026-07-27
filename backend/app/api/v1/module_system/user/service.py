@@ -53,6 +53,21 @@ class UserService:
     def __init__(self, auth: AuthSchema) -> None:
         self.auth = auth
 
+    async def _get_unique_user_by_username(self, username: str):
+        """认证前账号查询必须在全局范围内唯一，避免跨租户误命中。"""
+        from app.api.v1.module_system.auth.service import get_unique_user_by_username
+
+        return await get_unique_user_by_username(self.auth.db, username)
+
+    def _auth_for_user(self, user) -> AuthSchema:
+        """为认证前唯一解析出的账号建立显式租户写入上下文。"""
+        return AuthSchema(
+            db=self.auth.db,
+            user=user,
+            tenant_id=user.tenant_id,
+            check_data_scope=False,
+        )
+
     async def _ensure_tenant_membership(self, user_id: int, tenant_id: int | None, role: str = "member") -> None:
         """确保用户和租户关系存在，用于登录后的租户上下文校验。"""
         if not tenant_id:
@@ -211,25 +226,29 @@ class UserService:
             user_dict.dept_name = user.dept.name
 
         _pc_only = {"client": "pc"}
-        if self.auth.user and self.auth.user.is_superuser:
+        if self.auth.is_platform_global:
             menu_all = await MenuCRUD(self.auth).tree_list(
                 search={"type": ("in", [1, 2, 3, 4]), "status": 0, **_pc_only},
                 order_by=[{"order": "asc"}],
             )
             menus = [MenuOutSchema.model_validate(menu) for menu in menu_all]
         else:
-            menu_ids = {menu.id for role in self.auth.user.roles or [] for menu in role.menus if menu.status == 0 and getattr(menu, "client", "pc") == "pc"}
-
-            if menu_ids and self.auth.tenant_id:
+            if self.auth.user.is_superuser and self.auth.tenant_id:
                 allowed_ids = await PackageService(self.auth).get_tenant_available_menu_ids(self.auth.tenant_id)
-                allowed_set = set(allowed_ids)
-                menu_ids = menu_ids & allowed_set
+                menu_ids = set(allowed_ids)
+            else:
+                menu_ids = {menu.id for role in self.auth.user.roles or [] for menu in role.menus if menu.status == 0 and getattr(menu, "client", "pc") == "pc"}
+
+                if menu_ids and self.auth.tenant_id:
+                    allowed_ids = await PackageService(self.auth).get_tenant_available_menu_ids(self.auth.tenant_id)
+                    allowed_set = set(allowed_ids)
+                    menu_ids = menu_ids & allowed_set
 
             menus = (
                 [
                     MenuOutSchema.model_validate(menu)
                     for menu in await MenuCRUD(self.auth).tree_list(
-                        search={"id": ("in", list(menu_ids)), **_pc_only},
+                        search={"id": ("in", sorted(menu_ids)), **_pc_only},
                         order_by=[{"order": "asc"}],
                     )
                 ]
@@ -317,7 +336,7 @@ class UserService:
         return await self.detail(result.id)
 
     async def forget_password(self, data: UserForgetPasswordSchema) -> UserOutSchema:
-        user = await UserCRUD(self.auth).get(username=data.username)
+        user = await self._get_unique_user_by_username(data.username)
         if not user:
             raise CustomException(msg="该数据不存在")
         if user.status == 1:
@@ -333,7 +352,10 @@ class UserService:
             raise CustomException(msg="手机号不匹配")
 
         new_password_hash = PwdUtil.hash_password(password=data.new_password)
-        new_user = await UserCRUD(self.auth).forget_password(id=user.id, password_hash=new_password_hash)
+        new_user = await UserCRUD(self._auth_for_user(user)).forget_password(
+            id=user.id,
+            password_hash=new_password_hash,
+        )
         return UserOutSchema.model_validate(new_user)
 
     @staticmethod
@@ -371,7 +393,11 @@ class UserService:
         if hourly_count >= PASSWORD_RESET_HOURLY_LIMIT:
             raise CustomException(msg="验证码请求次数过多，请稍后再试", status_code=status.HTTP_400_BAD_REQUEST)
 
-        user = await UserCRUD(self.auth).get(username=username)
+        try:
+            user = await self._get_unique_user_by_username(username)
+        except CustomException:
+            # 发送验证码接口保持防枚举语义；歧义账号不得发送，也不向外披露原因。
+            user = None
         should_send = (
             user is not None
             and user.status != 1
@@ -430,7 +456,7 @@ class UserService:
         if str(payload.get("code")) != data.code:
             raise CustomException(msg="验证码错误", status_code=status.HTTP_400_BAD_REQUEST)
 
-        user = await UserCRUD(self.auth).get(username=username)
+        user = await self._get_unique_user_by_username(username)
         if not user or user.id != payload.get("user_id") or str(user.email or "").strip().lower() != email:
             await redis_curd.delete(reset_key)
             raise CustomException(msg="验证码已过期或不存在", status_code=status.HTTP_400_BAD_REQUEST)
@@ -440,10 +466,13 @@ class UserService:
             raise CustomException(msg="超级管理员密码不能重置", status_code=status.HTTP_400_BAD_REQUEST)
 
         new_password_hash = PwdUtil.hash_password(password=data.new_password)
-        new_user = await UserCRUD(self.auth).forget_password(id=user.id, password_hash=new_password_hash)
+        user_crud = UserCRUD(self._auth_for_user(user))
+        await user_crud.forget_password(id=user.id, password_hash=new_password_hash)
+        new_user = await user_crud.get_or_404(id=user.id)
         await redis_curd.delete(reset_key)
+        response = UserOutSchema.model_validate(new_user)
         await self.auth.db.commit()
-        return UserOutSchema.model_validate(new_user)
+        return response
 
     async def batch_import(self, file: UploadFile, update_support: bool = False) -> str:
         header_dict = {

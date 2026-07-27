@@ -289,15 +289,32 @@ class PaymentService:
             raise CustomException(msg="支付回调验签失败")
 
         order_no = callback_data.get("order_no") or callback_data.get("out_trade_no", "")
-        o_crud = OrderCRUD(auth)
         order = None
         if order_no:
-            order = await o_crud.get_by_order_no(order_no)
+            order_stmt = (
+                select(OrderModel)
+                .where(
+                    OrderModel.order_no == order_no,
+                    OrderModel.is_deleted.is_(False),
+                )
+                .limit(1)
+            )
+            order = (await auth.db.execute(order_stmt)).scalar_one_or_none()
         elif callback_result.order_id:
-            order = await o_crud.get_by_id(callback_result.order_id)
+            order_stmt = (
+                select(OrderModel)
+                .where(
+                    OrderModel.id == callback_result.order_id,
+                    OrderModel.is_deleted.is_(False),
+                )
+                .limit(1)
+            )
+            order = (await auth.db.execute(order_stmt)).scalar_one_or_none()
 
         if not order:
             raise CustomException(msg="该数据不存在")
+        auth.tenant_id = order.tenant_id
+        o_crud = OrderCRUD(auth)
         if order.status != 0:
             raise CustomException(msg="订单状态异常")
         if order.amount != callback_result.amount and callback_result.amount > 0:

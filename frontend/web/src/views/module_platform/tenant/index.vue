@@ -215,8 +215,14 @@ import { useCrudDialog } from "@/hooks/core/useCrudDialog";
 import { useTableSelection } from "@/hooks/core/useTableSelection";
 import { confirmDelete, confirmBatchDelete } from "@/hooks/core/useConfirm";
 import TenantAPI, {
+  TENANT_MANUAL_STATUS_OPTIONS,
+  TENANT_STATUS,
+  TENANT_STATUS_META,
+  TENANT_STATUS_OPTIONS,
+  resolveNextTenantManualStatus,
   type TenantCreateForm,
   type TenantForm,
+  type TenantStatus,
   type TenantTable,
   type TenantUpdateForm,
 } from "@/api/module_platform/tenant";
@@ -241,7 +247,7 @@ const { hasAuth } = useAuth();
 type TenantSearchForm = {
   name?: string;
   code?: string;
-  status?: number;
+  status?: TenantStatus;
   created_time?: string[];
 };
 
@@ -261,9 +267,10 @@ function buildTenantRowActions(
     onDetail: (id: number) => void;
     onEdit: (id: number) => void;
     onDelete: (id: number) => void;
-    onToggleStatus: (id: number) => void;
+    onToggleStatus: (row: TenantTable) => void;
   }
 ): TableOperationAction[] {
+  const nextManualStatus = resolveNextTenantManualStatus(row.status);
   const all: TableOperationAction[] = [
     {
       key: "detail",
@@ -280,14 +287,21 @@ function buildTenantRowActions(
       perm: PLATFORM_TENANT_PERMISSIONS.update,
       run: () => ctx.onEdit(row.id!),
     },
-    {
-      key: "toggle",
-      label: row.status === 0 ? "禁用" : "启用",
-      artType: "edit",
-      icon: row.status === 0 ? "ri:forbid-2-line" : "ri:checkbox-circle-line",
-      perm: PLATFORM_TENANT_PERMISSIONS.patch,
-      run: () => ctx.onToggleStatus(row.id!),
-    },
+    ...(nextManualStatus === null
+      ? []
+      : [
+          {
+            key: "toggle",
+            label: nextManualStatus === TENANT_STATUS.SUSPENDED ? "暂停" : "启用",
+            artType: "edit" as const,
+            icon:
+              nextManualStatus === TENANT_STATUS.SUSPENDED
+                ? "ri:forbid-2-line"
+                : "ri:checkbox-circle-line",
+            perm: PLATFORM_TENANT_PERMISSIONS.patch,
+            run: () => ctx.onToggleStatus(row),
+          },
+        ]),
     {
       key: "delete",
       label: "删除",
@@ -310,11 +324,6 @@ const searchForm = ref<TenantSearchForm>({
 const showSearchBar = ref(true);
 const searchBarRef = ref<InstanceType<typeof FaSearchBar> | null>(null);
 const searchBarRules: Record<string, unknown> = {};
-
-const statusOptions = ref([
-  { label: "正常", value: 0 },
-  { label: "禁用", value: 1 },
-]);
 
 const tenantSearchItems = computed<SearchFormItem[]>(() => [
   {
@@ -339,7 +348,7 @@ const tenantSearchItems = computed<SearchFormItem[]>(() => [
     type: "select",
     props: {
       placeholder: "请选择状态",
-      options: statusOptions.value,
+      options: TENANT_STATUS_OPTIONS,
       clearable: true,
     },
     span: 6,
@@ -363,13 +372,15 @@ async function deleteTenantRow(id: number) {
   }
 }
 
-async function toggleTenantStatus(id: number) {
+async function toggleTenantStatus(row: TenantTable) {
+  const nextStatus = resolveNextTenantManualStatus(row.status);
+  if (nextStatus === null || row.id == null) return;
   try {
-    await TenantAPI.toggleTenantStatus(id);
+    await TenantAPI.toggleTenantStatus(row.id, nextStatus);
     // 直接更新当前行的 status，确保 UI 即时响应
-    const row = (data.value as TenantTable[]).find((item) => item.id === id);
-    if (row) {
-      row.status = row.status === 0 ? 1 : 0;
+    const currentRow = (data.value as TenantTable[]).find((item) => item.id === row.id);
+    if (currentRow) {
+      currentRow.status = nextStatus;
     }
     await refreshData();
   } catch {
@@ -415,10 +426,7 @@ const {
         prop: "status",
         label: "状态",
         width: 80,
-        status: {
-          0: { type: "success", text: "正常" },
-          1: { type: "danger", text: "禁用" },
-        },
+        status: TENANT_STATUS_META,
       },
       { prop: "contact_name", label: "联系人", minWidth: 100, showOverflowTooltip: true },
       { prop: "contact_phone", label: "联系电话", width: 110, showOverflowTooltip: true },
@@ -448,7 +456,7 @@ const tenantDetailItems: import("@/components/others/fa-descriptions/index.vue")
       label: "状态",
       prop: "status",
       tag: {
-        map: { 0: { type: "success", text: "正常" }, 1: { type: "danger", text: "禁用" } },
+        map: TENANT_STATUS_META,
       },
     },
     { label: "关联套餐ID", prop: "package_id" },
@@ -642,10 +650,15 @@ const basicFormItems = computed<FormItem[]>(() => [
     props: {
       placeholder: "请选择状态",
       style: { width: "100%" },
-      options: [
-        { label: "正常", value: 0 },
-        { label: "禁用", value: 1 },
-      ],
+      options:
+        dialogVisible.type === "create"
+          ? [TENANT_MANUAL_STATUS_OPTIONS[0]]
+          : resolveNextTenantManualStatus(formData.value.status) === null
+            ? TENANT_STATUS_OPTIONS
+            : TENANT_MANUAL_STATUS_OPTIONS,
+      disabled:
+        dialogVisible.type === "update" &&
+        resolveNextTenantManualStatus(formData.value.status) === null,
     },
   },
   {

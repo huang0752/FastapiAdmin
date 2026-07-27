@@ -132,6 +132,12 @@ class WorkflowService:
             raise CustomException(msg="工作流不存在")
         if obj.workflow_status != WORKFLOW_STATUS_PUBLISHED:
             raise CustomException(msg="仅已发布的工作流可执行")
+        if obj.tenant_id != 1:
+            raise CustomException(
+                msg="租户工作流不允许执行自定义 Python",
+                code=10403,
+                status_code=403,
+            )
 
         nodes = obj.nodes or []
         edges = obj.edges or []
@@ -164,6 +170,7 @@ class WorkflowService:
                 edges,
                 templates,
                 variables,
+                obj.tenant_id,
             )
         except ValueError as e:
             raise CustomException(msg=str(e)) from e

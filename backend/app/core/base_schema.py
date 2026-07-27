@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.validator import DateTimeStr
@@ -101,6 +101,32 @@ class AuthSchema(BaseModel):
     check_data_scope: bool = Field(default=True, description="是否检查数据权限")
     db: AsyncSession | None = Field(default=None, description="数据库会话", exclude=True)
     tenant_id: int | None = Field(default=None, description="租户ID,用于用户认证前查询")
+    _platform_global_read: bool = PrivateAttr(default=False)
+
+    @classmethod
+    def for_platform_global_read(cls, db: AsyncSession) -> "AuthSchema":
+        """创建后台任务使用的平台全局只读上下文。
+
+        该能力是私有属性，不能通过请求数据或普通模型构造参数开启；同时不赋予
+        ``is_platform_global`` 写权限，所有 TenantMixin 写操作仍会 fail closed。
+        """
+        auth = cls(db=db, check_data_scope=False)
+        auth._platform_global_read = True
+        return auth
+
+    @property
+    def is_platform_global(self) -> bool:
+        """是否处于平台全局管理模式。
+
+        超级管理员切换到普通租户后属于租户代管模式，数据查询仍应受当前
+        ``tenant_id`` 约束；只有系统租户 1 才允许绕过租户过滤。
+        """
+        return bool(self.user and self.user.is_superuser and self.tenant_id == 1)
+
+    @property
+    def has_platform_global_read(self) -> bool:
+        """是否允许读取跨租户平台数据（不包含任何写能力）。"""
+        return self.is_platform_global or self._platform_global_read
 
     def get_user(self) -> "UserModel | None":
         """类型化的用户访问方法。

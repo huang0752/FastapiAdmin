@@ -129,7 +129,6 @@ class TenantMixin(MappedBase):
         Integer,
         ForeignKey("platform_tenant.id", ondelete="RESTRICT", onupdate="CASCADE"),
         nullable=False,
-        default=1,
         index=True,
         comment="租户ID",
     )

@@ -70,6 +70,7 @@ def _topological_levels(nodes: list[dict], edges: list[dict]) -> list[list[dict]
 
 
 def _execute_node(
+    tenant_id: int,
     vue_node_id: str,
     node_type_code: str,
     code_block: str,
@@ -78,12 +79,12 @@ def _execute_node(
     upstream: dict[str, Any],
     flow_variables: dict[str, Any],
 ) -> Any:
-    job_id = f"wfnode-{vue_node_id}"
+    job_id = f"tenant:{tenant_id}:workflow-node:{vue_node_id}"
     args = _parse_args(args_str)
     kw = _parse_kwargs(kwargs_str)
     kw.setdefault("upstream", upstream)
     kw.setdefault("variables", flow_variables)
-    return SchedulerUtil._task_wrapper(job_id, code_block, *args, **kw)
+    return SchedulerUtil._task_wrapper(job_id, tenant_id, code_block, *args, **kw)
 
 
 def run_workflow_sync(
@@ -91,8 +92,11 @@ def run_workflow_sync(
     edges: list[dict],
     node_templates: dict[str, dict[str, Any]],
     flow_variables: dict[str, Any],
+    tenant_id: int,
 ) -> dict[str, Any]:
     """同步执行工作流：按拓扑层级分组，同层节点并行执行。"""
+    if tenant_id != 1:
+        raise PermissionError("租户工作流不允许执行自定义 Python")
     validate_workflow_graph(nodes, edges)
     levels = _topological_levels(nodes, edges)
     results: dict[str, Any] = {}
@@ -114,6 +118,7 @@ def run_workflow_sync(
                         upstream[e["source"]] = results[e["source"]]
                 futures[nid] = executor.submit(
                     _execute_node,
+                    tenant_id,
                     nid,
                     ntype,
                     tpl["func"],

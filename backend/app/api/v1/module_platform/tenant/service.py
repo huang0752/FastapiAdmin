@@ -1,13 +1,14 @@
 
 import json
-import random
+import secrets
 import string
 
 import sqlalchemy as sa
 from redis.asyncio.client import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import RedisInitKeyConfig
-from app.core.base_schema import AuthSchema, BatchSetAvailable
+from app.core.base_schema import AuthSchema
 from app.core.dependencies import require_superadmin
 from app.core.exceptions import CustomException
 from app.core.logger import logger
@@ -15,12 +16,14 @@ from app.core.redis_crud import RedisCURD
 from app.utils.hash_bcrpy_util import PwdUtil
 
 from .crud import TenantCRUD
-from .model import TenantModel, TenantUserModel
+from .model import TenantModel, TenantStatus, TenantUserModel
 from .schema import (
     PackageChangePreviewOut,
+    TenantBatchStatusSchema,
     TenantConfigItem,
     TenantConfigOutSchema,
     TenantCreateSchema,
+    TenantInitialAdminSchema,
     TenantOutSchema,
     TenantQueryParam,
     TenantUpdateSchema,
@@ -59,6 +62,109 @@ class TenantService:
 
     def __init__(self, auth: AuthSchema) -> None:
         self.auth = auth
+
+    @staticmethod
+    async def ensure_tenant_owner(
+        db: AsyncSession,
+        tenant_id: int,
+        user_id: int,
+        *,
+        is_default: int = 1,
+    ) -> None:
+        """幂等创建租户 owner 角色、成员关系、用户绑定和最低菜单授权。"""
+        from app.api.v1.module_platform.menu.model import MenuModel
+        from app.api.v1.module_platform.package.model import PackageMenuModel
+        from app.api.v1.module_platform.package.service import PackageService
+        from app.api.v1.module_system.role.model import RoleModel
+        from app.api.v1.module_system.user.model import UserRolesModel
+
+        membership = (
+            await db.execute(
+                sa.select(TenantUserModel)
+                .where(
+                    TenantUserModel.tenant_id == tenant_id,
+                    TenantUserModel.user_id == user_id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if membership is None:
+            db.add(
+                TenantUserModel(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    role="owner",
+                    is_default=is_default,
+                )
+            )
+        else:
+            membership.role = "owner"
+            membership.is_default = is_default
+
+        owner_role = (
+            await db.execute(
+                sa.select(RoleModel)
+                .where(RoleModel.tenant_id == tenant_id, RoleModel.code == "owner")
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if owner_role is None:
+            owner_role = RoleModel(
+                name="租户管理员",
+                code="owner",
+                tenant_id=tenant_id,
+                order=1,
+                status=0,
+                data_scope=4,
+                description="租户 owner 角色",
+            )
+            db.add(owner_role)
+            await db.flush()
+        else:
+            owner_role.status = 0
+            owner_role.data_scope = 4
+
+        user_role = (
+            await db.execute(
+                sa.select(UserRolesModel)
+                .where(
+                    UserRolesModel.user_id == user_id,
+                    UserRolesModel.role_id == owner_role.id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if user_role is None:
+            db.add(UserRolesModel(user_id=user_id, role_id=owner_role.id))
+        await db.flush()
+
+        owner_menu_ids = await PackageService.get_owner_minimum_menu_ids(db)
+        tenant = (
+            await db.execute(sa.select(TenantModel).where(TenantModel.id == tenant_id).limit(1))
+        ).scalar_one_or_none()
+        available_ids = set(owner_menu_ids)
+        if tenant and tenant.package_id:
+            package_menu_ids = set(
+                (
+                    await db.execute(
+                        sa.select(PackageMenuModel.menu_id)
+                        .join(MenuModel, MenuModel.id == PackageMenuModel.menu_id)
+                        .where(
+                            PackageMenuModel.package_id == tenant.package_id,
+                            MenuModel.scope == "tenant",
+                            MenuModel.status == 0,
+                        )
+                    )
+                ).scalars().all()
+            )
+            available_ids.update(package_menu_ids)
+        await PackageService.sync_tenant_role_menus(
+            db,
+            tenant_id,
+            available_ids,
+            owner_menu_ids=available_ids,
+        )
+        PackageService.invalidate_tenant_menu_cache(tenant_id)
 
     @require_superadmin
     async def detail(self, id: int) -> TenantOutSchema:
@@ -112,7 +218,7 @@ class TenantService:
 
         password_length = 12
         characters = string.ascii_letters + string.digits + "!@#$%^&*"
-        password = "".join(random.choice(characters) for _ in range(password_length))
+        password = "".join(secrets.choice(characters) for _ in range(password_length))
         admin_data = {
             "username": username,
             "password": PwdUtil.hash_password(password=password),
@@ -125,25 +231,22 @@ class TenantService:
             user_obj = await UserCRUD(self.auth).create(data=admin_data)
             if not user_obj:
                 raise CustomException(msg="创建租户初始管理员失败")
-            self.auth.db.add(
-                TenantUserModel(
-                    user_id=user_obj.id,
-                    tenant_id=tenant_obj.id,
-                    role="owner",
-                    is_default=1,
-                )
+            await self.ensure_tenant_owner(
+                self.auth.db,
+                tenant_obj.id,
+                user_obj.id,
             )
-            await self.auth.db.flush()
         except CustomException:
             raise
         except Exception as e:
             logger.error(f"为租户[{tenant_obj.name}]创建初始管理员失败: {e!s}")
             raise CustomException(msg="创建租户初始管理员失败") from e
 
-        logger.info(f"为租户[{tenant_obj.name}]创建初始管理员成功，用户名: {username}，临时密码: {password}")
+        logger.info(f"为租户[{tenant_obj.name}]创建初始管理员成功，用户名: {username}")
 
         await self.auth.db.refresh(tenant_obj)
         result = TenantOutSchema.model_validate(tenant_obj)
+        result.initial_admin = TenantInitialAdminSchema(username=username, password=password)
 
         return result
 
@@ -166,8 +269,8 @@ class TenantService:
         if id == 1:
             if data.code is not None and data.code != obj.code:
                 raise CustomException(msg="系统租户编码不可修改")
-            if data.status is not None and data.status == 1:
-                raise CustomException(msg="系统租户不允许禁用")
+            if data.status is not None and data.status != TenantStatus.ACTIVE:
+                raise CustomException(msg="系统租户必须保持正常状态")
 
         # 套餐变更：仅超管可操作，防止租户管理员自行升级/降级套餐
         if data.package_id is not None and data.package_id != old_package_id:
@@ -187,31 +290,19 @@ class TenantService:
         if not updated:
             raise CustomException(msg="更新失败")
 
-        # 套餐变更后：清理角色中不再可用的菜单关联，防止用户看到空白菜单
+        # 套餐变更后：收缩所有角色越权菜单，并把新增菜单补给 owner。
         if data.package_id is not None and data.package_id != old_package_id:
-            from sqlalchemy import delete as sa_delete
-            from sqlalchemy import select
-
             from app.api.v1.module_platform.package.service import PackageService
-            from app.api.v1.module_system.role.model import RoleMenusModel, RoleModel
 
-            available_ids = await PackageService(self.auth).get_tenant_available_menu_ids(id)
-            if available_ids:
-                role_ids_stmt = select(RoleModel.id).where(RoleModel.tenant_id == id)
-                result = await self.auth.db.execute(role_ids_stmt)
-                tenant_role_ids = [row[0] for row in result.all()]
-                if tenant_role_ids:
-                    await self.auth.db.execute(
-                        sa_delete(RoleMenusModel).where(
-                            RoleMenusModel.role_id.in_(tenant_role_ids),
-                            RoleMenusModel.menu_id.notin_(available_ids),
-                        )
-                    )
-                    await self.auth.db.flush()
-                    logger.info(
-                        f"租户[{id}]套餐变更：已清理角色中不再可用的菜单关联, "
-                        f"available_menus={len(available_ids)}, roles_affected={len(tenant_role_ids)}"
-                    )
+            available_ids = set(await PackageService(self.auth).get_tenant_available_menu_ids(id))
+            await PackageService.sync_tenant_role_menus(
+                self.auth.db,
+                id,
+                available_ids,
+                owner_menu_ids=available_ids,
+            )
+            PackageService.invalidate_tenant_menu_cache(id, self.auth)
+            logger.info(f"租户[{id}]套餐变更：角色菜单已同步, available_menus={len(available_ids)}")
 
         result = TenantOutSchema.model_validate(updated)
         return result
@@ -252,24 +343,24 @@ class TenantService:
         await TenantCRUD(self.auth).delete(ids=ids)
 
     @require_superadmin
-    async def set_available(self, data: BatchSetAvailable) -> None:
+    async def set_available(self, data: TenantBatchStatusSchema) -> None:
         """
         批量设置租户状态
 
         参数:
-        - data (BatchSetAvailable): 批量状态设置
+        - data (TenantBatchStatusSchema): 批量正常/暂停状态设置
 
         返回:
         - None
         """
-        if data.status == 1 and 1 in data.ids:
-            raise CustomException(msg="系统租户不允许禁用")
+        if data.status != TenantStatus.ACTIVE and 1 in data.ids:
+            raise CustomException(msg="系统租户必须保持正常状态")
         await TenantCRUD(self.auth).set(ids=data.ids, status=data.status)
 
     @require_superadmin
     async def toggle_status(self, id: int) -> None:
         """
-        切换单个租户的启用/禁用状态
+        切换单个租户的正常/暂停状态
 
         参数:
         - id (int): 租户ID
@@ -280,7 +371,13 @@ class TenantService:
         obj = await TenantCRUD(self.auth).get_or_404(id=id)
         if id == 1:
             raise CustomException(msg="系统租户不允许禁用")
-        new_status = 0 if obj.status == 1 else 1
+        if obj.status not in {TenantStatus.ACTIVE, TenantStatus.SUSPENDED}:
+            raise CustomException(msg="当前生命周期状态不支持手工启用/暂停，请先续期或恢复")
+        new_status = (
+            TenantStatus.SUSPENDED
+            if obj.status == TenantStatus.ACTIVE
+            else TenantStatus.ACTIVE
+        )
         await TenantCRUD(self.auth).set(ids=[id], status=new_status)
 
     @require_superadmin
@@ -643,7 +740,7 @@ class TenantService:
             async with session.begin():
                 from app.core.base_schema import AuthSchema as _AuthSchema
 
-                _auth = _AuthSchema(db=session, check_data_scope=False)
+                _auth = _AuthSchema.for_platform_global_read(session)
                 svc = TenantService(_auth)
                 config = await svc.get_config(tenant_id)
                 await TenantService._sync_configs_to_redis(redis, tenant_id, config)
@@ -787,7 +884,7 @@ class TenantService:
 
         if tenant.status not in (0, 1, 2):
             status_labels = {0: "正常", 1: "宽限期", 2: "暂停", 3: "冻结", 4: "过期", 5: "归档"}
-            current_label = status_labels.get(str(tenant.status), str(tenant.status))
+            current_label = status_labels.get(tenant.status, str(tenant.status))
             raise CustomException(msg=f"当前租户状态为「{current_label}」，仅正常/宽限期/暂停状态可续期")
 
         new_end = datetime.fromisoformat(end_time) if isinstance(end_time, str) else end_time
@@ -933,11 +1030,12 @@ class TenantService:
         now = datetime.now()
 
         async with async_db_session() as session:
-            # 获取所有已过期的活跃租户（status=0）
+            # 持续扫描所有未终结状态，保证宽限/暂停/冻结继续向后迁移。
             rows = await session.execute(
                 text(
                     "SELECT id, name, contact_email, contact_name, end_time, status "
-                    "FROM platform_tenant WHERE status = '0' AND end_time IS NOT NULL AND end_time < :now"
+                    "FROM platform_tenant WHERE status IN ('0', '1', '2', '3') "
+                    "AND end_time IS NOT NULL AND end_time < :now"
                 ),
                 {"now": now},
             )
@@ -945,6 +1043,8 @@ class TenantService:
 
             for t in expired_tenants:
                 tenant_id, tenant_name, email, contact_name, end_time, cur_status = t
+                if isinstance(end_time, str):
+                    end_time = datetime.fromisoformat(end_time)
                 days_past = (now - end_time).days if end_time else 0
 
                 if days_past <= 7:

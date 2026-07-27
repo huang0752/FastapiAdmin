@@ -81,7 +81,7 @@ async def get_workflow_node_type_list_controller(
 )
 async def create_workflow_node_type_controller(
     data: WorkflowNodeTypeCreateSchema,
-    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_task:workflow:node-type:create"]))],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["*:*:*"]))],
 ) -> JSONResponse:
     service = WorkflowNodeTypeService(auth)
     result_dict = await service.create(data=data)
@@ -96,7 +96,7 @@ async def create_workflow_node_type_controller(
 async def update_workflow_node_type_controller(
     id: Annotated[int, Path(description="ID")],
     data: WorkflowNodeTypeUpdateSchema,
-    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_task:workflow:node-type:update"]))],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["*:*:*"]))],
 ) -> JSONResponse:
     service = WorkflowNodeTypeService(auth)
     result_dict = await service.update(id=id, data=data)
@@ -110,7 +110,7 @@ async def update_workflow_node_type_controller(
 )
 async def delete_workflow_node_type_controller(
     ids: Annotated[list[int], Body(description="ID列表")],
-    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_task:workflow:node-type:delete"]))],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["*:*:*"]))],
 ) -> JSONResponse:
     service = WorkflowNodeTypeService(auth)
     await service.delete(ids=ids)

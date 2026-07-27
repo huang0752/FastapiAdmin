@@ -123,7 +123,9 @@ class RequestLogMiddleware(BaseHTTPMiddleware):
         if not redis:
             return _DEFAULT_CONFIG
         try:
-            tenant_id = await _extract_tenant_from_token(request) or 1
+            tenant_id = await _extract_tenant_from_token(request)
+            if tenant_id is None:
+                return _DEFAULT_CONFIG
             return await ParamsService.get_system_config_for_middleware(redis, tenant_id)
         except Exception:
             return _DEFAULT_CONFIG
@@ -150,19 +152,21 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
             reset_correlation_id(token)
 
 
-_TENANT_WHITELIST_PREFIXES = ("/docs", "/redoc", "/openapi.json", "/metrics", "/static/")
-_WHITELIST_ALL = (
+_TENANT_WHITELIST_EXACT = (
     "/api/v1/system/auth/login", "/api/v1/system/auth/captcha",
     "/api/v1/system/auth/refresh", "/api/v1/health", "/api/v1/common/health",
-) + tuple(settings.TENANT_WHITELIST_PATHS)
+    "/docs", "/redoc", "/openapi.json", "/metrics",
+)
+_TENANT_WHITELIST_PREFIXES = ("/docs/", "/redoc/", "/static/")
 
 
 def _tenant_is_whitelisted(path: str) -> bool:
     """白名单路径：精确匹配公共接口，前缀匹配文档 / 静态资源。"""
-    for prefix in (*_WHITELIST_ALL, *_TENANT_WHITELIST_PREFIXES):
-        if path == prefix or path.startswith(prefix):
-            return True
-    return False
+    if path in _TENANT_WHITELIST_EXACT:
+        return True
+    if any(path.startswith(prefix) for prefix in _TENANT_WHITELIST_PREFIXES):
+        return True
+    return _is_path_whitelisted(path, list(settings.TENANT_WHITELIST_PATHS))
 
 
 async def _extract_tenant_from_token(request: Request) -> int | None:

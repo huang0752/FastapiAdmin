@@ -16,10 +16,14 @@ from app.core.logger import logger
 async def _write_operation_log_async(log_data: dict) -> None:
     from app.api.v1.module_system.log.schema import OperationLogCreateSchema
     from app.api.v1.module_system.log.service import OperationLogService
+
+    tenant_id = log_data.pop("tenant_id", None)
+    if not isinstance(tenant_id, int) or tenant_id <= 0:
+        return
     try:
         async with async_db_session() as _session:
             async with _session.begin():
-                _auth = AuthSchema(db=_session)
+                _auth = AuthSchema(db=_session, tenant_id=tenant_id, check_data_scope=False)
                 await OperationLogService(_auth).create(data=OperationLogCreateSchema(**log_data))
     except Exception:
         logger.exception("操作日志写入失败: path={}", log_data.get("request_path"))
@@ -65,8 +69,14 @@ class OperationLogRoute(APIRoute):
 
                 ctx = getattr(request.state, "ctx", None)
                 current_user_id = ctx.user_id if ctx else None
+                tenant_id = getattr(request.state, "tenant_id", None)
+                if tenant_id is None and ctx and ctx.session_info:
+                    tenant_id = ctx.session_info.get("tenant_id")
+                if not isinstance(tenant_id, int) or tenant_id <= 0:
+                    return response
 
                 log_data: dict[str, Any] = {
+                    "tenant_id": tenant_id,
                     "request_path": request.url.path,
                     "request_method": request.method,
                     "request_payload": log_payload,

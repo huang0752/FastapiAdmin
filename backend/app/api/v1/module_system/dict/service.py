@@ -350,7 +350,7 @@ class DictDataService:
         try:
             async with async_db_session() as session:
                 async with session.begin():
-                    init_auth = AuthSchema(db=session, check_data_scope=False)
+                    init_auth = AuthSchema.for_platform_global_read(session)
                     obj_list = await DictTypeCRUD(init_auth).get_list()
                     if not obj_list:
                         logger.warning("未找到任何字典类型数据")

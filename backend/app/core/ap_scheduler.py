@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -96,6 +97,38 @@ class SchedulerUtil:
     # 临时存储 job_name，用于在 EVENT_JOB_SUBMITTED 时获取
     # 格式可以是: str (任务名称) 或 tuple[str, str] (原任务ID, 任务名称)
     _job_name_cache: dict[str, str | tuple[str, str]] = {}
+
+    @staticmethod
+    def _namespace_job_id(tenant_id: int, node_id: str | int) -> str:
+        """生成包含租户边界的 APScheduler 任务 ID。"""
+        if not isinstance(tenant_id, int) or tenant_id <= 0:
+            raise ValueError("任务缺少有效 tenant_id")
+        return f"tenant:{tenant_id}:node:{node_id}"
+
+    @staticmethod
+    def _tenant_id_from_job_id(job_id: str | int) -> int | None:
+        """从命名空间任务 ID 提取租户；系统内建任务固定属于平台租户。"""
+        value = str(job_id)
+        match = re.match(r"^tenant:([1-9]\d*):node:", value)
+        if match:
+            return int(match.group(1))
+        if value.startswith("system_"):
+            return 1
+        return None
+
+    @classmethod
+    def _resolve_job_id(cls, job_id: str | int, jobstore: str | None = None) -> str:
+        """解析任务 ID；裸节点 ID 仅在调度器中唯一时兼容。"""
+        value = str(job_id)
+        if scheduler.get_job(value, jobstore):
+            return value
+        if value.startswith(("tenant:", "system_")):
+            return value
+        suffix = f":node:{value}"
+        matches = [str(job.id) for job in scheduler.get_jobs(jobstore) if str(job.id).endswith(suffix)]
+        if len(matches) > 1:
+            raise ValueError(f"任务 ID {value} 跨租户不唯一")
+        return matches[0] if matches else value
 
     @classmethod
     def scheduler_event_listener(cls, event: JobEvent | JobExecutionEvent) -> None:
@@ -651,13 +684,23 @@ class SchedulerUtil:
         logger.info("✅ 6 个系统周期任务已注册（租户到期/续费提醒/归档清理/订单取消/日志清理）")
 
     @classmethod
-    def _task_wrapper(cls, job_id: str | int, code_block: str | None, *args, **kwargs):
+    def _task_wrapper(
+        cls,
+        job_id: str | int,
+        tenant_id: int,
+        code_block: str | None,
+        *args,
+        **kwargs,
+    ):
         """
         任务执行包装器，执行自定义代码块（同步版本，用于 ThreadPoolExecutor）
 
         支持完整的 Python 语法，包括 import 语句
         """
         import types
+
+        if tenant_id != 1:
+            raise PermissionError("租户任务不允许执行自定义 Python")
 
         def run_sync_handler():
             """
@@ -824,6 +867,7 @@ class SchedulerUtil:
         job_name: str | None = None,
         trigger_type: str = "manual",
         status: int = JOB_STATUS_RUNNING,
+        tenant_id: int | None = None,
     ) -> int | None:
         """
         创建执行日志
@@ -833,6 +877,9 @@ class SchedulerUtil:
         from app.plugin.module_task.cronjob.job.model import JobModel
 
         try:
+            resolved_tenant_id = tenant_id or cls._tenant_id_from_job_id(job_id)
+            if resolved_tenant_id is None:
+                raise ValueError(f"任务日志缺少可解析的 tenant_id: {job_id}")
             job = cls.get_job(job_id=job_id)
             next_run_time = str(job.next_run_time) if job and job.next_run_time else None
             job_state = cls._get_job_state(job) if job else None
@@ -842,6 +889,7 @@ class SchedulerUtil:
 
             with Session(engine) as session:
                 job_log = JobModel(
+                    tenant_id=resolved_tenant_id,
                     job_id=job_id,
                     job_name=job_name,
                     trigger_type=trigger_type,
@@ -961,7 +1009,11 @@ class SchedulerUtil:
                 # 创建新的日志记录
                 logger.debug(f"未找到任务 {job_id} 的日志记录，创建新日志")
                 trigger_type = cls._get_trigger_type(job_id) if job else "manual"
+                tenant_id = cls._tenant_id_from_job_id(job_id)
+                if tenant_id is None:
+                    raise ValueError(f"任务日志缺少可解析的 tenant_id: {job_id}")
                 new_log = JobModel(
+                    tenant_id=tenant_id,
                     job_id=job_id,
                     job_name=job.name if job else None,
                     trigger_type=trigger_type,
@@ -1198,6 +1250,11 @@ class SchedulerUtil:
         if not code_block or not code_block.strip():
             raise ValueError("任务代码块不能为空")
 
+        tenant_id = getattr(job_info, "tenant_id", None)
+        job_id = cls._namespace_job_id(tenant_id, job_info.id)
+        if tenant_id != 1:
+            raise PermissionError("租户任务不允许执行自定义 Python")
+
         jobstore = job_info.jobstore or "sqlalchemy"
         executor = job_info.executor or "threadpool"
 
@@ -1217,15 +1274,15 @@ class SchedulerUtil:
                     raise ValueError(f"关键字参数JSON格式无效: {kwargs_str}")
 
         # 缓存 job_name，用于 EVENT_JOB_SUBMITTED 时获取
-        cls._job_name_cache[str(job_info.id)] = job_info.name or ""
+        cls._job_name_cache[job_id] = job_info.name or ""
 
         try:
             job = scheduler.add_job(
                 func=cls._task_wrapper,
                 trigger=trigger,
-                args=[str(job_info.id), code_block, *job_args],
+                args=[job_id, tenant_id, code_block, *job_args],
                 kwargs=job_kwargs,
-                id=str(job_info.id),
+                id=job_id,
                 name=job_info.name,
                 coalesce=job_info.coalesce,
                 max_instances=1,
@@ -1235,13 +1292,13 @@ class SchedulerUtil:
             logger.info(f"任务 {job_info.id} 添加到 {jobstore} 存储器成功")
             return job
         except ConflictingIdError:
-            scheduler.remove_job(job_id=str(job_info.id), jobstore=jobstore)
+            scheduler.remove_job(job_id=job_id, jobstore=jobstore)
             job = scheduler.add_job(
                 func=cls._task_wrapper,
                 trigger=trigger,
-                args=[str(job_info.id), code_block, *job_args],
+                args=[job_id, tenant_id, code_block, *job_args],
                 kwargs=job_kwargs,
-                id=str(job_info.id),
+                id=job_id,
                 name=job_info.name,
                 coalesce=job_info.coalesce,
                 max_instances=1,
@@ -1352,7 +1409,8 @@ class SchedulerUtil:
         返回:
         - Job | None: 任务对象或不存在。
         """
-        return scheduler.get_job(str(job_id), jobstore)
+        resolved_job_id = cls._resolve_job_id(job_id, jobstore)
+        return scheduler.get_job(resolved_job_id, jobstore)
 
     @classmethod
     def get_jobs(cls, jobstore: str | None = None) -> list[Job]:
@@ -1389,7 +1447,7 @@ class SchedulerUtil:
         返回:
         - None
         """
-        scheduler.remove_job(str(job_id), jobstore)
+        scheduler.remove_job(cls._resolve_job_id(job_id, jobstore), jobstore)
 
     @classmethod
     def clear_jobs(cls) -> None:
@@ -1442,7 +1500,12 @@ class SchedulerUtil:
                     .first()
                 )
                 if not existing_log:
+                    tenant_id = cls._tenant_id_from_job_id(job.id)
+                    if tenant_id is None:
+                        logger.error("跳过缺少租户命名空间的任务日志同步: job_id={}", job.id)
+                        continue
                     job_log = JobModel(
+                        tenant_id=tenant_id,
                         job_id=str(job.id),
                         job_name=job.name,
                         trigger_type=cls._get_trigger_type(str(job.id)),
@@ -1468,7 +1531,7 @@ class SchedulerUtil:
         返回:
         - Job | None: 暂停后的 Job 或 None。
         """
-        return scheduler.pause_job(str(job_id), jobstore)
+        return scheduler.pause_job(cls._resolve_job_id(job_id, jobstore), jobstore)
 
     @classmethod
     def resume_job(cls, job_id: str | int, jobstore: str | None = None) -> Job | None:
@@ -1482,7 +1545,7 @@ class SchedulerUtil:
         返回:
         - Job | None: 恢复后的 Job 或 None。
         """
-        return scheduler.resume_job(str(job_id), jobstore)
+        return scheduler.resume_job(cls._resolve_job_id(job_id, jobstore), jobstore)
 
     @classmethod
     def modify_job(cls, job_id: str | int, jobstore: str | None = None, **changes) -> Job | None:
@@ -1497,7 +1560,7 @@ class SchedulerUtil:
         返回:
         - Job | None: 修改后的 Job 或 None。
         """
-        return scheduler.modify_job(str(job_id), jobstore, **changes)
+        return scheduler.modify_job(cls._resolve_job_id(job_id, jobstore), jobstore, **changes)
 
     @classmethod
     def run_job_now(cls, job_id: str | int, jobstore: str | None = None) -> Job | None:
@@ -1514,16 +1577,17 @@ class SchedulerUtil:
         注意:
         - 不改变原任务的触发器配置，仅追加一次性执行。
         """
-        job = cls.get_job(job_id=job_id, jobstore=jobstore)
+        resolved_job_id = cls._resolve_job_id(job_id, jobstore)
+        job = scheduler.get_job(resolved_job_id, jobstore)
         if not job:
             return None
 
         # 创建一个新的临时任务 ID
-        temp_job_id = f"{job_id}_run_now_{datetime.now().timestamp()}"
+        temp_job_id = f"{resolved_job_id}:run:{datetime.now().timestamp()}"
 
         # 缓存 job_name 和原任务 ID，用于 EVENT_JOB_SUBMITTED 时获取
         # 格式: (原任务ID, 任务名称)
-        cls._job_name_cache[temp_job_id] = (str(job_id), f"{job.name}(立即执行)")
+        cls._job_name_cache[temp_job_id] = (resolved_job_id, f"{job.name}(立即执行)")
 
         # 创建临时任务，延迟 0.1 秒执行，确保事件监听器能够捕获事件
         from datetime import timedelta

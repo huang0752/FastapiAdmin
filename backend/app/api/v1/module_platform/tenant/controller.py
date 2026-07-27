@@ -7,7 +7,7 @@ from redis.asyncio.client import Redis
 from app.common.response import ResponseSchema, SuccessResponse
 from app.core import cache_util
 from app.core.base_params import PaginationQueryParam
-from app.core.base_schema import AuthSchema, BatchSetAvailable, PageResultSchema
+from app.core.base_schema import AuthSchema, PageResultSchema
 from app.core.cache_util import cache
 from app.core.dependencies import AuthPermission, get_current_user, redis_getter
 from app.core.router_class import OperationLogRoute
@@ -21,6 +21,7 @@ from .permissions import (
 )
 from .schema import (
     PackageChangePreviewOut,
+    TenantBatchStatusSchema,
     TenantConfigItem,
     TenantConfigOutSchema,
     TenantCreateSchema,
@@ -113,11 +114,11 @@ async def delete_obj_controller(
 
 @TenantRouter.patch(
     "/status/batch",
-    summary="批量修改租户状态",
+    summary="批量启用或暂停租户",
     response_model=ResponseSchema[None],
 )
 async def batch_set_available_obj_controller(
-    data: BatchSetAvailable,
+    data: TenantBatchStatusSchema,
     auth: Annotated[AuthSchema, Depends(AuthPermission(TENANT_PATCH_PERMISSIONS))],
 ) -> JSONResponse:
     await TenantService(auth).set_available(data=data)
@@ -126,7 +127,7 @@ async def batch_set_available_obj_controller(
 
 @TenantRouter.put(
     "/status/{id}",
-    summary="启/禁用租户",
+    summary="启用/暂停租户",
     response_model=ResponseSchema[None],
 )
 async def toggle_tenant_status_controller(

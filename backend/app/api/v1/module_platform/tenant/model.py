@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import IntEnum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, SmallInteger, String, Text, UniqueConstraint
@@ -9,6 +10,20 @@ from app.core.base_model import MappedBase, ModelMixin
 
 if TYPE_CHECKING:
     from app.api.v1.module_platform.package.model import PackageModel
+
+
+class TenantStatus(IntEnum):
+    """租户到期生命周期状态。"""
+
+    ACTIVE = 0
+    GRACE = 1
+    SUSPENDED = 2
+    FROZEN = 3
+    EXPIRED = 4
+    ARCHIVED = 5
+
+
+TENANT_STATUS_DESCRIPTION = "状态(0:正常 1:宽限期 2:暂停 3:冻结 4:过期 5:归档)"
 
 
 class TenantModel(ModelMixin):
@@ -45,7 +60,13 @@ class TenantModel(ModelMixin):
     privacy: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None, comment="隐私政策地址")
     clause: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None, comment="服务条款地址")
     git_code: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None, comment="源码地址")
-    status: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment="状态(0:启动 1:停用)", index=True)
+    status: Mapped[int] = mapped_column(
+        Integer,
+        default=TenantStatus.ACTIVE,
+        nullable=False,
+        comment=TENANT_STATUS_DESCRIPTION,
+        index=True,
+    )
     description: Mapped[str | None] = mapped_column(Text, default=None, nullable=True, comment="备注")
 
     # 关联关系

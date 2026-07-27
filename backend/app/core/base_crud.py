@@ -348,13 +348,16 @@ class CRUDBase[ModelType: MappedBase, CreateSchemaType: BaseModel, UpdateSchemaT
             obj_dict = data if isinstance(data, dict) else data.model_dump()
             obj = self.model(**obj_dict)
 
+            if self.auth and hasattr(obj, "tenant_id") and not self.auth.is_platform_global:
+                if self.auth.tenant_id is None:
+                    raise CustomException(msg="租户上下文缺失", code=10403, status_code=403)
+                setattr(obj, "tenant_id", self.auth.tenant_id)
+
             if self.auth and self.auth.user:
-                if hasattr(obj, "tenant_id"):
-                    # 非超管始终使用当前租户；超管仅当未显式指定时自动填充
-                    if not self.auth.user.is_superuser or getattr(obj, "tenant_id", None) is None:
-                        if self.auth.tenant_id is None:
-                            raise CustomException(msg="租户上下文缺失", code=10403, status_code=403)
-                        setattr(obj, "tenant_id", self.auth.tenant_id)
+                if hasattr(obj, "tenant_id") and getattr(obj, "tenant_id", None) is None:
+                    if self.auth.tenant_id is None:
+                        raise CustomException(msg="租户上下文缺失", code=10403, status_code=403)
+                    setattr(obj, "tenant_id", self.auth.tenant_id)
                 if hasattr(obj, "created_id"):
                     setattr(obj, "created_id", self.auth.user.id)
                 if hasattr(obj, "updated_id"):
@@ -388,8 +391,9 @@ class CRUDBase[ModelType: MappedBase, CreateSchemaType: BaseModel, UpdateSchemaT
             if not obj:
                 raise CustomException(msg="更新对象不存在")
 
-            # 租户权限检查（仅在有认证且非超管时）
-            if self.auth and self.auth.user and not self.auth.user.is_superuser:
+            # 非平台全局上下文不得改变数据归属；切换租户后的超管也不例外。
+            if self.auth and not self.auth.is_platform_global:
+                obj_dict.pop("tenant_id", None)
                 if hasattr(obj, "tenant_id"):
                     obj_tid = getattr(obj, "tenant_id", None)
                     current_tid = self.auth.tenant_id
@@ -456,6 +460,10 @@ class CRUDBase[ModelType: MappedBase, CreateSchemaType: BaseModel, UpdateSchemaT
     async def set(self, ids: list[int], **kwargs) -> None:
         """批量更新字段（带租户隔离）"""
         try:
+            if self.auth and not self.auth.is_platform_global:
+                kwargs.pop("tenant_id", None)
+            if not kwargs:
+                return
             pk = self._get_pk_col()
             sql = self._tenant_dml_where(update(self.model)).where(pk.in_(ids)).values(**kwargs)
             await self.db.execute(sql)
@@ -492,10 +500,16 @@ class CRUDBase[ModelType: MappedBase, CreateSchemaType: BaseModel, UpdateSchemaT
         return await filter_obj.filter_query(sql)
 
     def _platform_shared_conditions(self) -> list[ColumnElement]:
-        if not self.auth or not self.auth.user:
+        if not self.auth:
+            return []
+        if self.auth.has_platform_global_read:
             return []
         tid = self.auth.tenant_id
-        if tid is not None and tid != 1:
+        if tid is None:
+            raise CustomException(msg="租户上下文缺失", code=10403, status_code=403)
+        if tid == 1:
+            return [getattr(self.model, "tenant_id") == 1]
+        if tid != 1:
             return [
                 (getattr(self.model, "tenant_id") == tid)
                 | (getattr(self.model, "tenant_id") == 1)
@@ -504,8 +518,7 @@ class CRUDBase[ModelType: MappedBase, CreateSchemaType: BaseModel, UpdateSchemaT
 
     def _tenant_dml_where(self, sql):
         """为 DML 语句注入 tenant_id 条件（不读平台数据）"""
-        if self.auth and hasattr(self.model, "tenant_id") \
-           and self.auth.user and not self.auth.user.is_superuser:
+        if self.auth and hasattr(self.model, "tenant_id") and not self.auth.is_platform_global:
             tid = self.auth.tenant_id
             if tid is not None:
                 return sql.where(getattr(self.model, "tenant_id") == tid)
@@ -520,7 +533,7 @@ class CRUDBase[ModelType: MappedBase, CreateSchemaType: BaseModel, UpdateSchemaT
 
         if self.auth and hasattr(self.model, "tenant_id") \
            and not getattr(self.model, "__platform_data_shared__", False):
-            if self.auth.user and not self.auth.user.is_superuser:
+            if not self.auth.has_platform_global_read:
                 tid = self.auth.tenant_id
                 if tid is not None:
                     conditions.append(getattr(self.model, "tenant_id") == tid)

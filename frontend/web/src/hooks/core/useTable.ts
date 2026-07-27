@@ -25,9 +25,12 @@ import {
 } from "vue";
 import { useWindowSize } from "@vueuse/core";
 import type { AxiosResponse } from "axios";
+import { hash } from "ohash";
 import { useTableColumns } from "./useTableColumns";
 import type { ColumnOption } from "@/types/component";
 import {
+  Auth,
+  StorageConfig,
   TableCache,
   CacheInvalidationStrategy,
   defaultResponseAdapter,
@@ -42,6 +45,34 @@ import {
 
 /** 跨组件实例：同一 dedupeKey 仅一条进行中的网络请求 */
 const globalListNetworkInflight = new Map<string, Promise<ApiResponse<unknown>>>();
+
+/** 函数引用即 API 身份；同一 API 包装函数跨组件实例保持稳定。 */
+const apiIdentityMap = new WeakMap<object, number>();
+let nextApiIdentity = 1;
+
+/** 活跃表格实例的请求状态清理器，供租户/session 切换统一失效。 */
+const activeTableRequestResetters = new Set<() => void>();
+
+function getApiIdentity(apiFn: object): number {
+  const existing = apiIdentityMap.get(apiFn);
+  if (existing !== undefined) return existing;
+
+  const identity = nextApiIdentity++;
+  apiIdentityMap.set(apiFn, identity);
+  return identity;
+}
+
+function getTenantSessionScope(): { tenantId: string; sessionHash: string } {
+  const tenantId = localStorage.getItem(StorageConfig.LAST_TENANT_ID_KEY) || "anonymous";
+  const sessionHash = hash(Auth.getAccessToken() || "anonymous");
+  return { tenantId, sessionHash };
+}
+
+/** 清空所有表格实例及跨实例去重状态，避免旧租户请求/缓存进入新 session。 */
+export function clearTableRequestCaches(): void {
+  globalListNetworkInflight.clear();
+  activeTableRequestResetters.forEach((reset) => reset());
+}
 
 // --- 类型推导（由 apiFn / 响应类型反推记录类型） ---
 type InferApiParams<T> = T extends (params: infer P) => any ? P : never;
@@ -168,6 +199,7 @@ function useTableImpl<TApiFn extends (params: any) => Promise<any>>(
     hooks: { onSuccess, onError, onCacheHit, resetFormCallback } = {},
     debug: { enableLog = false } = {},
   } = config;
+  const apiIdentity = getApiIdentity(apiFn);
 
   // 分页字段名配置：优先使用传入的配置，否则使用全局配置
   const pageKey = paginationKey?.current || tableConfig.paginationKey.current;
@@ -219,7 +251,7 @@ function useTableImpl<TApiFn extends (params: any) => Promise<any>>(
   /** KeepAlive 失活时不再发请求（组件侧 cancelRequest 会 abort） */
   let tableViewActive = true;
 
-  /** 稳定序列化请求参，供 in-flight 去重用 */
+  /** 稳定序列化 API、租户、session 与请求参数，供 in-flight 去重用。 */
   function stableDedupeKeyFromParams(params: TParams): string {
     const normalize = (input: unknown): unknown => {
       if (input === null || typeof input !== "object") return input;
@@ -234,7 +266,13 @@ function useTableImpl<TApiFn extends (params: any) => Promise<any>>(
       }
       return out;
     };
-    return JSON.stringify(normalize(toRaw(params) as unknown));
+    const { tenantId, sessionHash } = getTenantSessionScope();
+    return JSON.stringify({
+      apiIdentity,
+      tenantId,
+      sessionHash,
+      params: normalize(toRaw(params) as unknown),
+    });
   }
 
   // 缓存清理定时器
@@ -476,7 +514,9 @@ function useTableImpl<TApiFn extends (params: any) => Promise<any>>(
       globalListNetworkInflight.set(dedupeKey, networkPromise as Promise<ApiResponse<unknown>>);
       networkPromise
         .finally(() => {
-          globalListNetworkInflight.delete(dedupeKey);
+          if (globalListNetworkInflight.get(dedupeKey) === networkPromise) {
+            globalListNetworkInflight.delete(dedupeKey);
+          }
         })
         .catch(() => {}); // 忽略取消/reject，仅用于清理全局 Map
 
@@ -532,6 +572,21 @@ function useTableImpl<TApiFn extends (params: any) => Promise<any>>(
 
   // 智能防抖搜索函数
   const debouncedGetDataByPage = createSmartDebounce(getDataByPage, debounceTime);
+
+  const resetTenantScopedRequestState = (): void => {
+    abortController?.abort();
+    abortController = null;
+    inFlightDedupeKey = null;
+    inFlightDedupePromise = null;
+    debouncedGetDataByPage.cancel();
+    cache?.clear();
+    cacheUpdateTrigger.value++;
+    data.value = [];
+    error.value = null;
+    loadingState.value = "idle";
+  };
+
+  activeTableRequestResetters.add(resetTenantScopedRequestState);
 
   // 重置搜索参数
   const resetSearchParams = async (): Promise<void> => {
@@ -737,6 +792,7 @@ function useTableImpl<TApiFn extends (params: any) => Promise<any>>(
   }
 
   onUnmounted(() => {
+    activeTableRequestResetters.delete(resetTenantScopedRequestState);
     cancelRequest();
     if (cache) {
       cache.clear();

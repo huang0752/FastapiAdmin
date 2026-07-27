@@ -8,13 +8,20 @@ from app.core.base_params import BaseQueryParam
 from app.core.base_schema import BaseSchema
 from app.core.validator import DateTimeStr, email_validator, mobile_validator
 
+from .model import TENANT_STATUS_DESCRIPTION, TenantStatus
+
 
 class TenantCreateSchema(BaseModel):
     """新增租户"""
 
     name: str = Field(..., min_length=1, max_length=100, description="租户名称")
     code: str = Field(..., min_length=2, max_length=100, description="租户编码")
-    status: int = Field(default=0, ge=0, le=1, description="状态(0:启动 1:停用)")
+    status: int = Field(
+        default=TenantStatus.ACTIVE,
+        ge=TenantStatus.ACTIVE,
+        le=TenantStatus.ARCHIVED,
+        description=f"初始{TENANT_STATUS_DESCRIPTION}，创建时仅支持 0:正常",
+    )
     description: str | None = Field(default=None, description="描述")
     start_time: DateTimeStr | None = Field(default=None, description="开始时间")
     end_time: DateTimeStr | None = Field(default=None, description="结束时间")
@@ -57,8 +64,8 @@ class TenantCreateSchema(BaseModel):
     @field_validator("status")
     @classmethod
     def _validate_status(cls, v: int) -> int:
-        if v not in {0, 1}:
-            raise ValueError("状态仅支持 0(正常) 或 1(禁用)")
+        if v != TenantStatus.ACTIVE:
+            raise ValueError("新建租户状态仅支持 0(正常)")
         return v
 
     @field_validator("contact_phone")
@@ -85,7 +92,12 @@ class TenantUpdateSchema(TenantCreateSchema):
 
     name: str | None = Field(default=None, max_length=100, description="租户名称")  # type: ignore[assignment]
     code: str | None = Field(default=None, max_length=100, description="租户编码")  # type: ignore[assignment]
-    status: int | None = Field(default=None, ge=0, le=1, description="状态(0:启动 1:停用)")
+    status: int | None = Field(
+        default=None,
+        ge=TenantStatus.ACTIVE,
+        le=TenantStatus.ARCHIVED,
+        description=TENANT_STATUS_DESCRIPTION,
+    )
     description: str | None = Field(default=None, description="描述")
     start_time: DateTimeStr | None = Field(default=None, description="开始时间")
     end_time: DateTimeStr | None = Field(default=None, description="结束时间")
@@ -122,8 +134,10 @@ class TenantUpdateSchema(TenantCreateSchema):
     def _validate_status(cls, v: int | None) -> int | None:
         if v is None:
             return v
-        if v not in {0, 1}:
-            raise ValueError("状态仅支持 0(正常) 或 1(禁用)")
+        try:
+            TenantStatus(v)
+        except ValueError as exc:
+            raise ValueError(TENANT_STATUS_DESCRIPTION) from exc
         return v
 
     @field_validator("contact_phone")
@@ -145,10 +159,50 @@ class TenantUpdateSchema(TenantCreateSchema):
         return self
 
 
+class TenantBatchStatusSchema(BaseModel):
+    """平台手工启用或暂停租户。"""
+
+    ids: list[int] = Field(..., min_length=1, description="租户ID列表")
+    status: int = Field(..., description="手工状态(0:正常 2:暂停)")
+
+    @field_validator("status")
+    @classmethod
+    def _validate_status(cls, v: int) -> int:
+        if v not in {TenantStatus.ACTIVE, TenantStatus.SUSPENDED}:
+            raise ValueError("手工状态仅支持 0(正常) 或 2(暂停)")
+        return v
+
+
+class TenantInitialAdminSchema(BaseModel):
+    """仅在创建租户时返回一次的初始管理员凭据。"""
+
+    username: str = Field(..., description="初始管理员用户名")
+    password: str = Field(..., description="一次性临时密码")
+
+
 class TenantOutSchema(TenantCreateSchema, BaseSchema):
     """租户响应"""
 
     model_config = ConfigDict(from_attributes=True)
+    status: int = Field(
+        default=TenantStatus.ACTIVE,
+        ge=TenantStatus.ACTIVE,
+        le=TenantStatus.ARCHIVED,
+        description=TENANT_STATUS_DESCRIPTION,
+    )
+    initial_admin: TenantInitialAdminSchema | None = Field(
+        default=None,
+        description="仅创建成功响应中返回一次，不持久化",
+    )
+
+    @field_validator("status")
+    @classmethod
+    def _validate_status(cls, v: int) -> int:
+        try:
+            TenantStatus(v)
+        except ValueError as exc:
+            raise ValueError(TENANT_STATUS_DESCRIPTION) from exc
+        return v
 
 
 @dataclass
@@ -157,7 +211,12 @@ class TenantQueryParam(BaseQueryParam):
 
     name: str | None = Query(None, description="租户名称")
     code: str | None = Query(None, description="租户编码")
-    status: int | None = Query(None, ge=0, le=1, description="状态(0:启动 1:停用)")
+    status: int | None = Query(
+        None,
+        ge=TenantStatus.ACTIVE,
+        le=TenantStatus.ARCHIVED,
+        description=TENANT_STATUS_DESCRIPTION,
+    )
 
     def __post_init__(self) -> None:
         if self.name:
@@ -165,6 +224,10 @@ class TenantQueryParam(BaseQueryParam):
         if self.code:
             self.code = (QueueEnum.like.value, self.code)
         if isinstance(self.status, int):
+            try:
+                TenantStatus(self.status)
+            except ValueError as exc:
+                raise ValueError(TENANT_STATUS_DESCRIPTION) from exc
             self.status = (QueueEnum.eq.value, self.status)
 
 

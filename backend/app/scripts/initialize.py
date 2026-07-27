@@ -139,6 +139,11 @@ class InitializeData:
             if not data:
                 logger.info(f"⏭️  跳过 {table_name} 表，无初始化数据")
                 continue
+            if hasattr(model, "tenant_id"):
+                data = [
+                    item if item.get("tenant_id") is not None else {**item, "tenant_id": 1}
+                    for item in data
+                ]
 
             try:
                 # 树形表（platform_menu / sys_dept）：递归创建含 children 的对象
@@ -151,6 +156,18 @@ class InitializeData:
                     db.add_all(objs)
                     await db.flush()
                     logger.info(f"✅️ 已向 {table_name} 写入初始化数据")
+                    continue
+
+                # 套餐菜单使用 package code + permission/route identity，运行时解析主键。
+                if table_name == "platform_package_menu":
+                    count = await db.execute(select(func.count()).select_from(model))
+                    if count.scalar():
+                        logger.info(f"⏭️  跳过 {table_name} 表数据初始化（表已有数据）")
+                        continue
+                    resolved_rows = await self.resolve_package_menu_seed(db, data)
+                    db.add_all([model(**item) for item in resolved_rows])
+                    await db.flush()
+                    logger.info(f"✅️ 已向 {table_name} 写入 {len(resolved_rows)} 条稳定菜单关联")
                     continue
 
                 # 字典类型表：存储类型映射供字典数据使用
@@ -217,7 +234,7 @@ class InitializeData:
         await self.__backfill_tenant_memberships(db)
 
     async def __backfill_tenant_memberships(self, db: AsyncSession) -> None:
-        """回填历史用户的租户关系，保证会话租户校验不会误杀旧数据。"""
+        """回填历史成员关系，并幂等修复普通租户 owner 角色与授权。"""
         stmt = (
             select(UserModel)
             .where(
@@ -244,7 +261,7 @@ class InitializeData:
                 TenantUserModel(
                     user_id=user.id,
                     tenant_id=user.tenant_id,
-                    role="owner" if user.is_superuser else "member",
+                    role="member",
                     is_default=0 if has_any else 1,
                 )
             )
@@ -252,6 +269,116 @@ class InitializeData:
         if added:
             await db.flush()
             logger.info(f"✅️ 已回填 {added} 条用户租户关系")
+
+        from app.api.v1.module_platform.tenant.service import TenantService
+
+        tenant_ids = set(
+            (
+                await db.execute(
+                    select(TenantModel.id).where(
+                        TenantModel.id != 1,
+                        TenantModel.is_deleted.is_(False),
+                    )
+                )
+            ).scalars().all()
+        )
+        repaired = 0
+        ownerless_tenant_ids: list[int] = []
+        for tenant_id in tenant_ids:
+            owner_user_ids = set(
+                (
+                    await db.execute(
+                        select(TenantUserModel.user_id).where(
+                            TenantUserModel.tenant_id == tenant_id,
+                            TenantUserModel.role == "owner",
+                        )
+                    )
+                ).scalars().all()
+            )
+            if not owner_user_ids:
+                ownerless_tenant_ids.append(tenant_id)
+            for user_id in owner_user_ids:
+                await TenantService.ensure_tenant_owner(db, tenant_id, user_id)
+                repaired += 1
+        if repaired:
+            logger.info(f"✅️ 已校准 {repaired} 条租户 owner 角色与权限绑定")
+        if ownerless_tenant_ids:
+            logger.warning(
+                f"⚠️  租户缺少显式 owner，未自动提权，请由管理员确认: {sorted(ownerless_tenant_ids)}"
+            )
+
+    async def resolve_package_menu_seed(
+        self,
+        db: AsyncSession,
+        data: list[dict],
+        *,
+        tenant_scope_override_ids: set[int] | None = None,
+    ) -> list[dict[str, int]]:
+        """把稳定套餐编码和菜单 identity 解析成运行时关联主键。"""
+        scope_override_ids = tenant_scope_override_ids or set()
+        resolved_pairs: set[tuple[int, int]] = set()
+        for package_seed in data:
+            package_code = package_seed.get("package_code")
+            identities = package_seed.get("menus")
+            if not package_code or not isinstance(identities, list) or not identities:
+                raise ValueError("platform_package_menu seed 需要 package_code 和非空 menus")
+            package = (
+                await db.execute(
+                    select(PackageModel).where(PackageModel.code == package_code).limit(1)
+                )
+            ).scalar_one_or_none()
+            if package is None:
+                raise ValueError(f"platform_package_menu 未找到套餐编码: {package_code}")
+
+            selected_ids: set[int] = set()
+            for identity in identities:
+                identity_keys = [
+                    key
+                    for key in ("permission", "route_name", "route_path")
+                    if identity.get(key)
+                ]
+                if len(identity_keys) != 1:
+                    raise ValueError(f"菜单 identity 必须且只能指定一个稳定字段: {identity}")
+                key = identity_keys[0]
+                menus = (
+                    await db.execute(
+                        select(MenuModel).where(getattr(MenuModel, key) == identity[key])
+                    )
+                ).scalars().all()
+                if not menus:
+                    raise ValueError(f"菜单 identity 无匹配: {identity}")
+                if any(
+                    menu.scope != "tenant" and menu.id not in scope_override_ids
+                    for menu in menus
+                ):
+                    raise ValueError(f"套餐 seed 拒绝 platform scope 菜单: {identity}")
+                selected_ids.update(menu.id for menu in menus)
+
+            pending = set(selected_ids)
+            while pending:
+                menus = (
+                    await db.execute(select(MenuModel).where(MenuModel.id.in_(pending)))
+                ).scalars().all()
+                if len(menus) != len(pending):
+                    raise ValueError(f"套餐 seed 菜单父级缺失: {sorted(pending)}")
+                if any(
+                    menu.scope != "tenant" and menu.id not in scope_override_ids
+                    for menu in menus
+                ):
+                    raise ValueError("套餐 seed 的父级菜单不能是 platform scope")
+                selected_ids.update(menu.id for menu in menus)
+                pending = {
+                    menu.parent_id
+                    for menu in menus
+                    if menu.parent_id is not None and menu.parent_id not in selected_ids
+                }
+
+            resolved_pairs.update((package.id, menu_id) for menu_id in selected_ids)
+
+        return [
+            {"package_id": package_id, "menu_id": menu_id}
+            for package_id, menu_id in sorted(resolved_pairs)
+        ]
 
     @staticmethod
     def __create_objects_with_children(data: list[dict], model_class: type) -> list:

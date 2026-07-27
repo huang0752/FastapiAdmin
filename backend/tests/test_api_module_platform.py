@@ -355,7 +355,9 @@ class TestMenu:
     def test_menu_status_batch(self, test_client: TestClient, auth_headers: dict) -> None:
         assert_route(
             test_client, "PATCH", "/platform/menu/status/batch", auth=auth_headers,
-            json={"ids": [1], "status": 1},
+            # 路由冒烟测试不能禁用 ID=1 的根菜单，否则会污染 session 级测试数据库，
+            # 使后续租户 owner 初始化找不到任何启用的必备菜单。
+            json={"ids": [9999], "status": 1},
         )
 
 

@@ -373,7 +373,7 @@ class ParamsService:
     async def _load_all_configs_from_db() -> list:
         async with async_db_session() as session:
             async with session.begin():
-                init_auth = AuthSchema(db=session, check_data_scope=False)
+                init_auth = AuthSchema.for_platform_global_read(session)
                 return await ParamsCRUD(init_auth).get_list()
 
     @staticmethod

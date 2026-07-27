@@ -1,5 +1,4 @@
 import json
-import time
 from collections.abc import AsyncGenerator
 from dataclasses import replace
 from functools import wraps
@@ -138,6 +137,27 @@ async def _try_sliding_refresh(redis: Redis, session_id: str) -> None:
             expire=settings.REFRESH_TOKEN_EXPIRE_SECONDS,
         )
 
+def _scope_user_org_context(user, tenant_id: int):
+    """将用户的组织关系收敛到当前租户，避免切换租户后沿用旧部门/岗位。"""
+    if hasattr(user, "roles"):
+        user.roles = [
+            role
+            for role in user.roles
+            if role and role.status == 0 and role.tenant_id == tenant_id
+        ]
+    if hasattr(user, "positions"):
+        user.positions = [
+            position
+            for position in user.positions
+            if position and position.status == 0 and position.tenant_id == tenant_id
+        ]
+    dept = getattr(user, "dept", None)
+    if dept is not None and getattr(dept, "tenant_id", None) != tenant_id:
+        user.dept = None
+        user.dept_id = None
+    return user
+
+
 async def _load_user_from_db(db: AsyncSession, user_id: int, tenant_id: int):
     """从数据库加载用户（含角色、菜单、部门、职位全量预加载）
 
@@ -172,17 +192,8 @@ async def _load_user_from_db(db: AsyncSession, user_id: int, tenant_id: int):
     if user.status == 1:
         raise CustomException(msg="用户已被停用", code=10401, status_code=401)
 
-    # 过滤不可用的角色和职位（在会话内完成，确保关联数据已加载）
-    if hasattr(user, "roles"):
-        user.roles = [
-            role
-            for role in user.roles
-            if role and role.status == 0 and (user.is_superuser or role.tenant_id == tenant_id)
-        ]
-    if hasattr(user, "positions"):
-        user.positions = [pos for pos in user.positions if pos and pos.status == 0]
-
-    return user
+    # 在会话内收敛到当前租户，确保会话关闭后不会携带其他租户组织关系。
+    return _scope_user_org_context(user, tenant_id)
 
 
 async def _validate_session_tenant(db: AsyncSession, user, tenant_id: int) -> None:
@@ -191,7 +202,7 @@ async def _validate_session_tenant(db: AsyncSession, user, tenant_id: int) -> No
 
     tenant_stmt = (
         select(TenantModel)
-        .where(TenantModel.id == tenant_id, TenantModel.status == 0, TenantModel.is_deleted.is_(False))
+        .where(TenantModel.id == tenant_id, TenantModel.status.in_((0, 1)), TenantModel.is_deleted.is_(False))
         .limit(1)
     )
     tenant_result = await db.execute(tenant_stmt)
@@ -321,9 +332,10 @@ async def _authenticate(
     return auth
 
 async def _get_cached_tenant_menu_ids(auth: AuthSchema, tenant_id: int) -> list[int]:
-    """获取租户可用菜单 ID，带 60s 进程级缓存
+    """获取当前租户可用菜单 ID。
 
-    套餐菜单变更频率极低，缓存可大幅减少 AuthPermission 的 DB 查询次数。
+    权限撤销必须跨 worker 立即生效，因此授权判断不读取进程内缓存。保留的
+    ``_package_menu_cache`` 只用于兼容旧调用方的显式失效，不再作为安全决策源。
 
     参数:
         auth: 认证信息
@@ -332,15 +344,9 @@ async def _get_cached_tenant_menu_ids(auth: AuthSchema, tenant_id: int) -> list[
     返回:
         可用菜单 ID 列表
     """
-    cached = _package_menu_cache.get(tenant_id)
-    if cached and time.time() - cached[0] < 60:
-        return cached[1]
-
     from app.api.v1.module_platform.package.service import PackageService
 
-    result = await PackageService.get_tenant_available_menu_ids(auth, tenant_id)
-    _package_menu_cache[tenant_id] = (time.time(), result)
-    return result
+    return await PackageService.get_tenant_available_menu_ids(auth, tenant_id)
 
 
 class AuthPermission:
