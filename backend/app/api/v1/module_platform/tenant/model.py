@@ -10,6 +10,7 @@ from app.core.base_model import MappedBase, ModelMixin
 
 if TYPE_CHECKING:
     from app.api.v1.module_platform.package.model import PackageModel
+    from app.api.v1.module_platform.site.model import SiteModel
 
 
 class TenantStatus(IntEnum):
@@ -48,6 +49,7 @@ class TenantModel(ModelMixin):
     domain: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None, comment="域名")
     logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None, comment="Logo URL")
     sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="排序")
+    site_id: Mapped[int] = mapped_column(Integer, ForeignKey("platform_site.id", ondelete="RESTRICT", onupdate="CASCADE"), nullable=False, index=True, comment="所属品牌站点ID")
     package_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("platform_package.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, default=None, index=True, comment="关联套餐ID")
     start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="开始时间")
     end_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="结束时间")
@@ -71,6 +73,7 @@ class TenantModel(ModelMixin):
 
     # 关联关系
     package: Mapped["PackageModel | None"] = relationship("PackageModel", lazy="selectin")
+    site: Mapped["SiteModel | None"] = relationship("SiteModel", back_populates="tenants", lazy="selectin")
 
     @validates("name")
     def validate_name(self, key: str, name: str) -> str:

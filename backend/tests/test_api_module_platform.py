@@ -80,7 +80,7 @@ class TestTenant:
     def test_tenant_create(self, test_client: TestClient, auth_headers: dict) -> None:
         assert_route(
             test_client, "POST", "/platform/tenant/create", auth=auth_headers,
-            json={"name": "测试租户", "code": "test_tenant", "contact_name": "张三", "contact_phone": "13800000000"},
+            json={"name": "测试租户", "code": "test_tenant", "site_id": 1, "contact_name": "张三", "contact_phone": "13800000000"},
         )
 
     def test_tenant_update(self, test_client: TestClient, auth_headers: dict) -> None:
@@ -93,7 +93,8 @@ class TestTenant:
         assert_route(test_client, "DELETE", "/platform/tenant/delete", auth=auth_headers, json=[9999])
 
     def test_tenant_config_info(self, test_client: TestClient, auth_headers: dict) -> None:
-        assert_route(test_client, "GET", "/platform/tenant/1/config/info", auth=auth_headers)
+        response = test_client.get("/platform/tenant/1/config/info")
+        assert response.status_code == 404
 
     def test_tenant_config(self, test_client: TestClient, auth_headers: dict) -> None:
         assert_route(
@@ -164,26 +165,6 @@ class TestTenant:
         assert after["login_bg"] == "https://example.test/self-login-bg.svg"
         assert after["version"] == before["version"]
 
-    def test_public_tenant_config_info_is_scoped_to_requested_tenant(
-        self, test_client: TestClient, auth_headers: dict
-    ) -> None:
-        payload = [
-            {"key": "name", "value": "测试租户公开品牌"},
-            {"key": "version", "value": "2.2.0"},
-            {"key": "logo_url", "value": "https://example.test/tenant-2-public-logo.svg"},
-        ]
-        update_resp = test_client.put("/platform/tenant/2/config", headers=auth_headers, json=payload)
-        assert update_resp.status_code == 200, update_resp.text
-
-        resp = test_client.get("/platform/tenant/2/config/info")
-
-        assert resp.status_code == 200, resp.text
-        items = {item["config_key"]: item["config_value"] for item in resp.json()["data"]}
-        assert items["tenant_name"] == "测试租户公开品牌"
-        assert items["tenant_version"] == "2.2.0"
-        assert items["tenant_logo"] == "https://example.test/tenant-2-public-logo.svg"
-        assert items["tenant_name"] != "平台租户"
-
     def test_tenant_renew(self, test_client: TestClient, auth_headers: dict) -> None:
         assert_route(
             test_client, "PUT", "/platform/tenant/renew/1", auth=auth_headers,
@@ -239,7 +220,7 @@ class TestPackage:
     def test_package_create(self, test_client: TestClient, auth_headers: dict) -> None:
         assert_route(
             test_client, "POST", "/platform/package/create", auth=auth_headers,
-            json={"name": "测试套餐", "code": "test_pkg", "price": 99.0, "sort": 1},
+            json={"name": "测试套餐", "code": "test_pkg", "site_id": 1, "price": 99.0, "sort": 1},
         )
 
     def test_package_update(self, test_client: TestClient, auth_headers: dict) -> None:

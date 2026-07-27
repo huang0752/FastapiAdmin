@@ -1,4 +1,4 @@
-import { request, NO_AUTH_FLAG } from "@utils";
+import { request } from "@utils";
 
 const API_PATH = "/platform/tenant";
 
@@ -157,17 +157,6 @@ const TenantAPI = {
     });
   },
 
-  /** 公开接口：无需登录即可获取租户配置（用于登录页等场景） */
-  getTenantConfigInfo(tenantId: number) {
-    return request<ApiResponse<TenantConfigItem[]>>({
-      url: `${API_PATH}/${tenantId}/config/info`,
-      method: "get",
-      headers: {
-        Authorization: NO_AUTH_FLAG,
-      },
-    });
-  },
-
   /** 获取租户个性化配置 */
   getTenantConfig(tenantId: number) {
     return request<ApiResponse<TenantConfigItem[]>>({
@@ -191,12 +180,14 @@ export default TenantAPI;
 export interface TenantPageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {
   name?: string;
   code?: string;
+  site_id?: number;
   status?: TenantStatus;
 }
 
 export interface TenantTable extends BaseType {
   name: string;
   code: string;
+  site_id: number;
   package_id?: number;
   start_time?: string;
   end_time?: string;
@@ -223,6 +214,7 @@ export interface TenantTable extends BaseType {
 export interface TenantForm extends BaseFormType {
   name?: string;
   code?: string;
+  site_id?: number;
   package_id?: number;
   start_time?: string;
   end_time?: string;
@@ -249,6 +241,7 @@ export interface TenantForm extends BaseFormType {
 export interface TenantCreateForm extends BaseFormType {
   name: string;
   code: string;
+  site_id: number;
   package_id?: number;
   start_time?: string;
   end_time?: string;
@@ -275,6 +268,7 @@ export interface TenantCreateForm extends BaseFormType {
 export interface TenantUpdateForm extends BaseFormType {
   name?: string;
   code?: string;
+  site_id?: number;
   package_id?: number;
   start_time?: string;
   end_time?: string;

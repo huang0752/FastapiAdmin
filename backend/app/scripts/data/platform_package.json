@@ -1,6 +1,7 @@
 [
   {
     "name": "基础版",
+    "site_id": 1,
     "code": "basic",
     "status": 0,
     "sort": 1,
@@ -16,6 +17,7 @@
   },
   {
     "name": "标准版",
+    "site_id": 1,
     "code": "standard",
     "status": 0,
     "sort": 2,
@@ -31,6 +33,7 @@
   },
   {
     "name": "专业版",
+    "site_id": 1,
     "code": "pro",
     "status": 0,
     "sort": 3,
@@ -46,6 +49,7 @@
   },
   {
     "name": "企业版",
+    "site_id": 1,
     "code": "enterprise",
     "status": 0,
     "sort": 4,

@@ -28,7 +28,7 @@ from app.core.exceptions import CustomException
 from app.core.logger import logger
 from app.core.redis_crud import RedisCURD
 
-from .service import LoginService
+from .service import LoginService, resolve_request_site
 
 OAuthProvider = Literal["wechat", "qq", "github", "gitee"]
 
@@ -400,12 +400,34 @@ async def complete_oauth_login(
     if user.status == 1:
         raise CustomException(msg="用户已被停用")
 
+    site = await resolve_request_site(db, request)
+    tenant_auth = AuthSchema(
+        db=db,
+        user=user,
+        tenant_id=user.tenant_id,
+        site_id=site.id,
+        check_data_scope=False,
+    )
+    tenants = await LoginService(tenant_auth).get_user_tenants(
+        user_id=user.id,
+        site_id=site.id,
+    )
+    if not tenants:
+        raise CustomException(msg="当前站点下没有可用租户", code=10401, status_code=401)
+
     user = await UserCRUD(AuthSchema(db=db, user=None, tenant_id=1, check_data_scope=False)).update_last_login_crud(id=user.id)
     if not user:
         raise CustomException(msg="用户不存在")
 
     login_type = f"oauth_{provider}"
-    token = await LoginService.create_token(request=request, redis=redis, user=user, login_type=login_type)
+    token = await LoginService.create_token(
+        request=request,
+        redis=redis,
+        user=user,
+        login_type=login_type,
+        tenant_id=tenants[0].id,
+        site_id=site.id,
+    )
     await rc.delete(f"{STATE_PREFIX}{state}")
     return token, frontend
 

@@ -145,6 +145,7 @@ import { useTableSelection } from "@/hooks/core/useTableSelection";
 import { useCrudForm } from "@/hooks/core/useCrudForm";
 import { confirmDelete, confirmBatchDelete, confirmToggleStatus } from "@/hooks/core/useConfirm";
 import PackageAPI, { type PackageForm, type PackageTable } from "@/api/module_platform/package";
+import SiteAPI from "@/api/module_platform/site";
 import MenuAPI from "@/api/module_platform/menu";
 import { useAuth } from "@/hooks/core/useAuth";
 import type { SearchFormItem } from "@/components/forms/fa-search-bar/index.vue";
@@ -319,6 +320,7 @@ const {
       { type: "globalIndex", width: 56, label: "序号" },
       { prop: "name", label: "套餐名称", minWidth: 120, showOverflowTooltip: true },
       { prop: "code", label: "套餐编码", minWidth: 100, showOverflowTooltip: true },
+      { prop: "site_id", label: "站点ID", width: 80, align: "center" },
       {
         prop: "status",
         label: "状态",
@@ -364,10 +366,28 @@ const {
 const formData = ref<PackageForm>({});
 const detailFormData = ref<Partial<PackageTable>>({});
 const pkgFormRenderKey = ref(0);
+const siteOptions = ref<{ label: string; value: number }[]>([]);
+const siteLoading = ref(false);
+
+async function fetchSiteOptions() {
+  siteLoading.value = true;
+  try {
+    const response = await SiteAPI.listSites({ page_no: 1, page_size: 100, status: 0 });
+    const sites = (response.data?.data?.items ?? []) as { id: number; name: string }[];
+    siteOptions.value = sites.map((site) => ({ label: site.name, value: site.id }));
+  } catch {
+    siteOptions.value = [];
+  } finally {
+    siteLoading.value = false;
+  }
+}
+
+onMounted(fetchSiteOptions);
 
 const pkgDetailItems: import("@/components/others/fa-descriptions/index.vue").DescriptionsItem[] = [
   { label: "套餐名称", prop: "name" },
   { label: "套餐编码", prop: "code" },
+  { label: "所属站点ID", prop: "site_id" },
   {
     label: "状态",
     prop: "status",
@@ -386,6 +406,19 @@ const pkgDetailItems: import("@/components/others/fa-descriptions/index.vue").De
 ];
 
 const pkgDialogFormItems = computed<FormItem[]>(() => [
+  {
+    label: "所属站点",
+    key: "site_id",
+    type: "select",
+    props: {
+      placeholder: "请选择所属站点",
+      options: siteOptions.value,
+      loading: siteLoading.value,
+      style: { width: "100%" },
+    },
+    rules: [{ required: true, message: "请选择所属站点", trigger: "change" }],
+    span: 12,
+  },
   {
     label: "套餐名称",
     key: "name",
@@ -538,6 +571,7 @@ const pkgDialogFormItems = computed<FormItem[]>(() => [
 ]);
 
 const rules = reactive({
+  site_id: [{ required: true, message: "请选择所属站点", trigger: "change" }],
   name: [
     { required: true, message: "请输入套餐名称", trigger: "blur" },
     { max: 100, message: "最长 100 个字符", trigger: "blur" },
@@ -569,6 +603,7 @@ const { submitLoading, handleCloseDialog, handleOpenDialog, handleSubmit } =
   useCrudForm<PackageForm>({
     formData,
     initialFormData: {
+      site_id: undefined,
       status: 0,
       period: "month",
       sort: 0,

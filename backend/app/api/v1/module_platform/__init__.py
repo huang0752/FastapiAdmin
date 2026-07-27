@@ -12,10 +12,12 @@ from app.api.v1.module_platform.order.controller import (
 from app.api.v1.module_platform.package.controller import PackageRouter
 from app.api.v1.module_platform.plugin.controller import PluginRouter
 from app.api.v1.module_platform.self_service.controller import TenantSelfServiceRouter
+from app.api.v1.module_platform.site.controller import SiteRouter
 from app.api.v1.module_platform.tenant.controller import TenantRouter
 
 platform_router = APIRouter(prefix="/platform")
 
+platform_router.include_router(SiteRouter)
 platform_router.include_router(TenantRouter)
 platform_router.include_router(PackageRouter)
 platform_router.include_router(PluginRouter)

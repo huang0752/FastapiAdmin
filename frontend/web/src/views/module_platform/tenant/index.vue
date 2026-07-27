@@ -227,6 +227,7 @@ import TenantAPI, {
   type TenantUpdateForm,
 } from "@/api/module_platform/tenant";
 import PackageAPI from "@/api/module_platform/package";
+import SiteAPI from "@/api/module_platform/site";
 import { useAuth } from "@/hooks/core/useAuth";
 import { PLATFORM_TENANT_PERMISSIONS } from "@/constants/permissions";
 import { renderTableOperationCell, type TableOperationAction, resolveStatusColumns } from "@utils";
@@ -446,7 +447,7 @@ const {
   },
 });
 
-const detailFormData = ref<TenantTable>({ code: "", name: "", status: 0 });
+const detailFormData = ref<TenantTable>({ code: "", name: "", site_id: 0, status: 0 });
 
 const tenantDetailItems: import("@/components/others/fa-descriptions/index.vue").DescriptionsItem[] =
   [
@@ -485,6 +486,7 @@ const tenantDetailItems: import("@/components/others/fa-descriptions/index.vue")
 const formData = ref<TenantForm>({
   name: "",
   code: "",
+  site_id: undefined,
   status: 0,
   description: "",
   package_id: undefined,
@@ -526,6 +528,7 @@ const validateTimeRange = (_rule: unknown, _value: unknown, callback: (e?: Error
 
 const rules = reactive({
   name: [{ required: true, message: "请输入租户名称", trigger: "blur" }],
+  site_id: [{ required: true, message: "请选择所属站点", trigger: "change" }],
   code: [
     { required: true, message: "请输入租户编码", trigger: "blur" },
     {
@@ -540,6 +543,7 @@ const rules = reactive({
 const initialFormData: TenantForm = {
   name: "",
   code: "",
+  site_id: undefined,
   status: 0,
   description: "",
   package_id: undefined,
@@ -587,6 +591,7 @@ async function handleOpenDialog(type: "create" | "update" | "detail", id?: numbe
     } else if (type === "update") {
       dialogVisible.title = "修改租户";
       formData.value = { ...initialFormData, ...detailData };
+      await fetchPackageOptions(formData.value.site_id);
     }
   } else {
     dialogVisible.title = "新增租户";
@@ -608,11 +613,30 @@ const activeTab = ref("basic");
 
 const packageOptions = ref<{ label: string; value: number }[]>([]);
 const packageLoading = ref(false);
+const siteOptions = ref<{ label: string; value: number }[]>([]);
+const siteLoading = ref(false);
 
-async function fetchPackageOptions() {
+async function fetchSiteOptions() {
+  siteLoading.value = true;
+  try {
+    const res = await SiteAPI.listSites({ page_no: 1, page_size: 100, status: 0 });
+    const list = (res.data?.data?.items ?? []) as { id: number; name: string }[];
+    siteOptions.value = list.map((site) => ({ label: site.name, value: site.id }));
+  } catch {
+    siteOptions.value = [];
+  } finally {
+    siteLoading.value = false;
+  }
+}
+
+async function fetchPackageOptions(siteId?: number) {
+  if (!siteId) {
+    packageOptions.value = [];
+    return;
+  }
   packageLoading.value = true;
   try {
-    const res = await PackageAPI.listPackage({ page_no: 1, page_size: 100 });
+    const res = await PackageAPI.listPackage({ page_no: 1, page_size: 100, site_id: siteId });
     const list = (res.data?.data?.items ?? res.data?.data ?? []) as { id: number; name: string }[];
     packageOptions.value = list.map((p) => ({ label: p.name, value: p.id }));
   } catch {
@@ -623,7 +647,7 @@ async function fetchPackageOptions() {
 }
 
 onMounted(() => {
-  fetchPackageOptions();
+  fetchSiteOptions();
 });
 
 const basicFormItems = computed<FormItem[]>(() => [
@@ -641,6 +665,22 @@ const basicFormItems = computed<FormItem[]>(() => [
       placeholder: "字母与数字，创建后不可改",
       maxlength: 100,
       disabled: dialogVisible.type === "update",
+    },
+  },
+  {
+    label: "所属站点",
+    key: "site_id",
+    type: "select",
+    props: {
+      placeholder: "请选择所属站点",
+      options: siteOptions.value,
+      loading: siteLoading.value,
+      disabled: dialogVisible.type === "update" && formData.value.id === 1,
+      style: { width: "100%" },
+      onChange: async (siteId: number) => {
+        formData.value.package_id = undefined;
+        await fetchPackageOptions(siteId);
+      },
     },
   },
   {
@@ -839,6 +879,7 @@ async function handleSubmit() {
       const payload: TenantUpdateForm = {
         name: formData.value.name,
         code: formData.value.code,
+        site_id: formData.value.site_id,
         description: formData.value.description,
         package_id: formData.value.package_id,
         start_time: formData.value.start_time,
@@ -866,6 +907,7 @@ async function handleSubmit() {
       const payload: TenantCreateForm = {
         name: formData.value.name as string,
         code: formData.value.code as string,
+        site_id: formData.value.site_id as number,
         status: formData.value.status,
         description: formData.value.description,
         package_id: formData.value.package_id,

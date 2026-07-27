@@ -27,7 +27,7 @@ export function useSiteConfig() {
   /** 初始化：强制拉取配置并同步标题/favicon */
   const initSiteConfig = async () => {
     try {
-      await configStore.getConfig(true);
+      await configStore.getConfig(true, null);
       syncFromConfig();
     } catch (error) {
       console.error("[SiteConfig] 获取配置失败:", error);

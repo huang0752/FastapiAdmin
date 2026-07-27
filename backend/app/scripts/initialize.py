@@ -20,6 +20,7 @@ from app.api.v1.module_platform.menu.model import MenuModel
 from app.api.v1.module_platform.order.model import OrderModel, PaymentRecordModel, RefundModel
 from app.api.v1.module_platform.package.model import PackageMenuModel, PackageModel, PackagePluginModel
 from app.api.v1.module_platform.plugin.model import PluginModel, TenantPluginModel
+from app.api.v1.module_platform.site.model import SiteDomainModel, SiteModel
 from app.api.v1.module_platform.tenant.model import TenantModel, TenantUserModel
 from app.api.v1.module_system.dept.model import DeptModel
 from app.api.v1.module_system.dict.model import DictDataModel, DictTypeModel
@@ -51,6 +52,8 @@ class InitializeData:
     # 按依赖关系排序：先基础表，再关联表
     prepare_init_models: list[type] = [
         # ── 平台管理：基础表 ──
+        SiteModel,
+        SiteDomainModel,
         PackageModel,
         TenantModel,
         PluginModel,

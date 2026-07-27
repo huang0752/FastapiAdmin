@@ -617,7 +617,7 @@ onMounted(async () => {
   if (!showRememberMe.value) {
     loginForm.remember = false;
   }
-  await configStore.getConfig(true);
+  await configStore.getConfig(true, null);
   if (userStore.isLogin) {
     await router.replace(resolveRedirectTarget(route.query));
     return;

@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.module_platform.menu.model import MenuModel
+from app.api.v1.module_platform.site.model import SiteModel
 from app.api.v1.module_platform.tenant.model import TenantModel
 from app.core.base_schema import AuthSchema
 from app.core.dependencies import require_superadmin
@@ -60,6 +61,11 @@ class PackageService:
     def __init__(self, auth: AuthSchema) -> None:
         self.auth = auth
 
+    async def _validate_site(self, site_id: int) -> None:
+        site = await self.auth.db.get(SiteModel, site_id)
+        if site is None or site.is_deleted or site.status != 0:
+            raise CustomException(msg="所属站点不存在或已停用")
+
     @require_superadmin
     async def detail(self, id: int) -> PackageOutSchema:
         return await PackageCRUD(self.auth).get_or_404(id=id, out_schema=PackageOutSchema, msg="该数据不存在")
@@ -82,9 +88,10 @@ class PackageService:
 
     @require_superadmin
     async def create(self, data: PackageCreateSchema) -> PackageOutSchema:
-        if await PackageCRUD(self.auth).get(name=data.name):
+        await self._validate_site(data.site_id)
+        if await PackageCRUD(self.auth).get(site_id=data.site_id, name=data.name):
             raise CustomException(msg="创建失败，套餐名称已存在")
-        if await PackageCRUD(self.auth).get(code=data.code):
+        if await PackageCRUD(self.auth).get(site_id=data.site_id, code=data.code):
             raise CustomException(msg="创建失败，套餐编码已存在")
 
         obj = await PackageCRUD(self.auth).create(data=data)
@@ -95,13 +102,24 @@ class PackageService:
     @require_superadmin
     async def update(self, id: int, data: PackageUpdateSchema) -> PackageOutSchema:
         obj = await PackageCRUD(self.auth).get_or_404(id=id)
+        target_site_id = data.site_id if data.site_id is not None else obj.site_id
+        await self._validate_site(target_site_id)
+
+        if target_site_id != obj.site_id:
+            tenant_count = (
+                await self.auth.db.execute(
+                    select(func.count()).select_from(TenantModel).where(TenantModel.package_id == id)
+                )
+            ).scalar()
+            if tenant_count:
+                raise CustomException(msg="套餐已有租户使用，不能变更所属站点", status_code=409)
 
         if data.name is not None:
-            exist = await PackageCRUD(self.auth).get(name=data.name)
+            exist = await PackageCRUD(self.auth).get(site_id=target_site_id, name=data.name)
             if exist and exist.id != id:
                 raise CustomException(msg="更新失败，名称重复")
         if data.code is not None:
-            exist = await PackageCRUD(self.auth).get(code=data.code)
+            exist = await PackageCRUD(self.auth).get(site_id=target_site_id, code=data.code)
             if exist and exist.id != id:
                 raise CustomException(msg="更新失败，编码重复")
 

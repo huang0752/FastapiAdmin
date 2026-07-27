@@ -216,18 +216,6 @@ async def get_tenant_config_controller(
     result = await TenantService(auth).get_config_items(tenant_id=id)
     return SuccessResponse(data=result, msg="获取租户配置成功")
 
-@TenantRouter.get(
-    "/{id}/config/info",
-    summary="获取租户配置（公开-缓存）",
-    response_model=ResponseSchema[list[TenantConfigOutSchema]],
-)
-async def get_tenant_config_info_controller(
-    id: Annotated[int, Path(description="租户ID")],
-    redis: Annotated[Redis, Depends(redis_getter)],
-) -> JSONResponse:
-    result = await TenantService.get_config_cache_items(redis=redis, tenant_id=id)
-    return SuccessResponse(data=result, msg="获取租户配置成功")
-
 @TenantRouter.put(
     "/{id}/config",
     summary="更新租户配置",

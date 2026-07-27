@@ -25,7 +25,7 @@ def _unique(prefix: str) -> str:
 async def _create_tenant(prefix: str) -> int:
     suffix = str(time.time_ns())
     async with async_db_session() as db:
-        tenant = TenantModel(name=f"{prefix}{suffix}", code=f"T{suffix}")
+        tenant = TenantModel(name=f"{prefix}{suffix}", code=f"T{suffix}", site_id=1)
         db.add(tenant)
         await db.commit()
         return tenant.id

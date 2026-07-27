@@ -2,6 +2,14 @@ name = "minimal"
 depends = []
 
 [[tables]]
+table = "platform_site"
+file = "../../data/platform_site.json"
+
+[[tables]]
+table = "platform_site_domain"
+file = "../../data/platform_site_domain.json"
+
+[[tables]]
 table = "platform_package"
 file = "../../data/platform_package.json"
 

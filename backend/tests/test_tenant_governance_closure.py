@@ -124,8 +124,8 @@ def test_generic_tenant_update_rejects_lifecycle_status(status: int) -> None:
 async def _exercise_membership_role_sync() -> None:
     suffix = str(time.time_ns() % 1_000_000_000_000)
     async with async_db_session() as db:
-        tenant = TenantModel(name=f"成员同步租户{suffix}", code=f"M{suffix}")
-        other_tenant = TenantModel(name=f"成员同步对照{suffix}", code=f"O{suffix}")
+        tenant = TenantModel(name=f"成员同步租户{suffix}", code=f"M{suffix}", site_id=1)
+        other_tenant = TenantModel(name=f"成员同步对照{suffix}", code=f"O{suffix}", site_id=1)
         db.add_all([tenant, other_tenant])
         await db.flush()
 
@@ -209,7 +209,7 @@ def test_membership_role_and_rbac_bindings_stay_in_sync(test_client: TestClient)
 async def _verify_governance_roles_are_reserved() -> None:
     suffix = str(time.time_ns() % 1_000_000_000_000)
     async with async_db_session() as db:
-        tenant = TenantModel(name=f"治理角色租户{suffix}", code=f"G{suffix}")
+        tenant = TenantModel(name=f"治理角色租户{suffix}", code=f"G{suffix}", site_id=1)
         db.add(tenant)
         await db.flush()
         owner_role = RoleModel(

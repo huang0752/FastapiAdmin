@@ -1,6 +1,7 @@
 [
   {
     "name": "平台租户",
+    "site_id": 1,
     "code": "system",
     "contact_name": "管理员",
     "contact_phone": "13800138000",
@@ -25,6 +26,7 @@
   },
   {
     "name": "测试租户",
+    "site_id": 1,
     "code": "test",
     "contact_name": "测试管理员",
     "contact_phone": "13800138001",

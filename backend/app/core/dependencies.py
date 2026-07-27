@@ -201,7 +201,14 @@ async def _load_user_from_db(db: AsyncSession, user_id: int, tenant_id: int):
     return _scope_user_org_context(user, tenant_id)
 
 
-async def _validate_session_tenant(db: AsyncSession, user, tenant_id: int) -> None:
+async def _validate_session_tenant(
+    db: AsyncSession,
+    user,
+    tenant_id: int,
+    *,
+    session_site_id: int | None,
+    request_site_id: int | None,
+) -> None:
     """校验当前会话租户有效，且普通用户仍属于该租户。"""
     from app.api.v1.module_platform.tenant.model import TenantModel, TenantUserModel
 
@@ -211,8 +218,17 @@ async def _validate_session_tenant(db: AsyncSession, user, tenant_id: int) -> No
         .limit(1)
     )
     tenant_result = await db.execute(tenant_stmt)
-    if not tenant_result.scalar_one_or_none():
+    tenant = tenant_result.scalar_one_or_none()
+    if not tenant:
         raise CustomException(msg="租户不存在或已被禁用", code=10401, status_code=401)
+
+    from app.api.v1.module_system.auth.service import validate_session_site
+
+    validate_session_site(
+        session_site_id=session_site_id,
+        request_site_id=request_site_id,
+        tenant_site_id=tenant.site_id,
+    )
 
     if user.is_superuser:
         return
@@ -315,11 +331,27 @@ async def _authenticate(
     tenant_id = user_info.get("tenant_id")
     if not tenant_id:
         raise CustomException(msg="认证已失效", code=10401, status_code=401)
+    site_id = user_info.get("site_id")
+    if not site_id:
+        raise CustomException(msg="站点会话已失效", code=10401, status_code=401)
+
+    request_site_id = int(site_id)
+    if request:
+        from app.api.v1.module_system.auth.service import resolve_request_site
+
+        request_site = await resolve_request_site(db, request)
+        request_site_id = request_site.id
 
     # 用户查询使用独立只读会话（不参与请求事务，查询后立即释放快照）
     async with async_db_session() as lookup_db:
         user = await _load_user_from_db(lookup_db, int(user_id), int(tenant_id))
-        await _validate_session_tenant(lookup_db, user, int(tenant_id))
+        await _validate_session_tenant(
+            lookup_db,
+            user,
+            int(tenant_id),
+            session_site_id=int(site_id),
+            request_site_id=int(request_site_id),
+        )
 
     # 设置请求上下文（仅在当前 request 对象上，业务方通过 request.state.ctx 读取）
     if request:
@@ -332,7 +364,12 @@ async def _authenticate(
         )
 
     # 返回的 auth.db 指向请求级事务会话，供后续读写操作使用
-    auth = AuthSchema(db=db, tenant_id=int(tenant_id), check_data_scope=False)
+    auth = AuthSchema(
+        db=db,
+        tenant_id=int(tenant_id),
+        site_id=int(site_id),
+        check_data_scope=False,
+    )
     auth.user = user
     return auth
 

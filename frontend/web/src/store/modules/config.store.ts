@@ -29,23 +29,35 @@
  */
 import { store } from "@stores";
 import ParamsAPI, { ConfigTable } from "@/api/module_system/params";
+import SiteAPI, { type PublicSiteConfig } from "@/api/module_platform/site";
 import TenantAPI from "@/api/module_platform/tenant";
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { StorageConfig } from "@/utils/storage";
 
-const PUBLIC_TENANT_ID = 1;
-const TENANT_CONFIG_ALIASES: Record<string, string> = {
+const SITE_CONFIG_ALIASES: Record<string, string> = {
   name: "tenant_name",
   logo_url: "tenant_logo",
-  version: "tenant_version",
 };
+
+const PUBLIC_SITE_BRAND_FIELDS = [
+  "site_code",
+  "name",
+  "logo_url",
+  "favicon",
+  "login_bg",
+  "copyright",
+  "keep_record",
+  "help_doc",
+  "privacy",
+  "clause",
+] as const satisfies readonly (keyof PublicSiteConfig)[];
 
 export const useConfigStore = defineStore(
   "configStore",
   () => {
-    // 系统配置、租户配置、最终生效配置分层保存，避免来源混淆。
+    // 系统、Host 站点、登录租户与最终生效配置分层保存，避免来源混淆。
     const systemConfigData = ref<Record<string, ConfigTable>>({});
+    const siteConfigData = ref<Record<string, ConfigTable>>({});
     const tenantConfigData = ref<Record<string, ConfigTable>>({});
     const effectiveConfigData = ref<Record<string, ConfigTable>>({});
     // 兼容历史调用方：configData 表示最终生效配置。
@@ -54,25 +66,11 @@ export const useConfigStore = defineStore(
     const isConfigLoaded = ref(false);
     // 是否正在加载配置
     const configLoading = ref(false);
-    // 当前配置对应的租户 ID。用于租户切换时跳过旧缓存。
+    // 当前认证租户覆盖层；null 表示登录前仅应用站点品牌。
     const currentTenantConfigId = ref<number | null>(null);
     // 最近一次 fetch 时间戳，用于 force=true 时防止短期重复请求
     let _lastFetchedAt = 0;
     const MIN_FETCH_INTERVAL_MS = 5000;
-
-    function resolveTenantId(tenantId?: number | null) {
-      const explicitId = Number(tenantId);
-      if (Number.isInteger(explicitId) && explicitId > 0) {
-        return explicitId;
-      }
-
-      const savedTenantId = Number(localStorage.getItem(StorageConfig.LAST_TENANT_ID_KEY));
-      if (Number.isInteger(savedTenantId) && savedTenantId > 0) {
-        return savedTenantId;
-      }
-
-      return currentTenantConfigId.value || PUBLIC_TENANT_ID;
-    }
 
     function upsertConfigItem(target: Record<string, ConfigTable>, item: Partial<ConfigTable>) {
       if (item.config_value !== undefined && item.config_key) {
@@ -80,12 +78,32 @@ export const useConfigStore = defineStore(
       }
     }
 
-    function upsertTenantConfigItem(item: Partial<ConfigTable>) {
-      upsertConfigItem(tenantConfigData.value, item);
-      const aliasKey = item.config_key ? TENANT_CONFIG_ALIASES[item.config_key] : undefined;
+    function upsertSiteConfigItem(item: Partial<ConfigTable>) {
+      upsertConfigItem(siteConfigData.value, item);
+      const aliasKey = item.config_key ? SITE_CONFIG_ALIASES[item.config_key] : undefined;
+      if (aliasKey) {
+        upsertConfigItem(siteConfigData.value, {
+          ...item,
+          config_key: aliasKey,
+        });
+      }
+    }
+
+    function upsertTenantConfigItem(item: {
+      config_key?: string;
+      config_value?: string | null;
+    }) {
+      const value = item.config_value;
+      if (typeof value !== "string") return;
+      const normalizedItem: Partial<ConfigTable> = {
+        config_key: item.config_key,
+        config_value: value,
+      };
+      upsertConfigItem(tenantConfigData.value, normalizedItem);
+      const aliasKey = item.config_key ? SITE_CONFIG_ALIASES[item.config_key] : undefined;
       if (aliasKey) {
         upsertConfigItem(tenantConfigData.value, {
-          ...item,
+          ...normalizedItem,
           config_key: aliasKey,
         });
       }
@@ -94,17 +112,34 @@ export const useConfigStore = defineStore(
     function syncEffectiveConfig() {
       effectiveConfigData.value = {
         ...systemConfigData.value,
+        ...siteConfigData.value,
         ...tenantConfigData.value,
       };
     }
 
+    function replaceSiteConfig(site: PublicSiteConfig | null | undefined) {
+      siteConfigData.value = {};
+      if (!site) return;
+      for (const field of PUBLIC_SITE_BRAND_FIELDS) {
+        const value = site[field];
+        if (typeof value !== "string") continue;
+        upsertSiteConfigItem({ config_key: field, config_value: value });
+      }
+    }
+
     /**
-     * 获取系统配置 + 租户配置
+     * 获取系统配置 + 当前 Host 站点配置 + 可选的认证租户覆盖配置
      * @param force 是否强制刷新配置
-     * @param tenantId 租户ID；未登录公开场景才回退到平台默认租户
+     * @param tenantId 登录后的租户 ID；未传时不请求任何租户公开 ID 接口
      */
     async function getConfig(force = false, tenantId?: number | null) {
-      const resolvedTenantId = resolveTenantId(tenantId);
+      const numericTenantId = Number(tenantId);
+      const resolvedTenantId =
+        tenantId === null
+          ? null
+          : Number.isInteger(numericTenantId) && numericTenantId > 0
+            ? numericTenantId
+            : currentTenantConfigId.value;
       if (configLoading.value) {
         return;
       }
@@ -133,19 +168,30 @@ export const useConfigStore = defineStore(
           upsertConfigItem(systemConfigData.value, item);
         });
 
-        // 2. 获取租户个性化配置（品牌标识、版权信息等）
+        // 2. 当前 Host 由后端解析为 Site，前端不再传递可枚举的 tenant_id。
+        replaceSiteConfig(null);
         try {
-          const tenantResp = await TenantAPI.getTenantConfigInfo(resolvedTenantId);
-          const tenantList = tenantResp?.data?.data;
-          if (Array.isArray(tenantList)) {
-            tenantConfigData.value = {};
-            tenantList.forEach((item: any) => {
-              upsertTenantConfigItem(item);
-            });
-          }
-          currentTenantConfigId.value = resolvedTenantId;
+          const siteResp = await SiteAPI.getPublicConfig();
+          replaceSiteConfig(siteResp?.data?.data);
         } catch (e) {
-          console.warn("[configStore] 获取租户配置失败（非关键错误）", e);
+          console.warn("[configStore] 获取站点公开配置失败（非关键错误）", e);
+        }
+
+        // 3. 只有登录态明确传入 tenantId 时才加载认证租户覆盖层。
+        tenantConfigData.value = {};
+        if (resolvedTenantId !== null) {
+          try {
+            const tenantResp = await TenantAPI.getTenantConfig(resolvedTenantId);
+            const tenantList = tenantResp?.data?.data;
+            if (Array.isArray(tenantList)) {
+              tenantList.forEach((item) => upsertTenantConfigItem(item));
+            }
+            currentTenantConfigId.value = resolvedTenantId;
+          } catch (e) {
+            console.warn("[configStore] 获取认证租户配置失败（非关键错误）", e);
+          }
+        } else {
+          currentTenantConfigId.value = null;
         }
 
         syncEffectiveConfig();
@@ -159,6 +205,7 @@ export const useConfigStore = defineStore(
     return {
       configData,
       systemConfigData,
+      siteConfigData,
       tenantConfigData,
       effectiveConfigData,
       isConfigLoaded,

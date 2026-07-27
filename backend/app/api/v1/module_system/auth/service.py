@@ -7,7 +7,7 @@ from typing import NewType
 import ua_parser
 from fastapi import BackgroundTasks, Request
 from redis.asyncio.client import Redis
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.module_monitor.online.schema import OnlineOutSchema
@@ -48,6 +48,29 @@ from .schema import (
 
 CaptchaKey = NewType("CaptchaKey", str)
 CaptchaBase64 = NewType("CaptchaBase64", str)
+
+
+async def resolve_request_site(db: AsyncSession, request: Request):
+    """按请求 Host 解析启用中的品牌站点，未知 Host 一律拒绝。"""
+    from app.api.v1.module_platform.site.service import SiteService
+
+    site = await SiteService.resolve_by_host(db, request.headers.get("host", ""))
+    if not site:
+        raise CustomException(msg="当前访问域名未配置品牌站点", code=10403, status_code=403)
+    return site
+
+
+def validate_session_site(
+    *,
+    session_site_id: int | None,
+    request_site_id: int | None,
+    tenant_site_id: int | None,
+) -> None:
+    """确保会话、Host 与租户始终处于同一 Site 边界。"""
+    if not session_site_id or not request_site_id or not tenant_site_id:
+        raise CustomException(msg="站点上下文缺失", code=10401, status_code=401)
+    if len({int(session_site_id), int(request_site_id), int(tenant_site_id)}) != 1:
+        raise CustomException(msg="站点上下文不匹配，禁止跨站点访问", code=10403, status_code=403)
 
 
 def _redis_value_to_str(value) -> str | None:
@@ -95,13 +118,35 @@ async def _write_login_log(
         return None
 
 
-async def get_unique_user_by_username(db: AsyncSession, username: str) -> UserModel | None:
+async def get_unique_user_by_username(
+    db: AsyncSession,
+    username: str,
+    site_id: int | None = None,
+) -> UserModel | None:
     """按用户名做全局唯一查询；跨租户重名时拒绝猜测账号归属。"""
-    stmt = (
-        select(UserModel)
-        .where(UserModel.username == username, UserModel.is_deleted.is_(False))
-        .limit(2)
+    stmt = select(UserModel).where(
+        UserModel.username == username,
+        UserModel.is_deleted.is_(False),
     )
+    if site_id is not None:
+        from app.api.v1.module_platform.tenant.model import TenantModel
+
+        member_user_ids = (
+            select(TenantUserModel.user_id)
+            .join(TenantModel, TenantModel.id == TenantUserModel.tenant_id)
+            .where(TenantModel.site_id == site_id)
+        )
+        stmt = (
+            stmt.join(TenantModel, TenantModel.id == UserModel.tenant_id)
+            .where(
+                or_(
+                    TenantModel.site_id == site_id,
+                    UserModel.id.in_(member_user_ids),
+                )
+            )
+            .distinct()
+        )
+    stmt = stmt.limit(2)
     users = list((await db.execute(stmt)).scalars().all())
     if len(users) > 1:
         raise CustomException(msg="账号标识不唯一，请联系管理员", status_code=400)
@@ -162,6 +207,7 @@ class LoginService:
         _login_os = ua_result.os.family if ua_result.os else "Unknown"
         _login_browser = ua_result.user_agent.family if ua_result.user_agent else "Unknown"
         _login_username = login_form.username
+        site = await resolve_request_site(db, request)
 
         if settings.CAPTCHA_ENABLE:
             if not login_form.captcha_key or not login_form.captcha:
@@ -172,8 +218,7 @@ class LoginService:
                 captcha=login_form.captcha,
             )
 
-        auth = AuthSchema(db=db, check_data_scope=False)
-        user = await get_unique_user_by_username(db, login_form.username)
+        user = await get_unique_user_by_username(db, login_form.username, site.id)
 
         if not user:
             await _write_login_log(
@@ -212,11 +257,9 @@ class LoginService:
             )
             raise CustomException(msg="用户已被停用")
 
-        from app.api.v1.module_platform.tenant.model import TenantModel
-
-        tenant_stmt = select(TenantModel).where(TenantModel.id == user.tenant_id, TenantModel.status.in_((0, 1)), TenantModel.is_deleted.is_(False)).limit(1)
-        tenant_result = await auth.db.execute(tenant_stmt)
-        if not tenant_result.scalar_one_or_none():
+        tenants_auth = AuthSchema(db=db, user=user, tenant_id=user.tenant_id, check_data_scope=False)
+        tenants = await LoginService(tenants_auth).get_user_tenants(user_id=user.id, site_id=site.id)
+        if not tenants:
             await _write_login_log(
                 username=_login_username,
                 status=2,
@@ -227,7 +270,8 @@ class LoginService:
                 msg="所属租户已被禁用",
                 tenant_id=user.tenant_id,
             )
-            raise CustomException(msg="所属租户已被禁用，请联系平台管理员", code=10401, status_code=401)
+            raise CustomException(msg="当前站点下没有可用租户", code=10401, status_code=401)
+        selected_tenant_id = tenants[0].id
 
         user_auth = AuthSchema(
             db=db,
@@ -247,10 +291,9 @@ class LoginService:
             redis=redis,
             user=user,
             login_type=login_form.login_type,
+            tenant_id=selected_tenant_id,
+            site_id=site.id,
         )
-
-        tenants_auth = AuthSchema(db=db, user=user, tenant_id=user.tenant_id, check_data_scope=False)
-        tenants = await LoginService(tenants_auth).get_user_tenants(user_id=user.id)
 
         user_info = {
             "id": user.id,
@@ -268,7 +311,7 @@ class LoginService:
             request_os=_login_os,
             request_browser=_login_browser,
             msg="登录成功",
-            tenant_id=user.tenant_id,
+            tenant_id=selected_tenant_id,
         )
         # 登录成功后异步补全归属地，不阻塞返回
         if log_id and login_location == "归属地查询中":
@@ -284,7 +327,16 @@ class LoginService:
         )
 
     @classmethod
-    async def create_token(cls, request: Request, redis: Redis, user: UserModel, login_type: str) -> JWTOutSchema:
+    async def create_token(
+        cls,
+        request: Request,
+        redis: Redis,
+        user: UserModel,
+        login_type: str,
+        *,
+        tenant_id: int,
+        site_id: int,
+    ) -> JWTOutSchema:
         """创建访问令牌和刷新令牌"""
         session_id = str(uuid.uuid4())
         ua_result = ua_parser.parse(request.headers.get("user-agent"))
@@ -312,7 +364,8 @@ class LoginService:
         session_info = OnlineOutSchema(
             session_id=session_id,
             user_id=user.id,
-            tenant_id=user.tenant_id,
+            tenant_id=tenant_id,
+            site_id=site_id,
             is_superuser=user.is_superuser,
             name=user.name,
             user_name=user.username,
@@ -368,6 +421,7 @@ class LoginService:
     @classmethod
     async def refresh_token(
         cls,
+        request: Request,
         db: AsyncSession,
         redis: Redis,
         refresh_token: RefreshTokenPayloadSchema,
@@ -393,18 +447,20 @@ class LoginService:
         session_data = json.loads(session_info)
         user_id = session_data.get("user_id")
         tenant_id = session_data.get("tenant_id")
+        site_id = session_data.get("site_id")
 
-        if not session_id or not user_id or not tenant_id:
-            raise CustomException(msg="非法凭证,无法获取会话编号、用户ID或租户ID", code=10401, status_code=401)
+        if not session_id or not user_id or not tenant_id or not site_id:
+            raise CustomException(msg="非法凭证,无法获取会话编号、用户ID、租户ID或站点ID", code=10401, status_code=401)
 
-        auth = AuthSchema(db=db, tenant_id=tenant_id, check_data_scope=False)
-        user = await UserCRUD(auth).get(id=user_id)
+        user_stmt = select(UserModel).where(
+            UserModel.id == user_id,
+            UserModel.is_deleted.is_(False),
+        ).limit(1)
+        user = (await db.execute(user_stmt)).scalar_one_or_none()
         if not user:
             raise CustomException(msg="刷新token失败，用户不存在", code=10401, status_code=401)
         if user.status == 1:
             raise CustomException(msg="用户已被停用", code=10401, status_code=401)
-
-        from sqlalchemy import select
 
         from app.api.v1.module_platform.tenant.model import TenantModel
 
@@ -414,8 +470,16 @@ class LoginService:
             .limit(1)
         )
         tenant_result = await db.execute(tenant_stmt)
-        if not tenant_result.scalar_one_or_none():
+        tenant = tenant_result.scalar_one_or_none()
+        if not tenant:
             raise CustomException(msg="租户不存在或已被禁用", code=10401, status_code=401)
+
+        request_site = await resolve_request_site(db, request)
+        validate_session_site(
+            session_site_id=site_id,
+            request_site_id=request_site.id,
+            tenant_site_id=tenant.site_id,
+        )
 
         if not user.is_superuser:
             relation_stmt = (
@@ -497,6 +561,7 @@ class LoginService:
     async def get_user_tenants(
         self,
         user_id: int | None = None,
+        site_id: int | None = None,
     ) -> list[TenantOptionSchema]:
         """获取用户关联的租户列表"""
         from sqlalchemy import select
@@ -506,9 +571,16 @@ class LoginService:
         uid = user_id or (self.auth.user.id if self.auth.user else None)
         if not uid:
             return []
+        site_id = site_id or self.auth.site_id
+        if not site_id:
+            raise CustomException(msg="站点上下文缺失", code=10403, status_code=403)
 
         if self.auth.user and self.auth.user.is_superuser:
-            stmt = select(TenantModel).where(TenantModel.status.in_((0, 1)), TenantModel.is_deleted.is_(False)).order_by(TenantModel.sort, TenantModel.id)
+            stmt = select(TenantModel).where(
+                TenantModel.site_id == site_id,
+                TenantModel.status.in_((0, 1)),
+                TenantModel.is_deleted.is_(False),
+            ).order_by(TenantModel.sort, TenantModel.id)
             result = await self.auth.db.execute(stmt)
             tenant_objs = result.scalars().all()
             return [TenantOptionSchema(id=t.id, name=t.name, code=t.code) for t in tenant_objs]
@@ -518,6 +590,7 @@ class LoginService:
             .join(TenantUserModel, TenantUserModel.tenant_id == TenantModel.id)
             .where(
                 TenantUserModel.user_id == uid,
+                TenantModel.site_id == site_id,
                 TenantModel.status.in_((0, 1)),
                 TenantModel.is_deleted.is_(False),
             )
@@ -566,6 +639,13 @@ class LoginService:
 
         if not session_id or not session_info:
             raise CustomException(msg="会话已失效")
+
+        request_site = await resolve_request_site(self.auth.db, request)
+        validate_session_site(
+            session_site_id=session_info.get("site_id"),
+            request_site_id=request_site.id,
+            tenant_site_id=tenant.site_id,
+        )
 
         # 更新会话中的租户 ID 并写回 Redis
         session_info["tenant_id"] = tenant_id
@@ -659,15 +739,29 @@ class AutoLoginService:
     TOKEN_EXPIRE = 300
 
     @classmethod
-    async def get_auto_login_users(cls, db: AsyncSession, tenant_id: int | None = None) -> list[AutoLoginUserSchema]:
+    async def get_auto_login_users(
+        cls,
+        db: AsyncSession,
+        tenant_id: int | None = None,
+        site_id: int | None = None,
+    ) -> list[AutoLoginUserSchema]:
         """获取免登录用户列表"""
         from sqlalchemy import select
 
+        from app.api.v1.module_platform.tenant.model import TenantModel
         from app.api.v1.module_system.user.model import UserModel
 
-        stmt = select(UserModel).where(UserModel.status == 0)
+        if not site_id:
+            raise CustomException(msg="站点上下文缺失", code=10403, status_code=403)
+        stmt = (
+            select(UserModel)
+            .join(TenantUserModel, TenantUserModel.user_id == UserModel.id)
+            .join(TenantModel, TenantModel.id == TenantUserModel.tenant_id)
+            .where(UserModel.status == 0, TenantModel.site_id == site_id)
+            .distinct()
+        )
         if tenant_id is not None:
-            stmt = stmt.where(UserModel.tenant_id == tenant_id)
+            stmt = stmt.where(TenantUserModel.tenant_id == tenant_id)
         stmt = stmt.order_by(UserModel.id)
         result = await db.execute(stmt)
         users = result.scalars().all()
@@ -689,15 +783,26 @@ class AutoLoginService:
         db: AsyncSession,
         user_id: int,
         tenant_id: int | None = None,
+        site_id: int | None = None,
     ) -> AutoLoginTokenSchema:
         """创建免登录Token"""
         from sqlalchemy import select
 
+        from app.api.v1.module_platform.tenant.model import TenantModel
         from app.api.v1.module_system.user.model import UserModel
 
-        stmt = select(UserModel).where(UserModel.id == user_id)
-        if tenant_id is not None:
-            stmt = stmt.where(UserModel.tenant_id == tenant_id)
+        if not tenant_id or not site_id:
+            raise CustomException(msg="租户或站点上下文缺失", code=10403, status_code=403)
+        stmt = (
+            select(UserModel)
+            .join(TenantUserModel, TenantUserModel.user_id == UserModel.id)
+            .join(TenantModel, TenantModel.id == TenantUserModel.tenant_id)
+            .where(
+                UserModel.id == user_id,
+                TenantUserModel.tenant_id == tenant_id,
+                TenantModel.site_id == site_id,
+            )
+        )
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
 
@@ -715,7 +820,8 @@ class AutoLoginService:
         token_data = {
             "user_id": user.id,
             "username": user.username,
-            "tenant_id": user.tenant_id,
+            "tenant_id": tenant_id,
+            "site_id": site_id,
             "created_at": datetime.now().isoformat(),
         }
         await RedisCURD(redis).set(
@@ -762,11 +868,29 @@ class AutoLoginService:
         token_data = json.loads(token_data_str)
         user_id = token_data.get("user_id")
         token_tenant_id = token_data.get("tenant_id")
+        token_site_id = token_data.get("site_id")
 
-        stmt = select(UserModel).where(UserModel.id == user_id)
+        request_site = await resolve_request_site(db, request)
+        from app.api.v1.module_platform.tenant.model import TenantModel
+
         effective_tenant_id = tenant_id if tenant_id is not None else token_tenant_id
-        if effective_tenant_id is not None:
-            stmt = stmt.where(UserModel.tenant_id == effective_tenant_id)
+        tenant = (
+            await db.execute(
+                select(TenantModel).where(
+                    TenantModel.id == effective_tenant_id,
+                    TenantModel.status.in_((0, 1)),
+                    TenantModel.is_deleted.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if not tenant:
+            raise CustomException(msg="租户不存在或已被禁用")
+        validate_session_site(
+            session_site_id=token_site_id,
+            request_site_id=request_site.id,
+            tenant_site_id=tenant.site_id,
+        )
+        stmt = select(UserModel).where(UserModel.id == user_id)
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
 
@@ -778,7 +902,14 @@ class AutoLoginService:
 
         await RedisCURD(redis).delete(token_key)
 
-        jwt_token = await LoginService.create_token(request=request, redis=redis, user=user, login_type="PC端")
+        jwt_token = await LoginService.create_token(
+            request=request,
+            redis=redis,
+            user=user,
+            login_type="PC端",
+            tenant_id=effective_tenant_id,
+            site_id=request_site.id,
+        )
 
         logger.info(f"用户{user.username}免登录成功")
 
@@ -794,6 +925,7 @@ class TenantRegisterService:
     async def register(
         cls,
         db: AsyncSession,
+        site_id: int,
         username: str,
         password: str,
         email: str,
@@ -820,7 +952,12 @@ class TenantRegisterService:
         if cnt > 0:
             raise CustomException(msg="用户名或邮箱已被占用")
 
-        pkg_stmt = select(PackageModel).where(PackageModel.status == 0).order_by(PackageModel.id).limit(1)
+        pkg_stmt = (
+            select(PackageModel)
+            .where(PackageModel.site_id == site_id, PackageModel.status == 0)
+            .order_by(PackageModel.id)
+            .limit(1)
+        )
         default_pkg = (await db.execute(pkg_stmt)).scalar_one_or_none()
 
         now = datetime.now()
@@ -832,6 +969,7 @@ class TenantRegisterService:
             name=tenant_name or f"{username}的租户",
             code=tenant_code,
             contact_name=username,
+            site_id=site_id,
             package_id=default_pkg.id if default_pkg else None,
             start_time=now,
             end_time=trial_end,

@@ -194,6 +194,8 @@ class TenantService:
             raise CustomException(msg="该数据不存在")
         if package.status != 0:
             raise CustomException(msg="目标套餐已停用")
+        if getattr(tenant, "site_id", None) != getattr(package, "site_id", None):
+            raise CustomException(msg="禁止跨站点配置套餐")
 
         package_service = PackageService(self.auth)
         current_menu_ids = await package_service.get_tenant_available_menu_ids(tenant_id)
@@ -365,6 +367,18 @@ class TenantService:
 
     @require_superadmin
     async def create(self, data: TenantCreateSchema) -> TenantOutSchema:
+        from app.api.v1.module_platform.package.model import PackageModel
+        from app.api.v1.module_platform.site.model import SiteModel
+
+        site = await self.auth.db.get(SiteModel, data.site_id)
+        if site is None or site.is_deleted or site.status != 0:
+            raise CustomException(msg="所属站点不存在或已停用")
+        if data.package_id is not None:
+            package = await self.auth.db.get(PackageModel, data.package_id)
+            if package is None or package.is_deleted or package.status != 0:
+                raise CustomException(msg="关联套餐不存在或已停用")
+            if package.site_id != data.site_id:
+                raise CustomException(msg="禁止为租户配置其他站点的套餐")
         if await TenantCRUD(self.auth).get(name=data.name):
             raise CustomException(msg="创建失败，名称已存在")
         if await TenantCRUD(self.auth).get(code=data.code):
@@ -434,9 +448,27 @@ class TenantService:
 
         old_package_id = obj.package_id
 
+        from app.api.v1.module_platform.package.model import PackageModel
+        from app.api.v1.module_platform.site.model import SiteModel
+
+        target_site_id = data.site_id if data.site_id is not None else obj.site_id
+        target_package_id = data.package_id if data.package_id is not None else old_package_id
+
+        site = await self.auth.db.get(SiteModel, target_site_id)
+        if site is None or site.is_deleted or site.status != 0:
+            raise CustomException(msg="所属站点不存在或已停用")
+        if target_package_id is not None:
+            package = await self.auth.db.get(PackageModel, target_package_id)
+            if package is None or package.is_deleted or package.status != 0:
+                raise CustomException(msg="关联套餐不存在或已停用")
+            if package.site_id != target_site_id:
+                raise CustomException(msg="租户与套餐必须属于同一站点", status_code=409)
+
         if id == 1:
             if data.code is not None and data.code != obj.code:
                 raise CustomException(msg="系统租户编码不可修改")
+            if target_site_id != obj.site_id:
+                raise CustomException(msg="系统租户所属站点不可修改", status_code=409)
 
         # 套餐变更：仅超管可操作，防止租户管理员自行升级/降级套餐
         if data.package_id is not None and data.package_id != old_package_id:

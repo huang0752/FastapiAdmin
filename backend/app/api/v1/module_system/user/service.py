@@ -57,7 +57,11 @@ class UserService:
         """认证前账号查询必须在全局范围内唯一，避免跨租户误命中。"""
         from app.api.v1.module_system.auth.service import get_unique_user_by_username
 
-        return await get_unique_user_by_username(self.auth.db, username)
+        return await get_unique_user_by_username(
+            self.auth.db,
+            username,
+            self.auth.site_id,
+        )
 
     def _auth_for_user(self, user) -> AuthSchema:
         """为认证前唯一解析出的账号建立显式租户写入上下文。"""

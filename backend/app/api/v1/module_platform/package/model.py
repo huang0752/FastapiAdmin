@@ -1,5 +1,5 @@
 from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.core.base_model import MappedBase, ModelMixin
 
@@ -12,10 +12,15 @@ class PackageModel(ModelMixin):
     """
 
     __tablename__: str = "platform_package"
-    __table_args__: dict[str, str] = {"comment": "租户套餐表"}
+    __table_args__ = (
+        UniqueConstraint("site_id", "name", name="uq_platform_package_site_name"),
+        UniqueConstraint("site_id", "code", name="uq_platform_package_site_code"),
+        {"comment": "租户套餐表"},
+    )
 
-    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, comment="套餐名称")
-    code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, comment="套餐编码")
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="套餐名称")
+    code: Mapped[str] = mapped_column(String(100), nullable=False, comment="套餐编码")
+    site_id: Mapped[int] = mapped_column(Integer, ForeignKey("platform_site.id", ondelete="RESTRICT", onupdate="CASCADE"), nullable=False, index=True, comment="所属品牌站点ID")
     sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="排序")
     price: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="价格(分)")
     period: Mapped[str] = mapped_column(String(10), nullable=False, default="month", comment="计费周期(month/year)")
@@ -27,6 +32,7 @@ class PackageModel(ModelMixin):
     rate_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=60, comment="API速率限制(请求/10秒)")
     status: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment="状态(0:启动 1:停用)", index=True)
     description: Mapped[str | None] = mapped_column(Text, default=None, nullable=True, comment="备注")
+    site = relationship("SiteModel", back_populates="packages", lazy="selectin")
 
     @validates("name")
     def validate_name(self, key: str, name: str) -> str:

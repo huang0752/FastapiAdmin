@@ -101,6 +101,7 @@ class AuthSchema(BaseModel):
     check_data_scope: bool = Field(default=True, description="是否检查数据权限")
     db: AsyncSession | None = Field(default=None, description="数据库会话", exclude=True)
     tenant_id: int | None = Field(default=None, description="租户ID,用于用户认证前查询")
+    site_id: int | None = Field(default=None, description="品牌站点ID")
     _platform_global_read: bool = PrivateAttr(default=False)
 
     @classmethod

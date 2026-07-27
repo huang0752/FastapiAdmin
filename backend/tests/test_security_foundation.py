@@ -494,7 +494,7 @@ def test_platform_tenant_create_adds_initial_admin_membership(
     resp = test_client.post(
         "/platform/tenant/create",
         headers=auth_headers,
-        json={"name": f"租户{suffix}", "code": code},
+        json={"name": f"租户{suffix}", "code": code, "site_id": 1},
     )
     assert resp.status_code == 200, resp.text
     response_data = resp.json()["data"]
@@ -552,7 +552,7 @@ def test_grace_tenant_can_login_refresh_and_use_session_but_expired_cannot(
     create_resp = test_client.post(
         "/platform/tenant/create",
         headers=auth_headers,
-        json={"name": f"宽限期租户{suffix}", "code": code},
+        json={"name": f"宽限期租户{suffix}", "code": code, "site_id": 1},
     )
     assert create_resp.status_code == 200, create_resp.text
     response_data = create_resp.json()["data"]
@@ -600,7 +600,7 @@ async def _verify_ownerless_membership_is_not_promoted() -> None:
 
     suffix = str(time.time_ns() % 1_000_000_000_000)
     async with async_db_session() as db:
-        tenant = TenantModel(name=f"无 owner 租户{suffix}", code=f"O{suffix}", status=0)
+        tenant = TenantModel(name=f"无 owner 租户{suffix}", code=f"O{suffix}", site_id=1, status=0)
         db.add(tenant)
         await db.flush()
         user = UserModel(
@@ -641,9 +641,9 @@ def test_initializer_does_not_promote_first_user_for_ownerless_tenant() -> None:
 
 
 def test_tenant_create_schema_starts_only_in_active_status() -> None:
-    TenantCreateSchema(name="正常租户", code="NormalTenant", status=0)
+    TenantCreateSchema(name="正常租户", code="NormalTenant", site_id=1, status=0)
     with pytest.raises(ValueError):
-        TenantCreateSchema(name="非法初始状态", code="BadTenant", status=1)
+        TenantCreateSchema(name="非法初始状态", code="BadTenant", site_id=1, status=1)
 
 
 def test_tenant_update_rejects_lifecycle_status_and_query_accepts_all() -> None:
@@ -660,7 +660,7 @@ def test_tenant_update_rejects_lifecycle_status_and_query_accepts_all() -> None:
 
 def test_tenant_out_serializes_all_lifecycle_statuses() -> None:
     for status in range(6):
-        payload = TenantOutSchema(name="生命周期租户", code="Lifecycle", status=status)
+        payload = TenantOutSchema(name="生命周期租户", code="Lifecycle", site_id=1, status=status)
         assert payload.model_dump()["status"] == status
 
 
@@ -676,7 +676,7 @@ def test_tenant_batch_status_accepts_only_active_or_suspended() -> None:
 async def _verify_tenant_manual_status_toggle() -> None:
     suffix = str(time.time_ns() % 1_000_000_000_000)
     async with async_db_session() as db:
-        tenant = TenantModel(name=f"手工暂停租户{suffix}", code=f"M{suffix}", status=0)
+        tenant = TenantModel(name=f"手工暂停租户{suffix}", code=f"M{suffix}", site_id=1, status=0)
         db.add(tenant)
         await db.flush()
         auth = AuthSchema(db=db, tenant_id=1, check_data_scope=False)
@@ -847,6 +847,7 @@ async def _verify_expiry_transitions() -> None:
                 TenantModel(
                     name=f"到期状态测试{suffix}{index}",
                     code=code,
+                    site_id=1,
                     end_time=now - timedelta(days=days_past),
                     status=max(0, expected_status - 1),
                 )

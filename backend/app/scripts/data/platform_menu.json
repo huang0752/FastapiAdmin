@@ -428,10 +428,62 @@
         "scope": "platform"
       },
       {
+        "name": "站点管理",
+        "type": 2,
+        "icon": "ri:global-line",
+        "order": 3,
+        "permission": "module_platform:site:query",
+        "route_name": "Site",
+        "route_path": "site",
+        "component_path": "module_platform/site/index",
+        "status": 0,
+        "title": "站点管理",
+        "description": "维护 Host 与品牌站点映射",
+        "scope": "platform",
+        "children": [
+          {
+            "name": "新增",
+            "type": 3,
+            "order": 1,
+            "permission": "module_platform:site:create",
+            "status": 0,
+            "title": "新增",
+            "scope": "platform"
+          },
+          {
+            "name": "编辑",
+            "type": 3,
+            "order": 2,
+            "permission": "module_platform:site:update",
+            "status": 0,
+            "title": "编辑",
+            "scope": "platform"
+          },
+          {
+            "name": "删除",
+            "type": 3,
+            "order": 3,
+            "permission": "module_platform:site:delete",
+            "status": 0,
+            "title": "删除",
+            "scope": "platform"
+          },
+          {
+            "name": "查询",
+            "type": 3,
+            "order": 4,
+            "permission": "module_platform:site:query",
+            "status": 0,
+            "title": "查询",
+            "scope": "platform"
+          }
+        ]
+      },
+      {
         "name": "套餐管理",
         "type": 2,
         "icon": "ri:vip-crown-2-line",
-        "order": 3,
+        "order": 4,
         "permission": "module_package:package:query",
         "route_name": "Package",
         "route_path": "package",

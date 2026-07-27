@@ -13,6 +13,7 @@ class PackageCreateSchema(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=100, description="套餐名称")
     code: str = Field(..., min_length=2, max_length=100, description="套餐编码")
+    site_id: int = Field(..., gt=0, description="所属品牌站点ID")
     status: int = Field(default=0, ge=0, le=1, description="状态(0:启动 1:停用)")
     description: str | None = Field(default=None, max_length=255, description="描述")
     sort: int = Field(default=0, ge=0, description="排序")
@@ -56,6 +57,7 @@ class PackageUpdateSchema(PackageCreateSchema):
 
     name: str | None = Field(default=None, max_length=100, description="套餐名称")  # type: ignore[assignment]
     code: str | None = Field(default=None, max_length=100, description="套餐编码")  # type: ignore[assignment]
+    site_id: int | None = Field(default=None, gt=0, description="所属品牌站点ID")
     status: int | None = Field(default=None, ge=0, le=1, description="状态(0:启动 1:停用)")
     sort: int | None = Field(default=None, ge=0, description="排序")
     description: str | None = Field(default=None, max_length=255, description="描述")
@@ -101,6 +103,7 @@ class PackageQueryParam(BaseQueryParam):
     name: str | None = Query(None, description="套餐名称")
     code: str | None = Query(None, description="套餐编码")
     status: int | None = Query(None, ge=0, le=1, description="状态(0:启动 1:停用)")
+    site_id: int | None = Query(None, gt=0, description="所属品牌站点ID")
 
     def __post_init__(self) -> None:
         if self.name:
@@ -109,6 +112,8 @@ class PackageQueryParam(BaseQueryParam):
             self.code = (QueueEnum.like.value, self.code)
         if isinstance(self.status, int):
             self.status = (QueueEnum.eq.value, self.status)
+        if isinstance(self.site_id, int):
+            self.site_id = (QueueEnum.eq.value, self.site_id)
 
 
 class PackageMenuSetSchema(BaseModel):

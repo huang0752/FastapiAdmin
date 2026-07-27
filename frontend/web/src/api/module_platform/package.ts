@@ -86,12 +86,14 @@ export default PackageAPI;
 export interface PackagePageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {
   name?: string;
   code?: string;
+  site_id?: number;
   status?: number;
 }
 
 export interface PackageTable extends BaseType {
   name: string;
   code: string;
+  site_id: number;
   sort: number;
   price: number;
   period: string;
@@ -108,6 +110,7 @@ export interface PackageTable extends BaseType {
 export interface PackageForm extends BaseFormType {
   name?: string;
   code?: string;
+  site_id?: number;
   sort?: number;
   price?: number;
   period?: string;
@@ -124,6 +127,7 @@ export interface PackageForm extends BaseFormType {
 export interface PackageCreateForm {
   name: string;
   code: string;
+  site_id: number;
   status?: number;
   sort?: number;
   description?: string;
@@ -140,6 +144,7 @@ export interface PackageCreateForm {
 export interface PackageUpdateForm {
   name?: string;
   code?: string;
+  site_id?: number;
   status?: number;
   sort?: number;
   description?: string;

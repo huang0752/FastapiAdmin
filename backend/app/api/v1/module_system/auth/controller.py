@@ -17,7 +17,6 @@ from app.core.base_schema import (
     LogoutPayloadSchema,
     RefreshTokenPayloadSchema,
 )
-from app.core.cache_util import cache
 from app.core.dependencies import AuthPermission, db_getter, redis_getter
 from app.core.exceptions import CustomException
 from app.core.logger import logger
@@ -51,6 +50,7 @@ from .service import (
     CaptchaService,
     LoginService,
     TenantRegisterService,
+    resolve_request_site,
 )
 
 AuthRouter = APIRouter(route_class=OperationLogRoute, prefix="/auth", tags=["系统管理", "认证授权"])
@@ -87,11 +87,17 @@ async def login_for_access_token_controller(
     response_model=ResponseSchema[JWTOutSchema],
 )
 async def get_new_token_controller(
+    request: Request,
     payload: RefreshTokenPayloadSchema,
     db: Annotated[AsyncSession, Depends(db_getter)],
     redis: Annotated[Redis, Depends(redis_getter)],
 ) -> JSONResponse:
-    new_token = await LoginService.refresh_token(db=db, redis=redis, refresh_token=payload)
+    new_token = await LoginService.refresh_token(
+        request=request,
+        db=db,
+        redis=redis,
+        refresh_token=payload,
+    )
     return SuccessResponse(data=new_token, msg="刷新成功")
 
 
@@ -133,8 +139,11 @@ async def get_auto_login_users_controller(
     auth: Annotated[AuthSchema, Depends(AuthPermission(["module_system:auth:auto_login"]))],
     db: Annotated[AsyncSession, Depends(db_getter)],
 ) -> JSONResponse:
-    tenant_id = None if auth.user.is_superuser else auth.tenant_id
-    users = await AutoLoginService.get_auto_login_users(db=db, tenant_id=tenant_id)
+    users = await AutoLoginService.get_auto_login_users(
+        db=db,
+        tenant_id=auth.tenant_id,
+        site_id=auth.site_id,
+    )
     return SuccessResponse(data=users, msg="获取成功")
 
 
@@ -149,8 +158,13 @@ async def get_auto_login_token_controller(
     db: Annotated[AsyncSession, Depends(db_getter)],
     user_id: int,
 ) -> JSONResponse:
-    tenant_id = None if auth.user.is_superuser else auth.tenant_id
-    result = await AutoLoginService.create_auto_login_token(redis=redis, db=db, user_id=user_id, tenant_id=tenant_id)
+    result = await AutoLoginService.create_auto_login_token(
+        redis=redis,
+        db=db,
+        user_id=user_id,
+        tenant_id=auth.tenant_id,
+        site_id=auth.site_id,
+    )
     return SuccessResponse(data=result, msg="获取成功")
 
 
@@ -193,7 +207,6 @@ async def select_tenant_controller(
     response_model=ResponseSchema[list[TenantOptionSchema]],
     dependencies=[Depends(AuthPermission())],
 )
-@cache(expire=120, namespace=_AUTH_TENANTS_NS)
 async def get_user_tenants_controller(
     auth: Annotated[AuthSchema, Depends(AuthPermission())],
     db: Annotated[AsyncSession, Depends(db_getter)],
@@ -312,12 +325,15 @@ async def oauth_callback_controller(
     response_model=ResponseSchema[TenantRegisterOutSchema],
 )
 async def tenant_register_controller(
+    request: Request,
     data: TenantRegisterSchema,
     db: Annotated[AsyncSession, Depends(db_getter)],
 ) -> JSONResponse:
     require_tenant_register_enabled()
+    site = await resolve_request_site(db, request)
     result = await TenantRegisterService.register(
         db=db,
+        site_id=site.id,
         username=data.username,
         password=data.password,
         email=data.email,

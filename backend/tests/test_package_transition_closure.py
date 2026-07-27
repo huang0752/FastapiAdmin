@@ -13,6 +13,7 @@ from app.api.v1.module_platform.order.model import OrderModel
 from app.api.v1.module_platform.order.service import PaymentService
 from app.api.v1.module_platform.package.model import PackageModel
 from app.api.v1.module_platform.package.service import PackageService
+from app.api.v1.module_platform.site.model import SiteModel
 from app.api.v1.module_platform.tenant.crud import TenantCRUD
 from app.api.v1.module_platform.tenant.model import TenantModel
 from app.api.v1.module_platform.tenant.schema import TenantUpdateSchema
@@ -25,6 +26,7 @@ def _tenant(*, package_id: int | None = 10) -> SimpleNamespace:
         id=2,
         name="测试租户",
         code="tenant2",
+        site_id=1,
         package_id=package_id,
         status=0,
         start_time=None,
@@ -38,6 +40,7 @@ def _package(package_id: int = 20) -> SimpleNamespace:
     return SimpleNamespace(
         id=package_id,
         name="目标套餐",
+        site_id=1,
         status=0,
         max_users=20,
         max_roles=10,
@@ -55,6 +58,27 @@ def test_package_change_plan_is_set_safe_and_keeps_owner_minimum() -> None:
     assert plan.final_menu_ids == {2, 3, 4}
     assert plan.removed_menu_ids == {1}
     assert plan.added_menu_ids == {3, 4}
+
+
+def test_package_change_rejects_cross_site_package() -> None:
+    tenant = _tenant()
+    tenant.site_id = 10
+    package = _package()
+    package.site_id = 20
+    db = SimpleNamespace(get=AsyncMock())
+
+    async def fake_get(model, object_id):
+        if model is TenantModel and object_id == tenant.id:
+            return tenant
+        if model is PackageModel and object_id == package.id:
+            return package
+        return None
+
+    db.get.side_effect = fake_get
+    auth = AuthSchema.model_construct(db=db, tenant_id=1, check_data_scope=False)
+
+    with pytest.raises(Exception, match="套餐.*站点|跨站点"):
+        asyncio.run(TenantService(auth).plan_package_change(tenant.id, package.id))
 
 
 def test_apply_package_change_updates_package_syncs_roles_and_invalidates_cache(
@@ -115,8 +139,21 @@ def test_apply_package_change_updates_package_syncs_roles_and_invalidates_cache(
 
 def test_platform_update_uses_shared_package_application(monkeypatch: pytest.MonkeyPatch) -> None:
     tenant = _tenant()
+    package = _package()
+    package.is_deleted = False
+    site = SimpleNamespace(id=tenant.site_id, status=0, is_deleted=False)
+    db = SimpleNamespace(get=AsyncMock())
+
+    async def fake_db_get(model, object_id):
+        if model is SiteModel and object_id == site.id:
+            return site
+        if model is PackageModel and object_id == package.id:
+            return package
+        return None
+
+    db.get.side_effect = fake_db_get
     auth = AuthSchema.model_construct(
-        db=SimpleNamespace(),
+        db=db,
         tenant_id=1,
         user=SimpleNamespace(id=1, is_superuser=True),
         check_data_scope=False,
