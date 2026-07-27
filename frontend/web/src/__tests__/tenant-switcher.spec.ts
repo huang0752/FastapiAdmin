@@ -102,8 +102,35 @@ const ElDropdownStub = defineComponent({
   },
 });
 
+const ElDropdownContentStub = defineComponent({
+  name: "ElDropdown",
+  setup(_, { slots }) {
+    return () => h("div", [slots.default?.(), slots.dropdown?.()]);
+  },
+});
+
+const ElScrollbarStub = defineComponent({
+  name: "ElScrollbar",
+  props: { maxHeight: [String, Number] },
+  setup(props, { slots }) {
+    return () =>
+      h(
+        "div",
+        {
+          "data-test": "tenant-list-scroll",
+          "data-max-height": props.maxHeight,
+        },
+        slots.default?.()
+      );
+  },
+});
+
 beforeEach(() => {
   mocks.sequence.splice(0);
+  mocks.tenantList.value = [
+    { id: 1, name: "租户一" },
+    { id: 2, name: "租户二" },
+  ];
   mocks.currentTenant.value = { id: 1, name: "租户一" };
   Object.assign(mocks.userStore, {
     info: { id: 7, tenant_id: 1 },
@@ -142,6 +169,31 @@ beforeEach(() => {
 });
 
 describe("FaTenantSwitcher tenant/session isolation", () => {
+  it("keeps a large tenant list inside a viewport-bounded scroll area", () => {
+    mocks.tenantList.value = Array.from({ length: 50 }, (_, index) => ({
+      id: index + 1,
+      name: `租户${index + 1}`,
+    }));
+    const wrapper = mount(FaTenantSwitcher, {
+      global: {
+        stubs: {
+          ElDropdown: ElDropdownContentStub,
+          ElDropdownMenu: { template: "<div><slot /></div>" },
+          ElDropdownItem: { template: "<div><slot /></div>" },
+          ElScrollbar: ElScrollbarStub,
+          ElTag: true,
+          ElIcon: true,
+          FaSvgIcon: true,
+        },
+      },
+    });
+
+    expect(wrapper.get('[data-test="tenant-list-scroll"]').attributes("data-max-height")).toBe(
+      "min(60vh, 420px)"
+    );
+    expect(wrapper.text()).toContain("租户50");
+  });
+
   it("clears old tenant state before activating the new session and reloads immediately", async () => {
     const activation = deferred();
     mocks.userStore.selectTenant.mockReset().mockImplementation(() => {

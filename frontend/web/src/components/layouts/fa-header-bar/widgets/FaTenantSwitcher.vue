@@ -30,30 +30,32 @@
           <span class="dropdown-title">切换租户</span>
           <ElTag size="small" effect="plain" type="info"> 共 {{ tenantList.length }} 个 </ElTag>
         </div>
-        <ElDropdownItem
-          v-for="t in tenantList"
-          :key="t.id"
-          :command="t.id"
-          :class="{ 'is-active': t.id === currentTenant?.id }"
-          :disabled="switching"
-        >
-          <div class="dropdown-item" :class="{ 'is-current': t.id === currentTenant?.id }">
-            <div class="item-main">
-              <FaSvgIcon
-                :icon="t.id === currentTenant?.id ? 'ri:check-line' : 'ri:building-2-line'"
-                class="item-icon"
-                :class="{ active: t.id === currentTenant?.id }"
-              />
-              <div class="item-text">
-                <div class="item-name">{{ t.name }}</div>
-                <div v-if="t.code" class="item-code">{{ t.code }}</div>
+        <ElScrollbar class="tenant-list-scrollbar" max-height="min(60vh, 420px)">
+          <ElDropdownItem
+            v-for="t in tenantList"
+            :key="t.id"
+            :command="t.id"
+            :class="{ 'is-active': t.id === currentTenant?.id }"
+            :disabled="switching"
+          >
+            <div class="dropdown-item" :class="{ 'is-current': t.id === currentTenant?.id }">
+              <div class="item-main">
+                <FaSvgIcon
+                  :icon="t.id === currentTenant?.id ? 'ri:check-line' : 'ri:building-2-line'"
+                  class="item-icon"
+                  :class="{ active: t.id === currentTenant?.id }"
+                />
+                <div class="item-text">
+                  <div class="item-name">{{ t.name }}</div>
+                  <div v-if="t.code" class="item-code">{{ t.code }}</div>
+                </div>
               </div>
+              <ElTag v-if="t.id === currentTenant?.id" type="primary" size="small" effect="plain">
+                当前
+              </ElTag>
             </div>
-            <ElTag v-if="t.id === currentTenant?.id" type="primary" size="small" effect="plain">
-              当前
-            </ElTag>
-          </div>
-        </ElDropdownItem>
+          </ElDropdownItem>
+        </ElScrollbar>
         <div class="dropdown-footer-hint">
           <FaSvgIcon icon="ri:information-line" class="hint-icon" />
           <span>点击其他租户即可切换</span>
