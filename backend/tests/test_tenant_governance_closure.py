@@ -8,8 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
+from app.api.v1.module_platform.menu.model import MenuModel
 from app.api.v1.module_platform.tenant.model import TenantModel, TenantUserModel
 from app.api.v1.module_platform.tenant.schema import TenantUpdateSchema, TenantUserAddSchema
 from app.api.v1.module_platform.tenant.service import TenantService
@@ -20,6 +21,7 @@ from app.api.v1.module_system.user.model import UserModel, UserRolesModel
 from app.core.base_schema import AuthSchema, BatchSetAvailable
 from app.core.database import async_db_session
 from app.core.exceptions import CustomException
+from app.scripts.initialize import InitializeData
 
 
 def _route_permissions(app, path: str, method: str) -> list[str]:
@@ -63,6 +65,54 @@ def test_workspace_update_permission_is_seeded_under_tenant_workspace() -> None:
 
     walk(payload)
     assert parents == ["租户工作台"]
+
+
+async def _verify_existing_menu_tree_is_incrementally_repaired() -> None:
+    async with async_db_session() as db:
+        workspace = (
+            await db.execute(
+                select(MenuModel).where(MenuModel.route_name == "PlatformWorkspace").limit(1)
+            )
+        ).scalar_one()
+        query_button = (
+            await db.execute(
+                select(MenuModel)
+                .where(
+                    MenuModel.parent_id == workspace.id,
+                    MenuModel.type == 3,
+                    MenuModel.permission == "module_platform:workspace:query",
+                )
+                .limit(1)
+            )
+        ).scalar_one()
+        workspace.scope = "platform"
+        query_button.scope = "platform"
+        await db.execute(
+            delete(MenuModel).where(MenuModel.permission == "module_platform:workspace:update")
+        )
+        await db.flush()
+
+        await InitializeData()._InitializeData__init_data(db)
+
+        await db.refresh(workspace)
+        await db.refresh(query_button)
+        update_buttons = (
+            await db.execute(
+                select(MenuModel).where(
+                    MenuModel.parent_id == workspace.id,
+                    MenuModel.permission == "module_platform:workspace:update",
+                )
+            )
+        ).scalars().all()
+        assert workspace.scope == "tenant"
+        assert query_button.scope == "tenant"
+        assert len(update_buttons) == 1
+        assert update_buttons[0].scope == "tenant"
+        await db.rollback()
+
+
+def test_existing_database_gets_workspace_permission_incrementally(test_client: TestClient) -> None:
+    asyncio.run(_verify_existing_menu_tree_is_incrementally_repaired())
 
 
 @pytest.mark.parametrize("status", range(6))

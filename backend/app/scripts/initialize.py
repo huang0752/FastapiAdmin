@@ -231,7 +231,89 @@ class InitializeData:
                 logger.error(f"❌️ 初始化 {table_name} 表数据失败")
                 raise
 
+        await self.__ensure_owner_workspace_menus(db)
         await self.__backfill_tenant_memberships(db)
+
+    async def __ensure_owner_workspace_menus(self, db: AsyncSession) -> None:
+        """幂等补齐旧数据库缺失的租户工作台必备权限。"""
+        platform_root = (
+            await db.execute(
+                select(MenuModel).where(MenuModel.route_name == "Platform").limit(1)
+            )
+        ).scalar_one_or_none()
+        if platform_root is None:
+            return
+
+        changed = False
+        workspace = (
+            await db.execute(
+                select(MenuModel).where(MenuModel.route_name == "PlatformWorkspace").limit(1)
+            )
+        ).scalar_one_or_none()
+        if workspace is None:
+            workspace = MenuModel(
+                name="租户工作台",
+                type=2,
+                icon="ri:briefcase-line",
+                order=13,
+                permission="module_platform:workspace:query",
+                route_name="PlatformWorkspace",
+                route_path="workspace",
+                component_path="module_platform/self_service/index",
+                title="租户工作台",
+                scope="tenant",
+                status=0,
+                parent_id=platform_root.id,
+            )
+            db.add(workspace)
+            await db.flush()
+            changed = True
+
+        for menu in (platform_root, workspace):
+            if menu.scope != "tenant":
+                menu.scope = "tenant"
+                changed = True
+        if workspace.parent_id != platform_root.id:
+            workspace.parent_id = platform_root.id
+            changed = True
+
+        button_specs = (
+            ("查询", 1, "module_platform:workspace:query"),
+            ("修改品牌配置", 2, "module_platform:workspace:update"),
+        )
+        for name, order, permission in button_specs:
+            button = (
+                await db.execute(
+                    select(MenuModel)
+                    .where(MenuModel.type == 3, MenuModel.permission == permission)
+                    .order_by(MenuModel.id)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if button is None:
+                button = MenuModel(
+                    name=name,
+                    title=name,
+                    type=3,
+                    order=order,
+                    permission=permission,
+                    scope="tenant",
+                    status=0,
+                    parent_id=workspace.id,
+                )
+                db.add(button)
+                changed = True
+                continue
+            if button.parent_id != workspace.id:
+                button.parent_id = workspace.id
+                changed = True
+            if button.scope != "tenant":
+                button.scope = "tenant"
+                changed = True
+
+        if changed:
+            await db.flush()
+            logger.info("✅️ 已增量校准租户工作台菜单与品牌配置权限")
 
     async def __backfill_tenant_memberships(self, db: AsyncSession) -> None:
         """回填历史成员关系，并幂等修复普通租户 owner 角色与授权。"""
