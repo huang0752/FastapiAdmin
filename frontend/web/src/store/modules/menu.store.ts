@@ -34,6 +34,8 @@ import { AppRouteRecord } from "@/types/router";
 import { getFirstMenuPath } from "@utils";
 import { HOME_PAGE_PATH } from "@/router";
 import { mergeShellRoutesIntoMenu } from "@/router/staticRoutes";
+import { shouldIncludeShellRouteGroup } from "@/router/filterByAssembly";
+import { useAssemblyStoreHook } from "@/store/modules/assembly.store";
 
 /**
  * 菜单状态管理
@@ -42,6 +44,7 @@ import { mergeShellRoutesIntoMenu } from "@/router/staticRoutes";
 export const useMenuStore = defineStore(
   "menuStore",
   () => {
+    const assemblyStore = useAssemblyStoreHook();
     /** 首页路径 */
     const homePath = ref(HOME_PAGE_PATH);
     /** 菜单列表 */
@@ -56,9 +59,12 @@ export const useMenuStore = defineStore(
      * @param list 菜单路由记录数组
      */
     const setMenuList = (list: AppRouteRecord[]) => {
-      const merged = mergeShellRoutesIntoMenu(list);
+      const merged = mergeShellRoutesIntoMenu(list, assemblyStore.summary);
       menuList.value = merged;
-      setHomePath(HOME_PAGE_PATH || getFirstMenuPath(merged));
+      const preferredHome = shouldIncludeShellRouteGroup("home", assemblyStore.summary)
+        ? HOME_PAGE_PATH
+        : "";
+      setHomePath(preferredHome || getFirstMenuPath(merged) || "/");
     };
 
     /**

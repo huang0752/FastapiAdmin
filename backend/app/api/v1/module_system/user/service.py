@@ -264,7 +264,10 @@ class UserService:
                 else []
             )
         menu_tree = traversal_to_tree([menu.model_dump() for menu in menus])
-        user_dict.menus = filter_menu_tree_by_assembly(menu_tree)
+        user_dict.menus = filter_menu_tree_by_assembly(
+            menu_tree,
+            audience="platform" if self.auth.is_platform_global else "tenant",
+        )
         return user_dict
 
     async def update_current_info(self, data: CurrentUserUpdateSchema) -> UserOutSchema:

@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.v1.module_platform.package.service import PackageService
 from app.config.setting import settings
 from app.core.assembly import (
     AssemblyConfig,
@@ -148,6 +149,77 @@ def test_assembly_filters_runtime_menu_tree_by_plugin_and_route_group() -> None:
     assert titles == {"系统管理", "任务管理"}
     task = next(item for item in filtered if item["title"] == "任务管理")
     assert task["children"] == [{"title": "业务任务", "route_path": "business/task"}]
+
+
+def test_menu_route_name_allowlist_supports_platform_and_tenant_audiences() -> None:
+    assembly = AssemblyConfig(
+        included_menu_route_names=["Tenant", "Dept"],
+        platform_menu_route_names=["Tenant"],
+        tenant_menu_route_names=["Dept"],
+    )
+    menu_tree = [
+        {
+            "route_name": "Platform",
+            "route_path": "/platform",
+            "children": [
+                {
+                    "route_name": "Tenant",
+                    "route_path": "tenant",
+                    "children": [{"permission": "module_platform:tenant:create"}],
+                },
+                {"route_name": "PlatformOrder", "route_path": "order"},
+            ],
+        },
+        {
+            "route_name": "System",
+            "route_path": "/system",
+            "children": [
+                {"route_name": "Dept", "route_path": "dept"},
+                {"route_name": "Dict", "route_path": "dict"},
+            ],
+        },
+    ]
+
+    filtered = assembly.filter_menu_tree(menu_tree)
+    platform_filtered = assembly.filter_menu_tree(menu_tree, audience="platform")
+    tenant_filtered = assembly.filter_menu_tree(menu_tree, audience="tenant")
+
+    assert [item["route_name"] for item in filtered] == ["Platform", "System"]
+    assert [item["route_name"] for item in filtered[0]["children"]] == ["Tenant"]
+    assert filtered[0]["children"][0]["children"] == [
+        {"permission": "module_platform:tenant:create"}
+    ]
+    assert [item["route_name"] for item in filtered[1]["children"]] == ["Dept"]
+    assert [item["route_name"] for item in platform_filtered] == ["Platform"]
+    assert [item["route_name"] for item in tenant_filtered] == ["System"]
+
+
+def test_tenant_workspace_feature_flag_removes_workspace_owner_permissions(tmp_path: Path) -> None:
+    config = tmp_path / "no-workspace.toml"
+    config.write_text(
+        """
+[assembly]
+name = "no-workspace"
+
+[features]
+flags = { tenant_workspace = false }
+""",
+        encoding="utf-8",
+    )
+    old_file = settings.APP_ASSEMBLY_FILE
+    old_name = settings.APP_ASSEMBLY
+    settings.APP_ASSEMBLY_FILE = str(config)
+    settings.APP_ASSEMBLY = "no-workspace"
+    reset_assembly_cache()
+    try:
+        required = PackageService.owner_required_menu_permissions()
+        assert "module_platform:workspace:query" not in required
+        assert "module_platform:workspace:update" not in required
+        assert "module_system:dept:query" in required
+    finally:
+        settings.APP_ASSEMBLY_FILE = old_file
+        settings.APP_ASSEMBLY = old_name
+        reset_assembly_cache()
 
 
 @pytest.mark.asyncio

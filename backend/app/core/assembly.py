@@ -102,6 +102,9 @@ class AssemblyConfig:
     disabled_plugins: list[str] = field(default_factory=list)
     enabled_route_groups: list[str] = field(default_factory=list)
     disabled_route_groups: list[str] = field(default_factory=list)
+    included_menu_route_names: list[str] = field(default_factory=list)
+    platform_menu_route_names: list[str] = field(default_factory=list)
+    tenant_menu_route_names: list[str] = field(default_factory=list)
     seed_packs: list[str] = field(default_factory=lambda: ["legacy"])
     feature_flags: dict[str, bool] = field(default_factory=dict)
 
@@ -140,7 +143,29 @@ class AssemblyConfig:
 
         return self.is_route_group_enabled(route_group)
 
-    def filter_menu_tree(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _menu_route_name_allowlist(self, audience: str | None) -> set[str]:
+        if audience == "platform" and self.platform_menu_route_names:
+            return set(self.platform_menu_route_names)
+        if audience == "tenant" and self.tenant_menu_route_names:
+            return set(self.tenant_menu_route_names)
+        return set(self.included_menu_route_names)
+
+    def filter_menu_tree(
+        self,
+        items: list[dict[str, Any]],
+        *,
+        audience: str | None = None,
+    ) -> list[dict[str, Any]]:
+        allowlist = self._menu_route_name_allowlist(audience)
+        return self._filter_menu_tree(items, allowlist=allowlist)
+
+    def _filter_menu_tree(
+        self,
+        items: list[dict[str, Any]],
+        *,
+        allowlist: set[str],
+        include_descendants: bool = False,
+    ) -> list[dict[str, Any]]:
         filtered: list[dict[str, Any]] = []
         for item in items:
             if not self.is_menu_item_enabled(item):
@@ -148,8 +173,17 @@ class AssemblyConfig:
 
             next_item = dict(item)
             children = next_item.get("children") or []
+            route_name = str(next_item.get("route_name") or "")
+            is_selected = bool(route_name and route_name in allowlist)
             if children:
-                next_item["children"] = self.filter_menu_tree(children)
+                next_item["children"] = self._filter_menu_tree(
+                    children,
+                    allowlist=allowlist,
+                    include_descendants=include_descendants or is_selected,
+                )
+
+            if allowlist and not include_descendants and not is_selected and not next_item.get("children"):
+                continue
 
             had_children = bool(children)
             is_empty_catalog = had_children and not next_item.get("children") and not next_item.get("component_path")
@@ -203,6 +237,7 @@ def load_assembly_from_file(path: Path) -> AssemblyConfig:
     core = raw.get("core", {})
     backend = raw.get("backend", {})
     frontend = raw.get("frontend", {})
+    menus = raw.get("menus", {})
     seed = raw.get("seed", {})
     features = raw.get("features", {})
 
@@ -224,6 +259,9 @@ def load_assembly_from_file(path: Path) -> AssemblyConfig:
         disabled_plugins=_string_list(backend.get("disabled_plugins")),
         enabled_route_groups=_string_list(frontend.get("enabled_route_groups")),
         disabled_route_groups=_string_list(frontend.get("disabled_route_groups")),
+        included_menu_route_names=_string_list(menus.get("included_route_names")),
+        platform_menu_route_names=_string_list(menus.get("platform_route_names")),
+        tenant_menu_route_names=_string_list(menus.get("tenant_route_names")),
         seed_packs=_string_list(seed.get("packs")) or ["legacy"],
         feature_flags={str(k): bool(v) for k, v in flags_raw.items()},
     )
@@ -254,5 +292,9 @@ def get_frontend_assembly_summary() -> dict[str, Any]:
     return get_assembly().frontend_summary()
 
 
-def filter_menu_tree_by_assembly(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return get_assembly().filter_menu_tree(items)
+def filter_menu_tree_by_assembly(
+    items: list[dict[str, Any]],
+    *,
+    audience: str | None = None,
+) -> list[dict[str, Any]]:
+    return get_assembly().filter_menu_tree(items, audience=audience)

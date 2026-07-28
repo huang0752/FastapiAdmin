@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.module_platform.menu.model import MenuModel
 from app.api.v1.module_platform.site.model import SiteModel
 from app.api.v1.module_platform.tenant.model import TenantModel
+from app.core.assembly import get_assembly
 from app.core.base_schema import AuthSchema
 from app.core.dependencies import require_superadmin
 from app.core.exceptions import CustomException
@@ -60,6 +61,18 @@ class PackageService:
 
     def __init__(self, auth: AuthSchema) -> None:
         self.auth = auth
+
+    @staticmethod
+    def owner_required_menu_permissions() -> frozenset[str]:
+        permissions = set(OWNER_REQUIRED_MENU_PERMISSIONS)
+        if not get_assembly().is_feature_enabled("tenant_workspace", True):
+            permissions.difference_update(
+                {
+                    "module_platform:workspace:query",
+                    "module_platform:workspace:update",
+                }
+            )
+        return frozenset(permissions)
 
     async def _validate_site(self, site_id: int) -> None:
         site = await self.auth.db.get(SiteModel, site_id)
@@ -186,16 +199,17 @@ class PackageService:
     @staticmethod
     async def get_owner_minimum_menu_ids(db: AsyncSession) -> set[int]:
         """解析租户 owner 必备的组织管理与自助服务菜单。"""
+        required_permissions = PackageService.owner_required_menu_permissions()
         menus = (
             await db.execute(
                 select(MenuModel).where(
-                    MenuModel.permission.in_(OWNER_REQUIRED_MENU_PERMISSIONS),
+                    MenuModel.permission.in_(required_permissions),
                     MenuModel.status == 0,
                 )
             )
         ).scalars().all()
         found_permissions = {menu.permission for menu in menus}
-        missing = sorted(OWNER_REQUIRED_MENU_PERMISSIONS - found_permissions)
+        missing = sorted(required_permissions - found_permissions)
         if missing:
             raise CustomException(msg=f"租户 owner 必备菜单缺失: {missing}")
         return await PackageService.expand_tenant_menu_ids(db, {menu.id for menu in menus})

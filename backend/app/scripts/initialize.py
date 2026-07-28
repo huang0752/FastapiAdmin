@@ -234,7 +234,8 @@ class InitializeData:
                 logger.error(f"❌️ 初始化 {table_name} 表数据失败")
                 raise
 
-        await self.__ensure_owner_workspace_menus(db)
+        if self._assembly.is_feature_enabled("tenant_workspace", True):
+            await self.__ensure_owner_workspace_menus(db)
         await self.__backfill_tenant_memberships(db)
 
     async def __ensure_owner_workspace_menus(self, db: AsyncSession) -> None:

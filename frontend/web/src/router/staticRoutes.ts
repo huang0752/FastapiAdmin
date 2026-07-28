@@ -12,6 +12,11 @@ import { defineComponent, h, onMounted, ref } from "vue";
 import type { RouteRecordRaw } from "vue-router";
 import { RouterView, useRoute } from "vue-router";
 import { $t } from "@/locales";
+import {
+  defaultAssemblySummary,
+  type AssemblySummary,
+} from "@/config/assembly/default";
+import { shouldIncludeShellRouteGroup } from "@/router/filterByAssembly";
 
 /** 首页 / 仪表盘父级 meta（侧栏、静态子路由共用） */
 export const HOME_MENU_META: RouteMeta = {
@@ -279,7 +284,10 @@ function dashboardRoutesToShellMenu(route: AppRouteRecord, parentAbs = ""): AppR
   };
 }
 
-export function mergeShellRoutesIntoMenu(menuList: AppRouteRecord[]): AppRouteRecord[] {
+export function mergeShellRoutesIntoMenu(
+  menuList: AppRouteRecord[],
+  summary: AssemblySummary = defaultAssemblySummary
+): AppRouteRecord[] {
   const paths = new Set<string>();
   const names = new Set<string>();
   collectPathsAndNames(menuList, paths, names);
@@ -299,9 +307,11 @@ export function mergeShellRoutesIntoMenu(menuList: AppRouteRecord[]): AppRouteRe
     }
   };
 
-  tryPush(mergeShellHomeMenu);
+  if (shouldIncludeShellRouteGroup("home", summary)) {
+    tryPush(mergeShellHomeMenu);
+  }
 
-  if (!paths.has("/dashboard")) {
+  if (shouldIncludeShellRouteGroup("dashboard", summary) && !paths.has("/dashboard")) {
     tryPush(dashboardRoutesToShellMenu(structuredClone(getDashboardMenuTreeForMerge())));
   }
 

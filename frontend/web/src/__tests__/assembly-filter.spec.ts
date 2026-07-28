@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { filterRoutesByAssembly, isRouteGroupEnabled } from "../router/filterByAssembly";
+import {
+  filterRoutesByAssembly,
+  isRouteGroupEnabled,
+  shouldIncludeShellRouteGroup,
+} from "../router/filterByAssembly";
 import fastEnterConfig from "@/config/modules/fastEnter";
 import { fastEnterRouteGroupMap } from "@/config/assembly/routeGroups";
 import type { AssemblySummary } from "@/config/assembly/default";
@@ -74,5 +78,16 @@ describe("assembly route filtering", () => {
 
     expect(routeNames.length).toBeGreaterThan(0);
     expect(routeNames.every((routeName) => routeName in fastEnterRouteGroupMap)).toBe(true);
+  });
+
+  it("does not restore home or dashboard shell menus when assembly disables them", () => {
+    const productSummary: AssemblySummary = {
+      ...summary,
+      enabledRouteGroups: ["system", "platform", "user-profile", "exception"],
+      disabledRouteGroups: ["home", "dashboard"],
+    };
+    expect(shouldIncludeShellRouteGroup("home", productSummary)).toBe(false);
+    expect(shouldIncludeShellRouteGroup("dashboard", productSummary)).toBe(false);
+    expect(shouldIncludeShellRouteGroup("system", productSummary)).toBe(true);
   });
 });

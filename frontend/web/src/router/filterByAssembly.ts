@@ -19,6 +19,13 @@ export function isRouteGroupEnabled(
   return summary.enabledRouteGroups.length === 0 || summary.enabledRouteGroups.includes(routeGroup);
 }
 
+export function shouldIncludeShellRouteGroup(
+  routeGroup: string,
+  summary: AssemblySummary = defaultAssemblySummary
+): boolean {
+  return isRouteGroupEnabled(routeGroup, summary);
+}
+
 export function filterRoutesByAssembly<T extends RouteRecordRaw>(
   routes: T[],
   summary: AssemblySummary = defaultAssemblySummary
