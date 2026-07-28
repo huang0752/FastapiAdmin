@@ -43,6 +43,19 @@ def test_online_session_schema_persists_site_id() -> None:
     assert session.model_dump()["site_id"] == 30
 
 
+def test_super_admin_role_marks_nondefault_platform_tenant_as_global() -> None:
+    auth = AuthSchema.model_construct(
+        user=SimpleNamespace(
+            is_superuser=True,
+            roles=[SimpleNamespace(code="SUPER_ADMIN")],
+        ),
+        tenant_id=2,
+        check_data_scope=False,
+    )
+
+    assert auth.is_platform_global is True
+
+
 def test_request_site_resolution_rejects_unknown_host(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.api.v1.module_platform.site.service import SiteService
     from app.api.v1.module_system.auth.service import resolve_request_site

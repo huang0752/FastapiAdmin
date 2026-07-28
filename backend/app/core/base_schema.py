@@ -120,9 +120,15 @@ class AuthSchema(BaseModel):
         """是否处于平台全局管理模式。
 
         超级管理员切换到普通租户后属于租户代管模式，数据查询仍应受当前
-        ``tenant_id`` 约束；只有系统租户 1 才允许绕过租户过滤。
+        ``tenant_id`` 约束；系统租户 1 或明确绑定 ``SUPER_ADMIN`` 角色的
+        多站点平台租户允许绕过租户过滤。
         """
-        return bool(self.user and self.user.is_superuser and self.tenant_id == 1)
+        if not self.user or not self.user.is_superuser:
+            return False
+        if self.tenant_id == 1:
+            return True
+        roles = getattr(self.user, "roles", None) or []
+        return any(getattr(role, "code", None) == "SUPER_ADMIN" for role in roles)
 
     @property
     def has_platform_global_read(self) -> bool:
