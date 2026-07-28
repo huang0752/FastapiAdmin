@@ -43,6 +43,7 @@ import {
 } from "@utils";
 import { RouteRegistry } from "./core";
 import { MenuProcessor } from "./MenuProcessor";
+import { resolveAssemblyHomePath } from "./filterByAssembly";
 
 // --- 模块级单例与守卫状态 ---
 
@@ -158,6 +159,16 @@ async function handleRouteGuard(
   }
 
   await ensureAssemblyLoaded();
+  const assemblyStore = useAssemblyStore();
+  const assemblyHomePath = resolveAssemblyHomePath(to.path, assemblyStore.summary);
+  if (assemblyHomePath !== to.path) {
+    return {
+      path: assemblyHomePath,
+      query: to.query,
+      hash: to.hash,
+      replace: true,
+    };
+  }
   if (!isAssemblyRouteAllowed(to)) {
     return { name: "404", replace: true };
   }

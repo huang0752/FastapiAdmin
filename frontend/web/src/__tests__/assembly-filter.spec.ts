@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   filterRoutesByAssembly,
   isRouteGroupEnabled,
+  resolveAssemblyHomePath,
   shouldIncludeShellRouteGroup,
 } from "../router/filterByAssembly";
 import fastEnterConfig from "@/config/modules/fastEnter";
@@ -89,5 +90,19 @@ describe("assembly route filtering", () => {
     expect(shouldIncludeShellRouteGroup("home", productSummary)).toBe(false);
     expect(shouldIncludeShellRouteGroup("dashboard", productSummary)).toBe(false);
     expect(shouldIncludeShellRouteGroup("system", productSummary)).toBe(true);
+  });
+
+  it("falls back to the root path when the configured home route is disabled", () => {
+    const productSummary: AssemblySummary = {
+      ...summary,
+      enabledRouteGroups: ["system", "platform", "user-profile", "exception"],
+      disabledRouteGroups: ["home", "dashboard"],
+    };
+
+    expect(resolveAssemblyHomePath("/home", productSummary)).toBe("/");
+    expect(resolveAssemblyHomePath("/home", summary)).toBe("/home");
+    expect(resolveAssemblyHomePath("/platform/tenant", productSummary)).toBe(
+      "/platform/tenant"
+    );
   });
 });

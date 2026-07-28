@@ -26,6 +26,20 @@ export function shouldIncludeShellRouteGroup(
   return isRouteGroupEnabled(routeGroup, summary);
 }
 
+/**
+ * 装配关闭通用首页时，将历史缓存、登录回跳等遗留的 `/home` 收敛到根路径。
+ * 根路径由路由守卫在动态菜单加载后继续解析为当前装配的实际首页。
+ */
+export function resolveAssemblyHomePath(
+  path: string,
+  summary: AssemblySummary = defaultAssemblySummary
+): string {
+  if (path === "/home" && !isRouteGroupEnabled("home", summary)) {
+    return "/";
+  }
+  return path;
+}
+
 export function filterRoutesByAssembly<T extends RouteRecordRaw>(
   routes: T[],
   summary: AssemblySummary = defaultAssemblySummary

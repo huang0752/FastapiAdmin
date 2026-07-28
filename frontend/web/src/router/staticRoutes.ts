@@ -375,7 +375,6 @@ export const staticRoutes: AppRouteRecordRaw[] = [
   {
     path: "/",
     name: ROOT_LAYOUT_ROUTE_NAME,
-    redirect: "/home",
     component: Layout,
     children: [
       /** 首页（侧栏补入逻辑见同文件 `mergeShellRoutesIntoMenu`） */
