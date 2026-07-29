@@ -27,7 +27,6 @@ from pathlib import Path
 # 第三方库导入
 from fastapi import APIRouter, Depends, Request
 from fastapi import FastAPI as _FastAPI
-from fastapi_limiter.depends import RateLimiter
 from sqlalchemy import select
 
 # 内部库导入
@@ -40,6 +39,7 @@ from app.core.assembly import (
 from app.core.base_schema import AuthSchema
 from app.core.dependencies import get_current_user
 from app.core.exceptions import CustomException
+from app.core.http_limit import TenantPackageRateLimiter
 from app.core.logger import logger
 
 # 模块级缓存：最近一次构建的动态路由实例
@@ -62,7 +62,7 @@ def set_app_ref(app: _FastAPI) -> None:
 def get_dynamic_router_dependencies() -> list:
     """动态插件 HTTP 路由统一依赖：限流 + 插件运行时边界。"""
     return [
-        Depends(RateLimiter(times=200, seconds=10)),
+        Depends(TenantPackageRateLimiter(default_times=200, seconds=10)),
         Depends(validate_dynamic_plugin_access),
     ]
 

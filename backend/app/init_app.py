@@ -7,13 +7,13 @@ from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html, get_swagge
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi_limiter import FastAPILimiter
-from fastapi_limiter.depends import RateLimiter, WebSocketRateLimiter
+from fastapi_limiter.depends import WebSocketRateLimiter
 
 from app.core import cache_util
 
 from .config.setting import settings
 from .core.exceptions import handle_exception
-from .core.http_limit import http_limit_callback, ws_limit_callback
+from .core.http_limit import TenantPackageRateLimiter, http_limit_callback, ws_limit_callback
 from .core.logger import logger
 from .scripts.initialize import InitializeData
 from .utils.common_util import import_module, import_modules_async
@@ -100,10 +100,10 @@ def register_routers(app: FastAPI) -> None:
     from app.api.v1.module_platform import platform_router
     from app.api.v1.module_system import system_router
 
-    app.include_router(common_router, dependencies=[Depends(RateLimiter(times=200, seconds=10))])
-    app.include_router(monitor_router, dependencies=[Depends(RateLimiter(times=200, seconds=10))])
-    app.include_router(platform_router, dependencies=[Depends(RateLimiter(times=200, seconds=10))])
-    app.include_router(system_router, dependencies=[Depends(RateLimiter(times=200, seconds=10))])
+    app.include_router(common_router, dependencies=[Depends(TenantPackageRateLimiter(default_times=200, seconds=10))])
+    app.include_router(monitor_router, dependencies=[Depends(TenantPackageRateLimiter(default_times=200, seconds=10))])
+    app.include_router(platform_router, dependencies=[Depends(TenantPackageRateLimiter(default_times=200, seconds=10))])
+    app.include_router(system_router, dependencies=[Depends(TenantPackageRateLimiter(default_times=200, seconds=10))])
 
     from app.core.assembly import is_plugin_enabled
 

@@ -1008,5 +1008,5 @@ def test_plugin_reload_preserves_dynamic_route_dependencies(
 
     dependency_names = _route_dependency_names(test_client.app, "/ai/chat/list")
 
-    assert "RateLimiter" in dependency_names
+    assert "TenantPackageRateLimiter" in dependency_names
     assert "validate_dynamic_plugin_access" in dependency_names

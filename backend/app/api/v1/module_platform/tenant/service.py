@@ -328,6 +328,9 @@ class TenantService:
             owner_menu_ids=plan.final_menu_ids,
         )
         PackageService.invalidate_tenant_menu_cache(tenant_id, self.auth)
+        from app.core.http_limit import TenantPackageRateLimiter
+
+        TenantPackageRateLimiter.clear_cache()
         await self.auth.db.flush()
         logger.info(
             f"租户[{tenant_id}]套餐变更：package_id={new_package_id}, "

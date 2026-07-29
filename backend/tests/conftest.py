@@ -166,12 +166,16 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 
-async def _noop_rate_limit(request: Request, response: Response) -> None:
+async def _noop_rate_limit(self, request: Request, response: Response) -> None:
+    pass
+
+
+async def _noop_ws_rate_limit(self, websocket, context_key: str = "") -> None:
     pass
 
 
 RateLimiter.__call__ = _noop_rate_limit
-WebSocketRateLimiter.__call__ = _noop_rate_limit
+WebSocketRateLimiter.__call__ = _noop_ws_rate_limit
 
 # ============================================================
 # 精简 lifespan — 仅做数据库初始化

@@ -142,6 +142,9 @@ class PackageService:
             await self.disable_cascade(package_id=id)
 
         updated = await PackageCRUD(self.auth).update(id=id, data=data)
+        from app.core.http_limit import TenantPackageRateLimiter
+
+        TenantPackageRateLimiter.clear_cache()
         return PackageOutSchema.model_validate(updated)
 
     @require_superadmin
