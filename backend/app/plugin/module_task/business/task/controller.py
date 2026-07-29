@@ -27,7 +27,7 @@ DemoBatchRouter = APIRouter(route_class=OperationLogRoute, prefix="/demo-batch",
 @BusinessTaskRouter.post("/create", summary="创建业务任务", response_model=ResponseSchema[BusinessTaskOutSchema])
 async def create_business_task_controller(
     data: BusinessTaskCreateSchema,
-    auth: Annotated[AuthSchema, Depends(AuthPermission())],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_task:business_task:create"]))],
 ) -> JSONResponse:
     result = await BusinessTaskService(auth).create(data=data)
     return SuccessResponse(data=result, msg="创建业务任务成功")
@@ -37,7 +37,7 @@ async def create_business_task_controller(
 async def list_business_task_controller(
     page: Annotated[PaginationQueryParam, Depends()],
     search: Annotated[BusinessTaskQueryParam, Depends()],
-    auth: Annotated[AuthSchema, Depends(AuthPermission())],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_task:business_task:query"]))],
 ) -> JSONResponse:
     result = await BusinessTaskService(auth).page(
         page_no=page.page_no,
@@ -51,7 +51,7 @@ async def list_business_task_controller(
 @BusinessTaskRouter.get("/detail/{id}", summary="获取业务任务详情", response_model=ResponseSchema[BusinessTaskOutSchema])
 async def detail_business_task_controller(
     id: Annotated[int, Path(description="业务任务ID")],
-    auth: Annotated[AuthSchema, Depends(AuthPermission())],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_task:business_task:query"]))],
 ) -> JSONResponse:
     result = await BusinessTaskService(auth).detail(id=id)
     return SuccessResponse(data=result, msg="获取业务任务详情成功")
@@ -61,7 +61,7 @@ async def detail_business_task_controller(
 async def update_business_task_status_controller(
     data: BusinessTaskUpdateSchema,
     id: Annotated[int, Path(description="业务任务ID")],
-    auth: Annotated[AuthSchema, Depends(AuthPermission())],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_task:business_task:update"]))],
 ) -> JSONResponse:
     result = await BusinessTaskService(auth).update_status(id=id, data=data)
     return SuccessResponse(data=result, msg="更新业务任务状态成功")
@@ -70,7 +70,7 @@ async def update_business_task_status_controller(
 @DemoBatchRouter.post("/trigger", summary="触发试用数据初始化", response_model=ResponseSchema[DemoBatchOutSchema])
 async def trigger_demo_batch_controller(
     data: DemoBatchTriggerSchema,
-    auth: Annotated[AuthSchema, Depends(AuthPermission())],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_task:demo_batch:execute"]))],
 ) -> JSONResponse:
     result = await DemoBatchService(auth).trigger(data=data)
     return SuccessResponse(data=result, msg="试用数据初始化任务已创建")
@@ -79,7 +79,7 @@ async def trigger_demo_batch_controller(
 @DemoBatchRouter.delete("/clean/{demo_batch_id}", summary="清理试用数据", response_model=ResponseSchema[DemoBatchCleanOutSchema])
 async def clean_demo_batch_controller(
     demo_batch_id: Annotated[str, Path(description="试用数据批次ID")],
-    auth: Annotated[AuthSchema, Depends(AuthPermission())],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_task:demo_batch:delete"]))],
 ) -> JSONResponse:
     result = await DemoBatchService(auth).clean(demo_batch_id=demo_batch_id)
     return SuccessResponse(data=result, msg="试用数据清理任务已创建")

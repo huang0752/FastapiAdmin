@@ -11,6 +11,19 @@ from conftest import assert_route
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.core.dependencies import AuthPermission
+from app.plugin.module_task.business.task.controller import BusinessTaskRouter, DemoBatchRouter
+
+
+def _route_permissions(router, path: str, method: str) -> list[str]:
+    for route in router.routes:
+        if getattr(route, "path", None) != path or method not in getattr(route, "methods", set()):
+            continue
+        for dependency in route.dependant.dependencies:
+            if isinstance(dependency.call, AuthPermission):
+                return dependency.call.permissions
+    raise AssertionError(f"未找到任务路由: {method} {path}")
+
 # ============================================================
 # /task/cronjob — 调度器与任务
 # ============================================================
@@ -214,6 +227,26 @@ class TestWorkflowNodeType:
 
 class TestBusinessTask:
     """通用业务长任务中心。"""
+
+    def test_business_task_routes_require_explicit_permissions(self) -> None:
+        assert _route_permissions(BusinessTaskRouter, "/business/task/create", "POST") == [
+            "module_task:business_task:create"
+        ]
+        assert _route_permissions(BusinessTaskRouter, "/business/task/list", "GET") == [
+            "module_task:business_task:query"
+        ]
+        assert _route_permissions(BusinessTaskRouter, "/business/task/detail/{id}", "GET") == [
+            "module_task:business_task:query"
+        ]
+        assert _route_permissions(BusinessTaskRouter, "/business/task/status/{id}", "PATCH") == [
+            "module_task:business_task:update"
+        ]
+        assert _route_permissions(DemoBatchRouter, "/demo-batch/trigger", "POST") == [
+            "module_task:demo_batch:execute"
+        ]
+        assert _route_permissions(DemoBatchRouter, "/demo-batch/clean/{demo_batch_id}", "DELETE") == [
+            "module_task:demo_batch:delete"
+        ]
 
     def test_business_task_create_and_status_flow(self, test_client: TestClient, auth_headers: dict) -> None:
         create_resp = test_client.post(
