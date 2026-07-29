@@ -77,6 +77,8 @@ export default ({ mode }: { mode: string }) => {
       __APP_INFO__: JSON.stringify(__APP_INFO__),
     },
     base: env.VITE_BASE_URL,
+    // 同一项目的不同 mode 并行运行时，隔离依赖预构建元数据与产物。
+    cacheDir: path.resolve(root, "node_modules/.vite", mode),
     server: {
       host: true,
       port: Number(env.VITE_PORT),
