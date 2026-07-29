@@ -82,6 +82,39 @@ def test_storage_quota_reserves_commits_and_releases_atomically(test_client: Tes
     assert final_reserved == 0
 
 
+def test_zero_storage_quota_preserves_framework_unlimited_semantics(test_client: TestClient) -> None:
+    async def exercise() -> int:
+        suffix = str(time.time_ns())
+        async with async_db_session() as db:
+            package = PackageModel(
+                name=f"不限存储套餐{suffix}",
+                code=f"SU{suffix}",
+                site_id=1,
+                max_storage_mb=0,
+                rate_limit=60,
+            )
+            db.add(package)
+            await db.flush()
+            tenant = TenantModel(
+                name=f"不限存储租户{suffix}",
+                code=f"UT{suffix}",
+                site_id=1,
+                package_id=package.id,
+            )
+            db.add(tenant)
+            await db.flush()
+            auth = AuthSchema(db=db, tenant_id=tenant.id, check_data_scope=False)
+            auth.user = SimpleNamespace(is_superuser=False, roles=[])
+
+            await tenant_service_module.TenantStorageQuotaService(auth).reserve(2 * 1024 * 1024)
+            usage = await db.get(tenant_models.TenantStorageUsageModel, tenant.id)
+            reserved = usage.reserved_bytes
+            await db.rollback()
+            return reserved
+
+    assert asyncio.run(exercise()) == 2 * 1024 * 1024
+
+
 def test_storage_quota_migration_has_framework_revision_contract() -> None:
     migration = (
         __import__(

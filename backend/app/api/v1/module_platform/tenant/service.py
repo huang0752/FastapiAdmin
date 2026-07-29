@@ -99,7 +99,7 @@ class TenantStorageQuotaService:
             await db.flush()
         return usage
 
-    async def _storage_limit_bytes(self) -> int:
+    async def _storage_limit_bytes(self) -> int | None:
         db = self._database()
         tenant = await db.get(TenantModel, self.auth.tenant_id)
         if tenant is None or tenant.package_id is None:
@@ -109,6 +109,8 @@ class TenantStorageQuotaService:
         package = await db.get(PackageModel, tenant.package_id)
         if package is None or package.is_deleted or package.status != 0:
             return 0
+        if package.max_storage_mb == 0:
+            return None
         return package.max_storage_mb * self.BYTES_PER_MB
 
     @staticmethod
@@ -123,7 +125,7 @@ class TenantStorageQuotaService:
         if usage is None:
             return
         limit_bytes = await self._storage_limit_bytes()
-        if usage.used_bytes + usage.reserved_bytes + size_bytes > limit_bytes:
+        if limit_bytes is not None and usage.used_bytes + usage.reserved_bytes + size_bytes > limit_bytes:
             raise CustomException(msg="租户存储空间已达套餐上限", code=10429, status_code=413)
         usage.reserved_bytes += size_bytes
         await self._database().flush()
