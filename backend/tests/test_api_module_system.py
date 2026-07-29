@@ -3,6 +3,8 @@
 认证数据测试：admin 登录后验证 CRUD 真实数据。
 """
 
+from uuid import uuid4
+
 from conftest import assert_route  # noqa: F401
 from fastapi.testclient import TestClient
 
@@ -498,6 +500,119 @@ class TestNotice:
         )
         assert list_resp.status_code == 200, list_resp.text
         assert list_resp.json()["data"]["total"] == 0
+
+    def test_notice_panel_and_read_state_are_tenant_isolated(self, test_client: TestClient) -> None:
+        suffix = uuid4().hex[:8]
+        old_register = settings.AUTH_LOGIN_REGISTER_ENABLE
+        settings.AUTH_LOGIN_REGISTER_ENABLE = True
+        try:
+            tenants = []
+            for code in ("a", "b"):
+                register = test_client.post(
+                    "/system/auth/tenant/register",
+                    json={
+                        "username": f"notice_scope_{code}_{suffix}",
+                        "password": "admin123",
+                        "email": f"notice_scope_{code}_{suffix}@example.com",
+                        "tenant_name": f"通知面板隔离租户{code.upper()}{suffix}",
+                    },
+                )
+                assert register.status_code == 200, register.text
+                tenants.append(register.json()["data"])
+        finally:
+            settings.AUTH_LOGIN_REGISTER_ENABLE = old_register
+
+        async def assert_isolation() -> None:
+            from sqlalchemy import select
+
+            from app.api.v1.module_system.log.model import OperationLogModel
+            from app.api.v1.module_system.notice.model import NoticeModel, NoticeReadModel
+            from app.api.v1.module_system.notice.service import NoticeService
+            from app.api.v1.module_system.user.model import UserModel
+            from app.core.base_schema import AuthSchema
+            from app.core.database import async_db_session
+            from app.core.exceptions import CustomException
+
+            async with async_db_session() as db:
+                users = []
+                for tenant in tenants:
+                    user = (
+                        await db.execute(select(UserModel).where(UserModel.id == tenant["user_id"]))
+                    ).scalar_one()
+                    users.append(user)
+
+                notice_a = NoticeModel(
+                    tenant_id=tenants[0]["tenant_id"],
+                    notice_title=f"tenant-a-{suffix}",
+                    notice_type="1",
+                    notice_content="租户A私有公告",
+                    status=0,
+                )
+                notice_b = NoticeModel(
+                    tenant_id=tenants[1]["tenant_id"],
+                    notice_title=f"tenant-b-{suffix}",
+                    notice_type="1",
+                    notice_content="租户B私有公告",
+                    status=0,
+                )
+                log_a = OperationLogModel(
+                    tenant_id=tenants[0]["tenant_id"],
+                    request_path=f"/tenant-a/{suffix}/secret",
+                    request_method="GET",
+                    response_code=200,
+                    status=0,
+                )
+                log_b = OperationLogModel(
+                    tenant_id=tenants[1]["tenant_id"],
+                    request_path=f"/tenant-b/{suffix}/visible",
+                    request_method="GET",
+                    response_code=200,
+                    status=0,
+                )
+                db.add_all([notice_a, notice_b, log_a, log_b])
+                await db.flush()
+
+                auth_b = AuthSchema(
+                    user=users[1],
+                    db=db,
+                    tenant_id=tenants[1]["tenant_id"],
+                )
+                service = NoticeService(auth_b)
+
+                latest = await service.latest(limit=50)
+                latest_titles = {item.notice_title for item in latest}
+                assert notice_b.notice_title in latest_titles
+                assert notice_a.notice_title not in latest_titles
+
+                assert await service.get_unread_count() == 1
+                assert await service.mark_all_read() == 1
+                read_ids = set(
+                    (
+                        await db.execute(
+                            select(NoticeReadModel.notice_id).where(
+                                NoticeReadModel.user_id == users[1].id
+                            )
+                        )
+                    ).scalars()
+                )
+                assert notice_b.id in read_ids
+                assert notice_a.id not in read_ids
+
+                panel = await service.panel_data()
+                message_paths = {item.title for item in panel.messages}
+                assert log_b.request_path in message_paths
+                assert log_a.request_path not in message_paths
+
+                import pytest
+
+                with pytest.raises(CustomException):
+                    await service.mark_read(notice_a.id)
+
+                await db.rollback()
+
+        import asyncio
+
+        asyncio.run(assert_isolation())
 
 
 class TestParams:

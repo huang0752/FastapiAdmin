@@ -6,7 +6,7 @@ from app.core.logger import logger
 from app.utils.excel_util import ExcelUtil
 
 from .crud import BusinessNotificationCRUD, NoticeCRUD
-from .model import NoticeModel, NoticeReadModel
+from .model import NoticeReadModel
 from .schema import (
     BusinessNotificationCreateSchema,
     BusinessNotificationOutSchema,
@@ -116,21 +116,19 @@ class NoticeService:
         return ExcelUtil.export_list2excel(list_data=data, mapping_dict=mapping_dict)
 
     async def latest(self, limit: int = 5) -> list[NoticeOutSchema]:
-        from sqlalchemy import desc, select
-
-        stmt = select(NoticeModel).where(NoticeModel.status == 0).order_by(desc(NoticeModel.created_time)).limit(limit)
-        result = await self.auth.db.execute(stmt)
-        notices = result.scalars().all()
-        return [NoticeOutSchema.model_validate(n) for n in notices]
+        notices = await NoticeCRUD(self.auth).get_list(
+            search={"status": 0},
+            order_by=[{"created_time": "desc"}],
+            preload=[],
+        )
+        return [NoticeOutSchema.model_validate(n) for n in notices[:limit]]
 
     async def mark_read(self, notice_id: int) -> None:
         from datetime import datetime
 
         from sqlalchemy import select
 
-        notice = await NoticeCRUD(self.auth).get(id=notice_id)
-        if not notice:
-            raise CustomException(msg="该公告不存在")
+        await NoticeCRUD(self.auth).get_or_404(id=notice_id, msg="该公告不存在")
 
         exist_stmt = select(NoticeReadModel).where(
             NoticeReadModel.user_id == self.auth.user.id,
@@ -157,9 +155,11 @@ class NoticeService:
         read_ids_result = await self.auth.db.execute(read_ids_stmt)
         read_ids = {row[0] for row in read_ids_result.fetchall()}
 
-        notices_stmt = select(NoticeModel.id).where(NoticeModel.status == 0)
-        notices_result = await self.auth.db.execute(notices_stmt)
-        all_ids = {row[0] for row in notices_result.fetchall()}
+        notices = await NoticeCRUD(self.auth).get_list(
+            search={"status": 0},
+            preload=[],
+        )
+        all_ids = {notice.id for notice in notices}
 
         unread_ids = all_ids - read_ids
         if not unread_ids:
@@ -177,28 +177,35 @@ class NoticeService:
     async def get_unread_count(self) -> int:
         from sqlalchemy import func, select
 
-        total_stmt = select(func.count()).select_from(NoticeModel).where(NoticeModel.status == 0)
-        total_result = await self.auth.db.execute(total_stmt)
-        total_count = total_result.scalar() or 0
+        notices = await NoticeCRUD(self.auth).get_list(
+            search={"status": 0},
+            preload=[],
+        )
+        notice_ids = [notice.id for notice in notices]
+        total_count = len(notice_ids)
+        if not notice_ids:
+            return 0
 
-        read_stmt = select(func.count()).select_from(NoticeReadModel).where(NoticeReadModel.user_id == self.auth.user.id)
+        read_stmt = select(func.count()).select_from(NoticeReadModel).where(
+            NoticeReadModel.user_id == self.auth.user.id,
+            NoticeReadModel.notice_id.in_(notice_ids),
+        )
         read_result = await self.auth.db.execute(read_stmt)
         read_count = read_result.scalar() or 0
 
         return max(0, total_count - read_count)
 
     async def panel_data(self) -> PanelDataOut:
-        from sqlalchemy import desc, select
-
         notices = await self.latest(limit=5)
 
         messages = []
         try:
-            from app.api.v1.module_system.log.model import OperationLogModel
+            from app.api.v1.module_system.log.crud import OperationLogCRUD
 
-            stmt = select(OperationLogModel).order_by(desc(OperationLogModel.created_time)).limit(5)
-            result = await self.auth.db.execute(stmt)
-            logs = result.scalars().all()
+            logs = await OperationLogCRUD(self.auth).get_list(
+                order_by=[{"created_time": "desc"}],
+                preload=[],
+            )
             for log_entry in logs:
                 messages.append(
                     PanelMessageItem(
@@ -209,6 +216,8 @@ class NoticeService:
                         type="system",
                     )
                 )
+                if len(messages) >= 5:
+                    break
         except Exception as e:
             logger.warning(f"获取面板消息数据失败（操作日志表可能不存在），已跳过: {e}")
 
