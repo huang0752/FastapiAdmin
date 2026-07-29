@@ -219,6 +219,11 @@ class TenantService:
             raise CustomException(msg="该数据不存在")
 
         tenant.package_id = new_package_id
+        await PackageService.sync_tenant_plugins(
+            self.auth.db,
+            tenant_id,
+            new_package_id,
+        )
         await PackageService.sync_tenant_role_menus(
             self.auth.db,
             tenant_id,
@@ -418,6 +423,14 @@ class TenantService:
                 tenant_obj.id,
                 user_obj.id,
             )
+            if tenant_obj.package_id is not None:
+                from app.api.v1.module_platform.package.service import PackageService
+
+                await PackageService.sync_tenant_plugins(
+                    self.auth.db,
+                    tenant_obj.id,
+                    tenant_obj.package_id,
+                )
         except CustomException:
             raise
         except Exception as e:

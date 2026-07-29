@@ -1,4 +1,6 @@
 
+from datetime import datetime
+
 import sqlalchemy as sa
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -171,6 +173,59 @@ class PackageService:
         stmt = select(PackageMenuModel.menu_id).where(PackageMenuModel.package_id == package_id)
         result = await self.auth.db.execute(stmt)
         return [row[0] for row in result.all()]
+
+    @staticmethod
+    async def sync_tenant_plugins(
+        db: AsyncSession,
+        tenant_id: int,
+        package_id: int,
+    ) -> None:
+        """把套餐包含的插件幂等装配到租户。"""
+        from app.api.v1.module_platform.plugin.model import TenantPluginModel
+
+        plugin_ids = set(
+            (
+                await db.execute(
+                    select(PackagePluginModel.plugin_id).where(
+                        PackagePluginModel.package_id == package_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not plugin_ids:
+            return
+
+        existing = {
+            item.plugin_id: item
+            for item in (
+                await db.execute(
+                    select(TenantPluginModel).where(
+                        TenantPluginModel.tenant_id == tenant_id,
+                        TenantPluginModel.plugin_id.in_(plugin_ids),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        }
+        for plugin_id in plugin_ids:
+            tenant_plugin = existing.get(plugin_id)
+            if tenant_plugin is None:
+                db.add(
+                    TenantPluginModel(
+                        tenant_id=tenant_id,
+                        plugin_id=plugin_id,
+                        enabled=True,
+                        purchased=True,
+                        installed_time=datetime.now(),
+                    )
+                )
+            else:
+                tenant_plugin.enabled = True
+                tenant_plugin.purchased = True
+        await db.flush()
 
     @staticmethod
     async def expand_tenant_menu_ids(db: AsyncSession, menu_ids: set[int] | list[int]) -> set[int]:
@@ -373,3 +428,23 @@ class PackageService:
         for plugin_id in data.plugin_ids:
             self.auth.db.add(PackagePluginModel(package_id=package_id, plugin_id=plugin_id))
         await self.auth.db.flush()
+
+        tenant_ids = set(
+            (
+                await self.auth.db.execute(
+                    select(TenantModel.id).where(TenantModel.package_id == package_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for tenant_id in tenant_ids:
+            await PackageService.sync_tenant_plugins(
+                self.auth.db,
+                tenant_id,
+                package_id,
+            )
+        logger.info(
+            f"套餐[{package_id}]插件权限已设置, count={len(data.plugin_ids)}, "
+            f"tenants={len(tenant_ids)}"
+        )
