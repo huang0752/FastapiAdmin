@@ -1,9 +1,15 @@
 import asyncio
 import time
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import pytest
+
+from app.api.v1.module_platform.tenant import service as tenant_service_module
+from app.api.v1.module_platform.tenant.service import TenantService
 from app.core import dependencies
 from app.core.base_schema import AuthSchema
+from app.core.exceptions import CustomException
 
 
 def test_auth_schema_distinguishes_platform_global_from_tenant_impersonation() -> None:
@@ -57,3 +63,55 @@ def test_permission_check_does_not_trust_process_local_package_cache(monkeypatch
     result = asyncio.run(dependencies._get_cached_tenant_menu_ids(auth, 2))
 
     assert result == [22]
+
+
+def test_tenant_superuser_cannot_list_platform_tenants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock(return_value={"items": [], "total": 0})
+    monkeypatch.setattr(
+        tenant_service_module,
+        "TenantCRUD",
+        lambda _auth: SimpleNamespace(page=page),
+    )
+    auth = AuthSchema(
+        tenant_id=2,
+        user=SimpleNamespace(
+            id=2,
+            is_superuser=True,
+            roles=[SimpleNamespace(code="owner")],
+        ),
+        check_data_scope=False,
+    )
+
+    with pytest.raises(CustomException, match="仅平台管理员可操作") as exc_info:
+        asyncio.run(TenantService(auth).page(page_no=1, page_size=10))
+
+    assert exc_info.value.status_code == 403
+    page.assert_not_awaited()
+
+
+def test_site_platform_admin_can_list_platform_tenants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = {"items": [], "total": 0}
+    page = AsyncMock(return_value=expected)
+    monkeypatch.setattr(
+        tenant_service_module,
+        "TenantCRUD",
+        lambda _auth: SimpleNamespace(page=page),
+    )
+    auth = AuthSchema(
+        tenant_id=2,
+        user=SimpleNamespace(
+            id=2,
+            is_superuser=True,
+            roles=[SimpleNamespace(code="SUPER_ADMIN")],
+        ),
+        check_data_scope=False,
+    )
+
+    result = asyncio.run(TenantService(auth).page(page_no=1, page_size=10))
+
+    assert result == expected
+    page.assert_awaited_once()

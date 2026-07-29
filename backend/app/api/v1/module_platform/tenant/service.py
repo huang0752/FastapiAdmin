@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import RedisInitKeyConfig
 from app.core.base_schema import AuthSchema
-from app.core.dependencies import require_superadmin
+from app.core.dependencies import require_platform_admin
 from app.core.exceptions import CustomException
 from app.core.logger import logger
 from app.core.redis_crud import RedisCURD
@@ -64,7 +64,7 @@ class PackageChangePlan:
 
 class TenantService:
     """
-    租户管理服务（查询操作租户可见，写操作仅超级管理员可操作）
+    租户管理服务（跨租户管理仅平台管理员可用，租户侧使用自助品牌接口）
 
     设计：实例方法承载「当前用户上下文 (auth)」，``redis`` 仍是方法参数。
     内部跨方法调用从 ``cls.xxx(auth, ...)`` 改为 ``self.xxx(...)``。
@@ -336,7 +336,7 @@ class TenantService:
         )
         PackageService.invalidate_tenant_menu_cache(tenant_id)
 
-    @require_superadmin
+    @require_platform_admin
     async def detail(self, id: int) -> TenantOutSchema:
         """
         租户详情
@@ -349,7 +349,7 @@ class TenantService:
         """
         return await TenantCRUD(self.auth).get_or_404(id=id, out_schema=TenantOutSchema)
 
-    @require_superadmin
+    @require_platform_admin
     async def page(
         self,
         page_no: int,
@@ -365,7 +365,7 @@ class TenantService:
             out_schema=TenantOutSchema,
         )
 
-    @require_superadmin
+    @require_platform_admin
     async def create(self, data: TenantCreateSchema) -> TenantOutSchema:
         from app.api.v1.module_platform.package.model import PackageModel
         from app.api.v1.module_platform.site.model import SiteModel
@@ -432,7 +432,7 @@ class TenantService:
 
         return result
 
-    @require_superadmin
+    @require_platform_admin
     async def update(self, id: int, data: TenantUpdateSchema) -> TenantOutSchema:
         """
         更新租户
@@ -496,7 +496,7 @@ class TenantService:
         result = TenantOutSchema.model_validate(updated)
         return result
 
-    @require_superadmin
+    @require_platform_admin
     async def delete(self, ids: list[int]) -> None:
         """
         批量删除租户（含级联资源检查：用户/部门/角色/岗位）
@@ -531,7 +531,7 @@ class TenantService:
 
         await TenantCRUD(self.auth).delete(ids=ids)
 
-    @require_superadmin
+    @require_platform_admin
     async def set_available(self, data: TenantBatchStatusSchema) -> None:
         """
         批量设置租户状态
@@ -546,7 +546,7 @@ class TenantService:
             raise CustomException(msg="系统租户必须保持正常状态")
         await TenantCRUD(self.auth).set(ids=data.ids, status=data.status)
 
-    @require_superadmin
+    @require_platform_admin
     async def toggle_status(self, id: int) -> None:
         """
         切换单个租户的正常/暂停状态
@@ -569,7 +569,7 @@ class TenantService:
         )
         await TenantCRUD(self.auth).set(ids=[id], status=new_status)
 
-    @require_superadmin
+    @require_platform_admin
     async def get_tenant_users(self, tenant_id: int) -> list[TenantUserOutSchema]:
         """获取租户下的用户列表"""
         from sqlalchemy import select
@@ -601,7 +601,7 @@ class TenantService:
             )
         return users
 
-    @require_superadmin
+    @require_platform_admin
     async def add_tenant_user(self, tenant_id: int, data: TenantUserAddSchema) -> None:
         """
         向租户添加用户
@@ -670,7 +670,7 @@ class TenantService:
 
         logger.info(f"向租户[{tenant.name}]添加用户[{user.username}]成功, role={data.role}")
 
-    @require_superadmin
+    @require_platform_admin
     async def remove_tenant_user(self, tenant_id: int, user_id: int) -> None:
         """
         从租户移除用户
@@ -889,7 +889,7 @@ class TenantService:
             items.append(TenantConfigOutSchema(config_key=alias, config_value=str(value) if value is not None else None))
         return items
 
-    @require_superadmin
+    @require_platform_admin
     async def get_config_items(self, tenant_id: int) -> list[TenantConfigOutSchema]:
         """获取租户所有配置（对外接口，返回结构化列表）"""
         config = await self.get_config(tenant_id)
@@ -958,7 +958,7 @@ class TenantService:
         redis_key = f"{RedisInitKeyConfig.TENANT_CONFIG.key}:{tenant_id}"
         await RedisCURD(redis).delete(redis_key)
 
-    @require_superadmin
+    @require_platform_admin
     async def update_config(self, redis: Redis, tenant_id: int, config: dict | list[TenantConfigItem]) -> list[TenantConfigOutSchema]:
         """
         更新租户配置（同步 Redis 缓存）
@@ -1053,7 +1053,7 @@ class TenantService:
                     await TenantService._sync_configs_to_redis(redis, tenant.id, config)
                     logger.info(f"✅ 租户[{tenant.name}](id={tenant.id}) 配置已缓存到 Redis")
 
-    @require_superadmin
+    @require_platform_admin
     async def renew(self, tenant_id: int, end_time: str) -> TenantOutSchema:
         """租户续期：延长 end_time 并恢复为 active 状态
 
@@ -1091,7 +1091,7 @@ class TenantService:
 
         return TenantOutSchema.model_validate(tenant)
 
-    @require_superadmin
+    @require_platform_admin
     async def package_change_preview(self, tenant_id: int, new_package_id: int) -> PackageChangePreviewOut:
         """
         套餐变更影响预览

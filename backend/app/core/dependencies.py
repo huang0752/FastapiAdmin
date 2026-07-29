@@ -488,3 +488,20 @@ def require_superadmin(func):
         return await func(self, *args, **kwargs)
 
     return wrapper
+
+
+def require_platform_admin(func):
+    """装饰器：仅平台全局管理员可调用 Service 方法。
+
+    与只检查 ``is_superuser`` 的 ``require_superadmin`` 不同，本装饰器还要求
+    当前认证上下文满足 ``AuthSchema.is_platform_global``。因此，普通租户中的
+    用户即使被误标为超级管理员，也不能读取或操作跨租户平台数据。
+    """
+
+    @wraps(func)
+    async def wrapper(self, *args, **kwargs):
+        if not self.auth.is_platform_global:
+            raise CustomException(msg="仅平台管理员可操作", code=10403, status_code=403)
+        return await func(self, *args, **kwargs)
+
+    return wrapper
