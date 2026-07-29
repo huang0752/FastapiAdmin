@@ -57,7 +57,7 @@ export class RouteTransformer {
       return absPath;
     }
     if (depth === 0) {
-      return firstSeg;
+      return absPath.replace(/^\/+/, "");
     }
     if (!parentAbsPath || !absPath) return absPath;
     const p = parentAbsPath.replace(/\/$/, "");
