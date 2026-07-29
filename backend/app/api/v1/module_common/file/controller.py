@@ -85,7 +85,7 @@ async def private_upload_controller(
 ) -> JSONResponse:
     result = await FileService.save_private_service(
         file=file,
-        tenant_id=auth.tenant_id or 0,
+        auth=auth,
         namespace=namespace,
     )
     return SuccessResponse(data=result, msg="上传私有文件成功")
@@ -115,8 +115,8 @@ async def private_delete_controller(
     storage_key: Annotated[str, Body(embed=True, description="私有文件存储键")],
     auth: Annotated[AuthSchema, Depends(AuthPermission(["module_common:file:delete"]))],
 ) -> JSONResponse:
-    released_bytes = FileService.delete_private_service(
+    released_bytes = await FileService.delete_private_service(
         storage_key=storage_key,
-        tenant_id=auth.tenant_id or 0,
+        auth=auth,
     )
     return SuccessResponse(data={"released_bytes": released_bytes}, msg="删除私有文件成功")

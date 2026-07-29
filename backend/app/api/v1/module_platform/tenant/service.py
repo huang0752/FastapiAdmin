@@ -17,7 +17,7 @@ from app.core.redis_crud import RedisCURD
 from app.utils.hash_bcrpy_util import PwdUtil
 
 from .crud import TenantCRUD
-from .model import TenantModel, TenantStatus, TenantUserModel
+from .model import TenantModel, TenantStatus, TenantStorageUsageModel, TenantUserModel
 from .schema import (
     PackageChangePreviewOut,
     TenantBatchStatusSchema,
@@ -60,6 +60,103 @@ class PackageChangePlan:
     final_menu_ids: set[int]
     removed_menu_ids: set[int]
     added_menu_ids: set[int]
+
+
+class TenantStorageQuotaService:
+    """租户私有文件存储配额账本。"""
+
+    BYTES_PER_MB = 1024 * 1024
+
+    def __init__(self, auth: AuthSchema) -> None:
+        self.auth = auth
+
+    def _database(self) -> AsyncSession:
+        if self.auth.db is None:
+            raise CustomException(msg="数据库会话不可用")
+        if not self.auth.tenant_id:
+            raise CustomException(msg="缺少有效租户信息", code=10403, status_code=403)
+        return self.auth.db
+
+    async def _lock_usage(self) -> TenantStorageUsageModel | None:
+        """锁定租户行后取得用量行；系统租户不记账。"""
+        if self.auth.tenant_id == 1:
+            return None
+        db = self._database()
+        tenant = (
+            await db.execute(
+                sa.select(TenantModel)
+                .where(TenantModel.id == self.auth.tenant_id, TenantModel.is_deleted.is_(False))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if tenant is None:
+            raise CustomException(msg="租户不存在", status_code=404)
+
+        usage = await db.get(TenantStorageUsageModel, self.auth.tenant_id)
+        if usage is None:
+            usage = TenantStorageUsageModel(tenant_id=self.auth.tenant_id, used_bytes=0, reserved_bytes=0)
+            db.add(usage)
+            await db.flush()
+        return usage
+
+    async def _storage_limit_bytes(self) -> int:
+        db = self._database()
+        tenant = await db.get(TenantModel, self.auth.tenant_id)
+        if tenant is None or tenant.package_id is None:
+            return 0
+        from app.api.v1.module_platform.package.model import PackageModel
+
+        package = await db.get(PackageModel, tenant.package_id)
+        if package is None or package.is_deleted or package.status != 0:
+            return 0
+        return package.max_storage_mb * self.BYTES_PER_MB
+
+    @staticmethod
+    def _validate_size(size_bytes: int) -> None:
+        if size_bytes <= 0:
+            raise CustomException(msg="文件大小必须大于 0", status_code=400)
+
+    async def reserve(self, size_bytes: int) -> None:
+        """写盘前预占配额；租户行锁保证并发请求串行核算。"""
+        self._validate_size(size_bytes)
+        usage = await self._lock_usage()
+        if usage is None:
+            return
+        limit_bytes = await self._storage_limit_bytes()
+        if usage.used_bytes + usage.reserved_bytes + size_bytes > limit_bytes:
+            raise CustomException(msg="租户存储空间已达套餐上限", code=10429, status_code=413)
+        usage.reserved_bytes += size_bytes
+        await self._database().flush()
+
+    async def commit_reservation(self, size_bytes: int) -> None:
+        """文件写盘成功后将预占转为已用。"""
+        self._validate_size(size_bytes)
+        usage = await self._lock_usage()
+        if usage is None:
+            return
+        if usage.reserved_bytes < size_bytes:
+            raise CustomException(msg="存储配额预占记录不足", status_code=409)
+        usage.reserved_bytes -= size_bytes
+        usage.used_bytes += size_bytes
+        await self._database().flush()
+
+    async def release_reservation(self, size_bytes: int) -> None:
+        """写盘失败时释放预占。"""
+        self._validate_size(size_bytes)
+        usage = await self._lock_usage()
+        if usage is None:
+            return
+        usage.reserved_bytes = max(0, usage.reserved_bytes - size_bytes)
+        await self._database().flush()
+
+    async def release_used(self, size_bytes: int) -> None:
+        """私有文件删除后释放已用空间。"""
+        self._validate_size(size_bytes)
+        usage = await self._lock_usage()
+        if usage is None:
+            return
+        usage.used_bytes = max(0, usage.used_bytes - size_bytes)
+        await self._database().flush()
 
 
 class TenantService:

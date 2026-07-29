@@ -7,7 +7,7 @@ import aiofiles
 from fastapi import UploadFile
 
 from app.config.setting import settings
-from app.core.base_schema import DownloadFileSchema, PrivateUploadResponseSchema, UploadResponseSchema
+from app.core.base_schema import AuthSchema, DownloadFileSchema, PrivateUploadResponseSchema, UploadResponseSchema
 from app.core.exceptions import CustomException
 from app.core.logger import logger
 from app.utils.upload_util import UploadUtil
@@ -54,6 +54,16 @@ class FileService:
             raise CustomException(msg="非法的文件命名空间", status_code=400)
         return f"tenant/{tenant_id}/{namespace}/{uuid4().hex}_{file_name}"
 
+    @staticmethod
+    def _private_tenant_id(*, tenant_id: int | None, auth: AuthSchema | None) -> int:
+        auth_tenant_id = auth.tenant_id if auth else None
+        if tenant_id is not None and auth_tenant_id is not None and tenant_id != auth_tenant_id:
+            raise CustomException(msg="禁止跨租户操作文件", code=10403, status_code=403)
+        resolved = auth_tenant_id or tenant_id or 0
+        if resolved <= 0:
+            raise CustomException(msg="缺少有效租户信息", code=10403, status_code=403)
+        return resolved
+
     @classmethod
     def _resolve_private_path(
         cls,
@@ -83,7 +93,8 @@ class FileService:
         cls,
         *,
         file: UploadFile,
-        tenant_id: int,
+        tenant_id: int | None = None,
+        auth: AuthSchema | None = None,
         namespace: str = "file",
         storage_root: Path | None = None,
     ) -> PrivateUploadResponseSchema:
@@ -102,20 +113,35 @@ class FileService:
         await file.seek(0)
         UploadUtil.validate_file_content_type(content, extension)
 
+        resolved_tenant_id = cls._private_tenant_id(tenant_id=tenant_id, auth=auth)
         safe_name = UploadUtil.generate_safe_filename(file.filename, extension)
         storage_key = cls._private_storage_key(
-            tenant_id=tenant_id,
+            tenant_id=resolved_tenant_id,
             namespace=namespace,
             file_name=safe_name,
         )
         path = cls._resolve_private_path(
             storage_key=storage_key,
-            tenant_id=tenant_id,
+            tenant_id=resolved_tenant_id,
             storage_root=storage_root,
         )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiofiles.open(path, "wb") as target:
-            await target.write(content)
+        quota = None
+        if auth is not None:
+            from app.api.v1.module_platform.tenant.service import TenantStorageQuotaService
+
+            quota = TenantStorageQuotaService(auth)
+            await quota.reserve(len(content))
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            async with aiofiles.open(path, "wb") as target:
+                await target.write(content)
+            if quota is not None:
+                await quota.commit_reservation(len(content))
+        except Exception:
+            path.unlink(missing_ok=True)
+            if quota is not None:
+                await quota.release_reservation(len(content))
+            raise
 
         return PrivateUploadResponseSchema(
             storage_key=storage_key,
@@ -143,23 +169,29 @@ class FileService:
         return DownloadFileSchema(file_path=str(path), file_name=path.name)
 
     @classmethod
-    def delete_private_service(
+    async def delete_private_service(
         cls,
         *,
         storage_key: str,
-        tenant_id: int,
+        tenant_id: int | None = None,
+        auth: AuthSchema | None = None,
         storage_root: Path | None = None,
     ) -> int:
         """删除当前租户私有文件，返回释放的字节数。"""
+        resolved_tenant_id = cls._private_tenant_id(tenant_id=tenant_id, auth=auth)
         path = cls._resolve_private_path(
             storage_key=storage_key,
-            tenant_id=tenant_id,
+            tenant_id=resolved_tenant_id,
             storage_root=storage_root,
             action="删除",
         )
         if not path.is_file():
             raise CustomException(msg="文件不存在", status_code=404)
         size_bytes = path.stat().st_size
+        if auth is not None:
+            from app.api.v1.module_platform.tenant.service import TenantStorageQuotaService
+
+            await TenantStorageQuotaService(auth).release_used(size_bytes)
         path.unlink()
         return size_bytes
 

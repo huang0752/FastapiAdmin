@@ -102,18 +102,22 @@ class TestFile:
         assert download_error.value.status_code == 403
 
         with pytest.raises(CustomException, match="无权删除该文件") as delete_error:
-            FileService.delete_private_service(
-                storage_key=stored.storage_key,
-                tenant_id=22,
-                storage_root=tmp_path,
+            asyncio.run(
+                FileService.delete_private_service(
+                    storage_key=stored.storage_key,
+                    tenant_id=22,
+                    storage_root=tmp_path,
+                )
             )
         assert delete_error.value.status_code == 403
         assert (tmp_path / stored.storage_key).exists()
 
-        deleted_size = FileService.delete_private_service(
-            storage_key=stored.storage_key,
-            tenant_id=21,
-            storage_root=tmp_path,
+        deleted_size = asyncio.run(
+            FileService.delete_private_service(
+                storage_key=stored.storage_key,
+                tenant_id=21,
+                storage_root=tmp_path,
+            )
         )
         assert deleted_size == len(PNG_1X1)
         assert not (tmp_path / stored.storage_key).exists()

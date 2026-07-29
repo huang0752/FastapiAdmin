@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Integer, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.common.enums import PermissionFilterStrategy
@@ -110,3 +110,24 @@ class TenantUserModel(MappedBase):
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="member", comment="租户内角色(owner:拥有者 admin:管理员 member:成员)")
     is_default: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, comment="是否默认租户(0:否 1:是)")
     create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False, comment="创建时间")
+
+
+class TenantStorageUsageModel(MappedBase):
+    """租户私有文件存储用量与事务内预占。"""
+
+    __tablename__: str = "platform_tenant_storage_usage"
+    __table_args__ = (
+        CheckConstraint("used_bytes >= 0", name="ck_tenant_storage_used_nonnegative"),
+        CheckConstraint("reserved_bytes >= 0", name="ck_tenant_storage_reserved_nonnegative"),
+        {"comment": "租户私有文件存储用量"},
+    )
+
+    tenant_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("platform_tenant.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+        comment="租户ID",
+    )
+    used_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="已用字节数")
+    reserved_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="预占字节数")
+    updated_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间")
