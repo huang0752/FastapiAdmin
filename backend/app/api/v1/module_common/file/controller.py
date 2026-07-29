@@ -14,7 +14,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.common.response import ResponseSchema, SuccessResponse, UploadFileResponse
-from app.core.base_schema import UploadResponseSchema
+from app.core.base_schema import AuthSchema, PrivateUploadResponseSchema, UploadResponseSchema
 from app.core.dependencies import AuthPermission
 from app.core.router_class import OperationLogRoute
 from app.utils.upload_util import UploadUtil
@@ -71,3 +71,52 @@ async def download_controller(
     if delete:
         background_tasks.add_task(UploadUtil.delete_file, Path(result.file_path))
     return UploadFileResponse(file_path=result.file_path, filename=result.file_name)
+
+
+@FileRouter.post(
+    "/private/upload",
+    summary="上传租户私有文件",
+    response_model=ResponseSchema[PrivateUploadResponseSchema],
+)
+async def private_upload_controller(
+    file: UploadFile,
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_common:file:upload"]))],
+    namespace: Annotated[str, Query(pattern=r"^[A-Za-z0-9_-]+$", description="业务命名空间")] = "file",
+) -> JSONResponse:
+    result = await FileService.save_private_service(
+        file=file,
+        tenant_id=auth.tenant_id or 0,
+        namespace=namespace,
+    )
+    return SuccessResponse(data=result, msg="上传私有文件成功")
+
+
+@FileRouter.post(
+    "/private/download",
+    summary="下载租户私有文件",
+)
+async def private_download_controller(
+    storage_key: Annotated[str, Body(embed=True, description="私有文件存储键")],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_common:file:download"]))],
+) -> FileResponse:
+    result = FileService.resolve_private_service(
+        storage_key=storage_key,
+        tenant_id=auth.tenant_id or 0,
+    )
+    return UploadFileResponse(file_path=result.file_path, filename=result.file_name)
+
+
+@FileRouter.delete(
+    "/private/delete",
+    summary="删除租户私有文件",
+    response_model=ResponseSchema[dict],
+)
+async def private_delete_controller(
+    storage_key: Annotated[str, Body(embed=True, description="私有文件存储键")],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_common:file:delete"]))],
+) -> JSONResponse:
+    released_bytes = FileService.delete_private_service(
+        storage_key=storage_key,
+        tenant_id=auth.tenant_id or 0,
+    )
+    return SuccessResponse(data={"released_bytes": released_bytes}, msg="删除私有文件成功")

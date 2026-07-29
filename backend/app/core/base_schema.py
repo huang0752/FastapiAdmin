@@ -82,6 +82,15 @@ class DownloadFileSchema(BaseModel):
     file_name: str = Field(..., description="新文件名称")
 
 
+class PrivateUploadResponseSchema(BaseModel):
+    """私有文件上传响应（仅返回租户隔离的存储键）。"""
+
+    storage_key: str = Field(..., description="私有文件存储键")
+    file_name: str = Field(..., description="存储文件名")
+    origin_name: str = Field(..., description="原文件名")
+    size_bytes: int = Field(..., ge=0, description="文件大小（字节）")
+
+
 class BatchDelete(BaseModel):
     """批量删除请求模型"""
 
