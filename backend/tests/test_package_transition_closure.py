@@ -209,6 +209,50 @@ def test_sync_tenant_plugins_reenables_existing_package_plugin() -> None:
     db.flush.assert_awaited_once()
 
 
+def test_sync_tenant_plugins_disables_stale_plugins_including_empty_target() -> None:
+    active_plugin = TenantPluginModel(
+        tenant_id=2,
+        plugin_id=7,
+        enabled=True,
+        purchased=True,
+        installed_time=datetime.now(),
+    )
+    stale_plugin = TenantPluginModel(
+        tenant_id=2,
+        plugin_id=8,
+        enabled=True,
+        purchased=True,
+        installed_time=datetime.now(),
+    )
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[
+                _scalar_result([7]),
+                _scalar_result([active_plugin, stale_plugin]),
+                _scalar_result([]),
+                _scalar_result([active_plugin, stale_plugin]),
+            ]
+        ),
+        add=Mock(),
+        flush=AsyncMock(),
+    )
+
+    asyncio.run(PackageService.sync_tenant_plugins(db, tenant_id=2, package_id=20))
+
+    assert active_plugin.enabled is True
+    assert active_plugin.purchased is True
+    assert stale_plugin.enabled is False
+    assert stale_plugin.purchased is False
+
+    asyncio.run(PackageService.sync_tenant_plugins(db, tenant_id=2, package_id=21))
+
+    assert active_plugin.enabled is False
+    assert active_plugin.purchased is False
+    assert stale_plugin.enabled is False
+    assert stale_plugin.purchased is False
+    assert db.flush.await_count == 2
+
+
 def test_set_plugins_syncs_tenants_using_package(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -194,22 +194,26 @@ class PackageService:
             .scalars()
             .all()
         )
-        if not plugin_ids:
-            return
-
         existing = {
             item.plugin_id: item
             for item in (
                 await db.execute(
                     select(TenantPluginModel).where(
                         TenantPluginModel.tenant_id == tenant_id,
-                        TenantPluginModel.plugin_id.in_(plugin_ids),
                     )
                 )
             )
             .scalars()
             .all()
         }
+        for plugin_id, tenant_plugin in existing.items():
+            if plugin_id in plugin_ids:
+                tenant_plugin.enabled = True
+                tenant_plugin.purchased = True
+            else:
+                tenant_plugin.enabled = False
+                tenant_plugin.purchased = False
+
         for plugin_id in plugin_ids:
             tenant_plugin = existing.get(plugin_id)
             if tenant_plugin is None:
@@ -222,9 +226,6 @@ class PackageService:
                         installed_time=datetime.now(),
                     )
                 )
-            else:
-                tenant_plugin.enabled = True
-                tenant_plugin.purchased = True
         await db.flush()
 
     @staticmethod
