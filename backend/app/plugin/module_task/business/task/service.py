@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import status
@@ -7,7 +8,9 @@ from app.core.exceptions import CustomException
 
 from .crud import BusinessTaskCRUD
 from .schema import (
+    BusinessTaskActionOutSchema,
     BusinessTaskCreateSchema,
+    BusinessTaskDiagnosticOutSchema,
     BusinessTaskOutSchema,
     BusinessTaskQueryParam,
     BusinessTaskUpdateSchema,
@@ -33,6 +36,9 @@ class BusinessTaskService:
     async def detail(self, id: int) -> BusinessTaskOutSchema:
         return await self.crud.get_or_404(id=id, out_schema=BusinessTaskOutSchema)
 
+    async def diagnostic(self, id: int) -> BusinessTaskDiagnosticOutSchema:
+        return await self.crud.get_or_404(id=id, out_schema=BusinessTaskDiagnosticOutSchema)
+
     async def page(
         self,
         page_no: int,
@@ -49,14 +55,56 @@ class BusinessTaskService:
         )
 
     async def update_status(self, id: int, data: BusinessTaskUpdateSchema) -> BusinessTaskOutSchema:
+        """兼容内部记录更新；不再通过 HTTP 暴露。"""
         current = await self.crud.get_or_404(id=id)
         next_status = data.status or current.status
-        if current.status in self._TERMINAL_STATUSES and next_status != current.status:
-            raise CustomException(msg="终态任务不允许回退", status_code=status.HTTP_400_BAD_REQUEST)
-        if data.progress is not None and current.progress > data.progress and current.status in self._TERMINAL_STATUSES:
-            raise CustomException(msg="终态任务不允许回退进度", status_code=status.HTTP_400_BAD_REQUEST)
+        from app.plugin.module_task.runtime.state import InvalidBusinessTaskProgress, InvalidBusinessTaskTransition, ensure_progress, ensure_transition
+
+        try:
+            ensure_transition(current.status, next_status)
+            if data.progress is not None:
+                ensure_progress(current.progress, data.progress)
+        except (InvalidBusinessTaskTransition, InvalidBusinessTaskProgress) as exc:
+            raise CustomException(msg=str(exc), status_code=status.HTTP_400_BAD_REQUEST)
         update_obj = await self.crud.update(id=id, data=data)
         return BusinessTaskOutSchema.model_validate(update_obj)
+
+    async def cancel(self, id: int) -> BusinessTaskActionOutSchema:
+        current = await self.crud.get_or_404(id=id)
+        if current.status in self._TERMINAL_STATUSES:
+            raise CustomException(msg="终态任务不能取消", status_code=status.HTTP_400_BAD_REQUEST)
+        now = datetime.now(UTC)
+        if current.status in {"pending", "enqueue_failed", "queued", "retrying"}:
+            current.status = "canceled"
+            current.cancel_requested_at = now
+            current.finished_at = now
+        elif current.status == "running":
+            from app.plugin.module_task.runtime.loader import load_business_task_modules
+            from app.plugin.module_task.runtime.registry import business_task_registry
+
+            load_business_task_modules()
+            try:
+                definition = business_task_registry.get(current.handler_code or "")
+            except LookupError:
+                raise CustomException(msg="任务处理器不可用，无法协作取消", status_code=status.HTTP_409_CONFLICT)
+            if not definition.supports_cancel:
+                raise CustomException(msg="任务处理器不支持运行中取消", status_code=status.HTTP_409_CONFLICT)
+            current.cancel_requested_at = now
+        await self.auth.db.flush()
+        await self.auth.db.refresh(current)
+        return BusinessTaskActionOutSchema.model_validate(current)
+
+    async def retry(self, id: int) -> BusinessTaskActionOutSchema:
+        current = await self.crud.get_or_404(id=id)
+        if not current.handler_code:
+            raise CustomException(msg="历史任务没有可重投处理器", status_code=status.HTTP_409_CONFLICT)
+        from app.plugin.module_task.runtime.dispatcher import BusinessTaskDispatcher
+
+        try:
+            task = await BusinessTaskDispatcher().retry_existing(task_id=current.id, tenant_id=current.tenant_id)
+        except (LookupError, ValueError) as exc:
+            raise CustomException(msg=str(exc), status_code=status.HTTP_409_CONFLICT)
+        return BusinessTaskActionOutSchema.model_validate(task)
 
 
 class DemoBatchRegistry:

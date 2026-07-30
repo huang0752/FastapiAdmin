@@ -236,7 +236,52 @@ class InitializeData:
 
         if self._assembly.is_feature_enabled("tenant_workspace", True):
             await self.__ensure_owner_workspace_menus(db)
+        if self._assembly.is_plugin_enabled("module_task"):
+            await self.__ensure_business_task_permissions(db)
         await self.__backfill_tenant_memberships(db)
+
+    async def __ensure_business_task_permissions(self, db: AsyncSession) -> None:
+        """幂等补齐业务任务查询、取消、重试和运行诊断权限。"""
+        task_root = (
+            await db.execute(select(MenuModel).where(MenuModel.route_name == "Task").limit(1))
+        ).scalar_one_or_none()
+        if task_root is None:
+            return
+        specs = (
+            ("查询业务任务", "module_task:business_task:query", "tenant"),
+            ("查看业务任务详情", "module_task:business_task:detail", "tenant"),
+            ("取消业务任务", "module_task:business_task:cancel", "tenant"),
+            ("重投业务任务", "module_task:business_task:retry", "tenant"),
+            ("诊断业务任务运行时", "module_task:business_task:monitor", "platform"),
+        )
+        added = 0
+        for order, (name, permission, scope) in enumerate(specs, start=20):
+            exists = (
+                await db.execute(
+                    select(MenuModel)
+                    .where(MenuModel.type == 3, MenuModel.permission == permission)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if exists is not None:
+                continue
+            db.add(
+                MenuModel(
+                    name=name,
+                    title=name,
+                    type=3,
+                    order=order,
+                    permission=permission,
+                    scope=scope,
+                    status=0,
+                    parent_id=task_root.id,
+                    description=name,
+                )
+            )
+            added += 1
+        if added:
+            await db.flush()
+            logger.info("✅️ 已增量补齐 {} 个业务任务权限", added)
 
     async def __ensure_owner_workspace_menus(self, db: AsyncSession) -> None:
         """幂等补齐旧数据库缺失的租户工作台必备权限。"""

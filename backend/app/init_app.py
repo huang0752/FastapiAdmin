@@ -42,6 +42,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, Any]:
         logger.info("✅ Redis租户配置初始化完成")
         await SchedulerUtil.init_scheduler(redis=app.state.redis)
         logger.info("✅ 定时任务调度器初始化完成")
+        if settings.CELERY_ENABLED and get_assembly().is_plugin_enabled("module_task"):
+            from app.core.ap_scheduler import scheduler
+            from app.plugin.module_task.runtime.recovery import install_business_task_recovery
+
+            install_business_task_recovery(scheduler)
+            logger.info("✅ 业务任务待发布恢复扫描已启用")
         await cache_util.init(redis=app.state.redis)
         logger.info("✅ fastapi-admin-cache 初始化完成")
         await FastAPILimiter.init(

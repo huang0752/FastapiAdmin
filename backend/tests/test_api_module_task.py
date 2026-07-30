@@ -229,17 +229,20 @@ class TestBusinessTask:
     """通用业务长任务中心。"""
 
     def test_business_task_routes_require_explicit_permissions(self) -> None:
-        assert _route_permissions(BusinessTaskRouter, "/business/task/create", "POST") == [
-            "module_task:business_task:create"
-        ]
         assert _route_permissions(BusinessTaskRouter, "/business/task/list", "GET") == [
             "module_task:business_task:query"
         ]
         assert _route_permissions(BusinessTaskRouter, "/business/task/detail/{id}", "GET") == [
-            "module_task:business_task:query"
+            "module_task:business_task:detail"
         ]
-        assert _route_permissions(BusinessTaskRouter, "/business/task/status/{id}", "PATCH") == [
-            "module_task:business_task:update"
+        assert _route_permissions(BusinessTaskRouter, "/business/task/cancel/{id}", "POST") == [
+            "module_task:business_task:cancel"
+        ]
+        assert _route_permissions(BusinessTaskRouter, "/business/task/retry/{id}", "POST") == [
+            "module_task:business_task:retry"
+        ]
+        assert _route_permissions(BusinessTaskRouter, "/business/task/monitor/health", "GET") == [
+            "module_task:business_task:monitor"
         ]
         assert _route_permissions(DemoBatchRouter, "/demo-batch/trigger", "POST") == [
             "module_task:demo_batch:execute"
@@ -248,45 +251,10 @@ class TestBusinessTask:
             "module_task:demo_batch:delete"
         ]
 
-    def test_business_task_create_and_status_flow(self, test_client: TestClient, auth_headers: dict) -> None:
-        create_resp = test_client.post(
-            "/task/business/task/create",
-            headers=auth_headers,
-            json={
-                "module": "sample",
-                "biz_type": "data_import",
-                "biz_id": "IMPORT-001",
-                "title": "样例数据导入",
-                "payload": {"file": "demo.xlsx"},
-            },
-        )
-        assert create_resp.status_code == 200, create_resp.text
-        task = create_resp.json()["data"]
-        assert task["status"] == "pending"
-        assert task["progress"] == 0
-        assert task["module"] == "sample"
-        assert task["biz_type"] == "data_import"
-
-        update_resp = test_client.patch(
-            f"/task/business/task/status/{task['id']}",
-            headers=auth_headers,
-            json={"status": "running", "progress": 45},
-        )
-        assert update_resp.status_code == 200, update_resp.text
-        running = update_resp.json()["data"]
-        assert running["status"] == "running"
-        assert running["progress"] == 45
-
-        finish_resp = test_client.patch(
-            f"/task/business/task/status/{task['id']}",
-            headers=auth_headers,
-            json={"status": "success", "progress": 100, "result": {"rows": 3}},
-        )
-        assert finish_resp.status_code == 200, finish_resp.text
-        finished = finish_resp.json()["data"]
-        assert finished["status"] == "success"
-        assert finished["progress"] == 100
-        assert finished["result"] == {"rows": 3}
+    def test_business_task_has_no_arbitrary_create_or_status_api(self, test_client: TestClient) -> None:
+        paths = test_client.app.openapi()["paths"]
+        assert "/task/business/task/create" not in paths
+        assert "/task/business/task/status/{id}" not in paths
 
     async def test_business_task_is_tenant_isolated(self, test_client: TestClient) -> None:
         _ = test_client
@@ -323,28 +291,39 @@ class TestBusinessTask:
         assert page.total == 0
         assert page.items == []
 
-    def test_business_task_rejects_invalid_status_transition(self, test_client: TestClient, auth_headers: dict) -> None:
-        create_resp = test_client.post(
-            "/task/business/task/create",
-            headers=auth_headers,
-            json={"module": "sample", "biz_type": "data_check", "title": "样例校验"},
-        )
-        assert create_resp.status_code == 200, create_resp.text
-        task_id = create_resp.json()["data"]["id"]
+    async def test_business_task_detail_cancel_and_retry_are_tenant_isolated(self, test_client: TestClient) -> None:
+        _ = test_client
+        import pytest
 
-        finish_resp = test_client.patch(
-            f"/task/business/task/status/{task_id}",
-            headers=auth_headers,
-            json={"status": "success", "progress": 100},
-        )
-        assert finish_resp.status_code == 200, finish_resp.text
+        from app.api.v1.module_system.user.model import UserModel
+        from app.core.base_schema import AuthSchema
+        from app.core.database import async_db_session
+        from app.core.exceptions import CustomException
+        from app.plugin.module_task.business.task.schema import BusinessTaskCreateSchema
+        from app.plugin.module_task.business.task.service import BusinessTaskService
 
-        rewind_resp = test_client.patch(
-            f"/task/business/task/status/{task_id}",
-            headers=auth_headers,
-            json={"status": "running", "progress": 50},
-        )
-        assert rewind_resp.status_code == 400, rewind_resp.text
+        async with async_db_session() as db:
+            tenant_a_user = (await db.execute(select(UserModel).where(UserModel.username == "user"))).scalar_one()
+            tenant_b_user = (await db.execute(select(UserModel).where(UserModel.username == "test_user"))).scalar_one()
+            tenant_a_auth = AuthSchema(db=db, user=tenant_a_user, tenant_id=tenant_a_user.tenant_id)
+            tenant_b_auth = AuthSchema(db=db, user=tenant_b_user, tenant_id=tenant_b_user.tenant_id)
+            task = await BusinessTaskService(tenant_a_auth).create(
+                BusinessTaskCreateSchema(module="sample", biz_type="tenant_guard", title="租户隔离动作")
+            )
+            await db.flush()
+
+            service = BusinessTaskService(tenant_b_auth)
+            with pytest.raises(CustomException):
+                await service.detail(task.id)
+            with pytest.raises(CustomException):
+                await service.cancel(task.id)
+            with pytest.raises(CustomException):
+                await service.retry(task.id)
+
+    def test_business_task_health_distinguishes_disabled_runtime(self, test_client: TestClient, auth_headers: dict) -> None:
+        response = test_client.get("/task/business/task/monitor/health", headers=auth_headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["status"] == "celery_disabled"
 
 
 class TestDemoBatchAndIndustrySamples:
