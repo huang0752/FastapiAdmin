@@ -6,3 +6,8 @@ version = "1.0.0"
 description = "定时任务、DAG 工作流等子模块。"
 optional = true
 tags = ["task", "cron", "workflow"]
+
+[runtime]
+# 当前插件的处理器注册模块。产品/第三方插件在自己的 plugin.toml 中声明，
+# module_task 不反向依赖具体业务插件。
+business_task_modules = []

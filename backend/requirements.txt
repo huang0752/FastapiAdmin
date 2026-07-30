@@ -8,6 +8,7 @@ apscheduler==3.11.0                    # 定时任务
 asyncmy==0.2.11                        # 异步mysql操作数据库
 asyncpg==0.31.0                        # 异步postgresql操作数据库
 bleach==6.4.0                          # 过滤 HTML 标签
+celery[redis]==5.6.3                   # module_task 可选业务长任务 Worker
 tinycss2==1.5.1                        # bleach CSS 清洗依赖
 click==8.1.7                           # 命令行参数解析
 croniter>=1.0.12,<5.0.0                # cron 表达式解析
@@ -30,7 +31,7 @@ pydantic-settings>=2.6.1               # 配置设置（fastapi-mail 要求 >=2.
 pyjwt==2.13.0                          # OAuth2
 pymysql==1.2.0                         # MySQL 异步操作数据库
 python-multipart==0.0.32               # request.form() 对表单进行「解析」时安装
-redis==7.1.0                           # Redis 异步操作数据库
+redis==6.4.0                           # Redis 客户端；兼容 Celery 5.6/Kombu 5.6 官方约束
 rich==15.0.0                           # 终端打印美化
 sqlalchemy==2.0.51                     # 数据库ORM
 sqlglot[rs]==27.8.0                    # sql 解析

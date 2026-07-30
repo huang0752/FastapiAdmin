@@ -129,6 +129,35 @@ class AssemblyConfig:
         value = self.feature_flags.get(feature)
         return value if isinstance(value, bool) else default
 
+    def business_task_modules(self, plugin_dir: Path | None = None) -> list[str]:
+        """读取当前装配允许插件声明的业务任务注册模块。
+
+        插件通过 ``plugin.toml`` 的 ``[runtime].business_task_modules`` 声明
+        显式扩展点；module_task 不反向导入任何产品插件。
+        """
+        directory = plugin_dir or PLUGIN_DIR
+        modules: list[str] = []
+        seen: set[str] = set()
+        if not directory.is_dir():
+            return modules
+        for plugin_path in sorted(directory.glob("module_*/plugin.toml")):
+            plugin_name = plugin_path.parent.name
+            if not self.is_plugin_enabled(plugin_name):
+                continue
+            with plugin_path.open("rb") as file:
+                manifest = tomllib.load(file)
+            runtime = manifest.get("runtime", {})
+            if not isinstance(runtime, dict):
+                raise TypeError(f"插件 {plugin_name} 的 [runtime] 必须是 TOML table")
+            for module in _string_list(runtime.get("business_task_modules")):
+                expected_prefix = f"app.plugin.{plugin_name}"
+                if module != expected_prefix and not module.startswith(f"{expected_prefix}."):
+                    raise ValueError(f"插件 {plugin_name} 的任务模块必须位于 {expected_prefix} 包内: {module}")
+                if module not in seen:
+                    seen.add(module)
+                    modules.append(module)
+        return modules
+
     def is_menu_item_enabled(self, item: dict[str, Any]) -> bool:
         permission = str(item.get("permission") or "")
         component_path = str(item.get("component_path") or "")

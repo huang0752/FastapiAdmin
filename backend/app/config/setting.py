@@ -2,7 +2,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -27,6 +27,21 @@ class Settings(BaseSettings):
             raise ValueError("生产环境必须通过环境变量配置 SECRET_KEY")
         if self.ENVIRONMENT == EnvironmentEnum.PROD and self.ALLOW_CREDENTIALS and "*" in self.ALLOW_ORIGINS:
             raise ValueError("生产环境开启凭证跨域时 ALLOW_ORIGINS 不能包含 '*'")
+        if self.CELERY_ENABLED:
+            broker = urlparse(self.CELERY_BROKER_URL)
+            if broker.scheme not in {"redis", "rediss"}:
+                raise ValueError("CELERY_BROKER_URL 只支持 redis:// 或 rediss://")
+            if not self.CELERY_DEFAULT_QUEUE.strip() or not self.CELERY_BROKER_KEY_PREFIX.strip():
+                raise ValueError("Celery 队列和 Broker 键前缀不能为空")
+            if not 0 < self.CELERY_HEARTBEAT_INTERVAL < self.CELERY_LEASE_SECONDS:
+                raise ValueError("Celery 心跳间隔必须小于租约时长")
+            if not 0 < self.CELERY_TASK_SOFT_TIME_LIMIT < self.CELERY_TASK_TIME_LIMIT < self.CELERY_BROKER_VISIBILITY_TIMEOUT:
+                raise ValueError("Celery 超时必须满足 soft < hard < visibility timeout")
+            if self.CELERY_WORKER_CONCURRENCY < 1 or self.CELERY_WORKER_PREFETCH_MULTIPLIER < 1 or self.CELERY_MAX_RETRIES < 0:
+                raise ValueError("Celery 并发、预取和重试配置不合法")
+            if self.ENVIRONMENT == EnvironmentEnum.PROD and broker.hostname not in {"localhost", "127.0.0.1", "::1"}:
+                if broker.scheme != "rediss" or broker.password is None:
+                    raise ValueError("生产环境的远程 Celery Redis Broker 必须使用 rediss 和认证")
 
     # ================================================= #
     # ******************* 项目环境 ****************** #
@@ -143,6 +158,28 @@ class Settings(BaseSettings):
     REDIS_DB_NAME: int = 1
     REDIS_USER: str = ""
     REDIS_PASSWORD: str = ""
+
+    # ================================================= #
+    # *************** Celery业务任务配置 *************** #
+    # ================================================= #
+    # Celery 是 module_task 的可选长任务运行时。Web 进程不会启动 Worker，
+    # PostgreSQL 保存业务事实状态，Redis 只承担 Broker 传输。
+    CELERY_ENABLED: bool = False
+    CELERY_BROKER_URL: str = "redis://localhost:6379/2"
+    CELERY_RESULT_BACKEND: None = None
+    CELERY_DEFAULT_QUEUE: str = "business_tasks"
+    CELERY_BROKER_KEY_PREFIX: str = "fastapiadmin:celery:"
+    CELERY_TASK_SOFT_TIME_LIMIT: int = 60 * 30
+    CELERY_TASK_TIME_LIMIT: int = 60 * 35
+    CELERY_WORKER_PREFETCH_MULTIPLIER: int = 1
+    CELERY_WORKER_CONCURRENCY: int = 2
+    CELERY_TASK_ACKS_LATE: bool = True
+    CELERY_TASK_REJECT_ON_WORKER_LOST: bool = True
+    CELERY_MAX_RETRIES: int = 3
+    CELERY_RETRY_BACKOFF: int = 30
+    CELERY_HEARTBEAT_INTERVAL: int = 15
+    CELERY_LEASE_SECONDS: int = 60
+    CELERY_BROKER_VISIBILITY_TIMEOUT: int = 60 * 60
 
     # ================================================= #
     # ******************** 验证码配置 ******************* #
