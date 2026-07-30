@@ -9,12 +9,13 @@
 | 技术 | 版本 | 说明 |
 |------|------|------|
 | FastAPI | 0.115.2 | 现代 Web 框架 |
-| SQLAlchemy | 2.0.36 | ORM 框架 |
-| Alembic | 1.15.1 | 数据库迁移工具 |
+| SQLAlchemy | 2.0.51 | ORM 框架 |
+| Alembic | 1.18.4 | 数据库迁移工具 |
 | Pydantic | 2.x | 数据验证与序列化 |
 | APScheduler | 3.11.0 | 定时任务调度 |
-| Redis | 5.2.1 | 缓存与会话存储 |
-| Uvicorn | 0.30.6 | ASGI 服务器 |
+| Celery | 5.6.3 | module_task 可选业务长任务 Worker |
+| redis-py | 6.4.0 | Redis 客户端与 Celery Broker 传输 |
+| Uvicorn | 0.49.0 | ASGI 服务器 |
 | Python | 3.12+ | 运行环境 |
 
 ## 项目结构
@@ -130,6 +131,10 @@ uv run ruff check --watch
 - `model_dump(mode='python')` 供 ORM 使用原生类型；JSON / Redis 使用 `model_dump(mode='json')`
 - 统一 HTTP 响应见 `app/common/response.py` 中的 **`jsonable_encoder`**
 - 写入 Redis 时请使用 **`model_dump(mode='json')`** 再序列化
+
+## 业务后台任务
+
+`module_task` 可选提供 Celery + Redis 长任务运行时；APScheduler 继续负责定时触发，PostgreSQL 保存业务任务事实状态。启用方式、Worker 命令、插件注册/投递协议、幂等、租约、重试、取消和恢复流程见 [Celery 通用业务任务运行时](../docs/framework/celery-business-task-runtime.md)。
 
 ## 相关链接
 
