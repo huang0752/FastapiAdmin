@@ -203,7 +203,7 @@ class _RecordingPublisher:
         self.messages.append(message)
 
 
-async def _runtime_auth():
+async def _runtime_auth(username: str = "user"):
     from sqlalchemy import select
 
     from app.api.v1.module_system.user.model import UserModel
@@ -211,7 +211,7 @@ async def _runtime_auth():
     from app.core.database import async_db_session
 
     db = async_db_session()
-    user = (await db.execute(select(UserModel).where(UserModel.username == "user"))).scalar_one()
+    user = (await db.execute(select(UserModel).where(UserModel.username == username))).scalar_one()
     return db, AuthSchema(db=db, user=user, tenant_id=user.tenant_id)
 
 
@@ -542,6 +542,134 @@ async def test_missing_actor_fails_without_running_handler(test_client, monkeypa
     assert outcome.status == "failed"
     assert failed.error_code == "ACTOR_INVALID"
     assert calls == 0
+
+
+@pytest.mark.parametrize("revocation", ["menu_disabled", "package_disabled", "package_permission_removed"])
+@pytest.mark.asyncio
+async def test_executor_rechecks_effective_package_menu_permissions(
+    test_client,
+    monkeypatch: pytest.MonkeyPatch,
+    revocation: str,
+) -> None:
+    from sqlalchemy import delete, select
+    from sqlalchemy.orm import selectinload
+
+    from app.api.v1.module_platform.menu.model import MenuModel
+    from app.api.v1.module_platform.package.model import PackageMenuModel, PackageModel
+    from app.api.v1.module_platform.tenant.model import TenantModel
+    from app.api.v1.module_system.role.model import RoleMenusModel
+    from app.api.v1.module_system.user.model import UserModel
+    from app.core.database import async_db_session
+    from app.plugin.module_task.business.task.model import BusinessTaskModel
+    from app.plugin.module_task.runtime.dispatcher import BusinessTaskDispatcher, DispatchRequest
+    from app.plugin.module_task.runtime.executor import BusinessTaskExecutor
+    from app.plugin.module_task.runtime.registry import BusinessTaskRegistry
+
+    _ = test_client
+    permission = f"tests:background:{revocation}"
+    calls = 0
+
+    async def handler(context, payload: _SamplePayload) -> dict:
+        nonlocal calls
+        calls += 1
+        return {"value": payload.value}
+
+    registry = BusinessTaskRegistry()
+    registry.register(
+        handler_code=f"sample.{revocation}",
+        handler=handler,
+        module="sample",
+        payload_schema=_SamplePayload,
+        required_permissions=(permission,),
+    )
+    monkeypatch.setattr("app.plugin.module_task.runtime.dispatcher.settings.CELERY_ENABLED", True)
+
+    menu_id: int | None = None
+    package_id: int | None = None
+    try:
+        async with async_db_session() as setup_db:
+            user = (
+                await setup_db.execute(
+                    select(UserModel)
+                    .options(selectinload(UserModel.roles))
+                    .where(UserModel.username == "test_user")
+                )
+            ).scalar_one()
+            tenant = await setup_db.get(TenantModel, user.tenant_id)
+            assert tenant is not None and tenant.package_id is not None
+            assert user.roles
+            package_id = tenant.package_id
+            menu = MenuModel(
+                name=f"后台权限复核-{revocation}",
+                type=3,
+                order=999,
+                permission=permission,
+                scope="tenant",
+                status=0,
+            )
+            setup_db.add(menu)
+            await setup_db.flush()
+            menu_id = menu.id
+            setup_db.add(RoleMenusModel(role_id=user.roles[0].id, menu_id=menu.id))
+            setup_db.add(PackageMenuModel(package_id=package_id, menu_id=menu.id))
+            await setup_db.commit()
+
+        db, auth = await _runtime_auth("test_user")
+        try:
+            task = await BusinessTaskDispatcher(registry=registry, publisher=_RecordingPublisher()).dispatch(
+                auth=auth,
+                request=DispatchRequest(
+                    handler_code=f"sample.{revocation}",
+                    biz_type="permission-recheck",
+                    payload={"value": 1},
+                    idempotency_key=f"permission-recheck-{revocation}",
+                ),
+            )
+        finally:
+            await db.close()
+
+        async with async_db_session() as revoke_db:
+            if revocation == "menu_disabled":
+                menu = await revoke_db.get(MenuModel, menu_id)
+                assert menu is not None
+                menu.status = 1
+            elif revocation == "package_disabled":
+                package = await revoke_db.get(PackageModel, package_id)
+                assert package is not None
+                package.status = 1
+            else:
+                await revoke_db.execute(
+                    delete(PackageMenuModel).where(
+                        PackageMenuModel.package_id == package_id,
+                        PackageMenuModel.menu_id == menu_id,
+                    )
+                )
+            await revoke_db.commit()
+
+        outcome = await BusinessTaskExecutor(registry=registry).execute(task.id)
+        async with async_db_session() as check_db:
+            failed = await check_db.get(BusinessTaskModel, task.id)
+            assert failed is not None
+            assert failed.status == "failed"
+            assert failed.error_code == "ACTOR_INVALID"
+        assert outcome.status == "failed"
+        assert calls == 0
+    finally:
+        if menu_id is not None:
+            async with async_db_session() as cleanup_db:
+                if package_id is not None:
+                    package = await cleanup_db.get(PackageModel, package_id)
+                    if package is not None:
+                        package.status = 0
+                    await cleanup_db.execute(
+                        delete(PackageMenuModel).where(
+                            PackageMenuModel.package_id == package_id,
+                            PackageMenuModel.menu_id == menu_id,
+                        )
+                    )
+                await cleanup_db.execute(delete(RoleMenusModel).where(RoleMenusModel.menu_id == menu_id))
+                await cleanup_db.execute(delete(MenuModel).where(MenuModel.id == menu_id))
+                await cleanup_db.commit()
 
 
 @pytest.mark.asyncio

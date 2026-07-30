@@ -14,6 +14,7 @@ from app.api.v1.module_system.role.model import RoleModel
 from app.api.v1.module_system.user.model import UserModel
 from app.config.setting import settings
 from app.core.base_schema import AuthSchema
+from app.core.dependencies import resolve_effective_permissions
 
 from ..business.task.model import BusinessTaskModel
 from .exceptions import BusinessTaskCancelled, InvalidBackgroundActorError
@@ -65,18 +66,12 @@ async def build_background_auth(
         ).scalar_one_or_none()
         if membership is None:
             raise InvalidBackgroundActorError("任务 actor 已不属于任务租户")
+    auth = AuthSchema.for_background_task(db=db, user=user, tenant_id=tenant_id)
     if required_permissions and not user.is_superuser:
-        granted = {
-            menu.permission
-            for role in user.roles
-            if role.status == 0 and role.tenant_id == tenant_id
-            for menu in role.menus
-            if menu.permission
-        }
-        missing = set(required_permissions) - granted
+        missing = set(required_permissions) - await resolve_effective_permissions(auth)
         if missing:
             raise InvalidBackgroundActorError("任务 actor 已失去处理器所需权限")
-    return AuthSchema.for_background_task(db=db, user=user, tenant_id=tenant_id)
+    return auth
 
 
 @dataclass(slots=True)

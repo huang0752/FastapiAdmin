@@ -391,6 +391,27 @@ async def _get_cached_tenant_menu_ids(auth: AuthSchema, tenant_id: int) -> list[
     return await PackageService.get_tenant_available_menu_ids(auth, tenant_id)
 
 
+async def resolve_effective_permissions(auth: AuthSchema) -> set[str]:
+    """解析当前 actor 在租户与套餐约束下仍然有效的权限。"""
+    if not auth.user or not auth.user.roles:
+        return set()
+
+    role_menus = [
+        menu
+        for role in auth.user.roles
+        if role.status == 0 and (auth.tenant_id is None or role.tenant_id == auth.tenant_id)
+        for menu in role.menus
+        if menu.status == 0 and menu.permission
+    ]
+    if not role_menus:
+        return set()
+    if auth.tenant_id is None:
+        return {menu.permission for menu in role_menus}
+
+    allowed_ids = set(await _get_cached_tenant_menu_ids(auth, auth.tenant_id))
+    return {menu.permission for menu in role_menus if menu.id in allowed_ids}
+
+
 class AuthPermission:
     """权限验证类"""
 
@@ -434,28 +455,7 @@ class AuthPermission:
         if "*" in self.permissions or "*:*:*" in self.permissions:
             raise CustomException(msg="无权限操作", code=10403, status_code=403)
 
-        # 检查用户是否有角色
-        if not auth.user or not auth.user.roles:
-            raise CustomException(msg="无权限操作", code=10403, status_code=403)
-
-        # 收集角色权限（附带 menu_id 用于套餐过滤）
-        role_perms: dict[str, int] = {}
-        for role in auth.user.roles:
-            if role.status != 0:
-                continue
-            for menu in role.menus:
-                if menu.status == 0 and menu.permission:
-                    role_perms[menu.permission] = menu.id
-
-        if not role_perms:
-            raise CustomException(msg="无权限操作", code=10403, status_code=403)
-
-        # 租户用户：权限必须受套餐菜单约束（带 60s 进程级缓存）
-        if auth.tenant_id:
-            allowed_ids = set(await _get_cached_tenant_menu_ids(auth, auth.tenant_id))
-            user_permissions = {p for p, mid in role_perms.items() if mid in allowed_ids}
-        else:
-            user_permissions = set(role_perms.keys())
+        user_permissions = await resolve_effective_permissions(auth)
 
         # 权限验证 - 满足任一权限即可
         if not any(perm in user_permissions for perm in self.permissions):

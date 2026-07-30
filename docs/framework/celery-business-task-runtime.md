@@ -119,7 +119,7 @@ async def generate_report(context, payload: ReportPayload) -> dict:
     return {"report_id": payload.report_id, "state": "generated"}
 ```
 
-处理器只允许服务端注册，不接受客户端提供 Python 路径、函数名、shell、动态代码或 pickle。`required_permissions` 会在每次执行前按当前 actor 权限重新验证。
+处理器只允许服务端注册，不接受客户端提供 Python 路径、函数名、shell、动态代码或 pickle。`required_permissions` 会在每次执行前按当前 actor 权限重新验证，并与在线请求共用角色状态、菜单状态和租户套餐可用菜单解析逻辑。菜单停用、套餐停用或套餐移除权限后，尚未开始的任务会拒绝执行。
 
 ## 内部投递
 
