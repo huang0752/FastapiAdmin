@@ -69,6 +69,10 @@ export default ({ mode }: { mode: string }) => {
   const root = process.cwd();
   const env = loadEnv(mode, root);
   const isProduction = mode === "production";
+  const apiBasePath = env.VITE_APP_BASE_API;
+  if (!apiBasePath) {
+    throw new Error("VITE_APP_BASE_API 不能为空");
+  }
 
   return defineConfig({
     define: {
@@ -84,7 +88,7 @@ export default ({ mode }: { mode: string }) => {
       port: Number(env.VITE_PORT),
       open: true,
       proxy: {
-        [env.VITE_APP_BASE_API]: {
+        [apiBasePath]: {
           target: env.VITE_API_BASE_URL, // 代理目标地址：https://后端地址
           secure: false, // 请求是否https
           changeOrigin: true, // 是否跨域
