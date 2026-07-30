@@ -14,7 +14,7 @@ from app.api.v1.module_system.role.model import RoleModel
 from app.api.v1.module_system.user.model import UserModel
 from app.config.setting import settings
 from app.core.base_schema import AuthSchema
-from app.core.dependencies import resolve_effective_permissions
+from app.core.dependencies import is_tenant_package_active, resolve_effective_permissions
 
 from ..business.task.model import BusinessTaskModel
 from .exceptions import BusinessTaskCancelled, InvalidBackgroundActorError
@@ -67,6 +67,8 @@ async def build_background_auth(
         if membership is None:
             raise InvalidBackgroundActorError("任务 actor 已不属于任务租户")
     auth = AuthSchema.for_background_task(db=db, user=user, tenant_id=tenant_id)
+    if not await is_tenant_package_active(auth, tenant_id):
+        raise InvalidBackgroundActorError("任务租户套餐不存在或已停用")
     if required_permissions:
         effective_permissions = await resolve_effective_permissions(
             auth,

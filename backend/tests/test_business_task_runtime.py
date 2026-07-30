@@ -507,6 +507,35 @@ def test_worker_closes_retrying_task_if_celery_rejects_retry(monkeypatch: pytest
     assert exhausted == [42, 5]
 
 
+def test_worker_marks_retry_recoverable_if_retry_publish_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from celery.exceptions import Reject
+
+    celery_app_module = importlib.import_module("app.plugin.module_task.runtime.celery_app")
+    monkeypatch.setattr(celery_app_module.settings, "CELERY_ENABLED", True)
+    monkeypatch.setattr(celery_app_module, "is_plugin_enabled", lambda code: code == "module_task")
+    worker = importlib.import_module("app.plugin.module_task.runtime.worker")
+    from app.plugin.module_task.runtime.executor import ExecutionOutcome
+
+    recoverable: list[int] = []
+
+    class FakeExecutor:
+        async def execute(self, business_task_id: int) -> ExecutionOutcome:
+            return ExecutionOutcome(status="retrying", retry_countdown=30, retry_budget=2, retry_attempt=4)
+
+        async def mark_retry_enqueue_failed(self, business_task_id: int, *, expected_attempt: int) -> None:
+            recoverable.extend((business_task_id, expected_attempt))
+
+    def reject_publish(*, countdown: int, max_retries: int | None):
+        raise Reject(ConnectionError("broker unavailable secret=do-not-leak"), requeue=False)
+
+    monkeypatch.setattr(worker, "BusinessTaskExecutor", FakeExecutor)
+    monkeypatch.setattr(worker.execute_business_task, "retry", reject_publish)
+
+    worker.execute_business_task.run(42)
+
+    assert recoverable == [42, 4]
+
+
 @pytest.mark.asyncio
 async def test_executor_closes_retrying_database_state_after_celery_exhaustion(test_client) -> None:
     from app.core.database import async_db_session
@@ -582,6 +611,50 @@ async def test_executor_does_not_close_newer_retry_generation(test_client) -> No
         assert current is not None
         assert current.status == "retrying"
         assert current.attempt == 5
+
+
+@pytest.mark.asyncio
+async def test_executor_marks_same_retry_generation_recoverable_after_publish_failure(test_client) -> None:
+    from app.core.database import async_db_session
+    from app.plugin.module_task.business.task.model import BusinessTaskModel
+    from app.plugin.module_task.runtime.executor import BusinessTaskExecutor
+
+    _ = test_client
+    db, auth = await _runtime_auth()
+    try:
+        task = BusinessTaskModel(
+            tenant_id=auth.tenant_id,
+            created_id=auth.user.id,
+            updated_id=auth.user.id,
+            module="sample",
+            biz_type="retry-publish-failure",
+            handler_code="sample.retry_publish_failure",
+            queue="business_tasks",
+            external_task_id="retry-publish-failure-state",
+            status="retrying",
+            progress=0,
+            attempt=4,
+            max_retries=5,
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+    finally:
+        await db.close()
+
+    executor = BusinessTaskExecutor()
+    await executor.mark_retry_enqueue_failed(task.id, expected_attempt=3)
+    async with async_db_session() as check_db:
+        unchanged = await check_db.get(BusinessTaskModel, task.id)
+        assert unchanged is not None and unchanged.status == "retrying"
+
+    await executor.mark_retry_enqueue_failed(task.id, expected_attempt=4)
+    async with async_db_session() as check_db:
+        recoverable = await check_db.get(BusinessTaskModel, task.id)
+        assert recoverable is not None
+        assert recoverable.status == "enqueue_failed"
+        assert recoverable.error_code == "BROKER_PUBLISH_FAILED"
+        assert recoverable.enqueue_failed_at is not None
 
 
 @pytest.mark.asyncio
@@ -999,12 +1072,19 @@ async def test_disabled_package_revokes_owner_minimum_permission_for_background_
 
     try:
         async with async_db_session() as denied_db:
-            with pytest.raises(InvalidBackgroundActorError, match="所需权限"):
+            with pytest.raises(InvalidBackgroundActorError, match="套餐"):
                 await build_background_auth(
                     denied_db,
                     tenant_id=2,
                     actor_user_id=actor_id,
                     required_permissions=(permission,),
+                )
+        async with async_db_session() as no_permission_db:
+            with pytest.raises(InvalidBackgroundActorError, match="套餐"):
+                await build_background_auth(
+                    no_permission_db,
+                    tenant_id=2,
+                    actor_user_id=actor_id,
                 )
     finally:
         async with async_db_session() as cleanup_db:

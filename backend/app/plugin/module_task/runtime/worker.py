@@ -9,7 +9,7 @@ import asyncio
 from urllib.parse import urlsplit, urlunsplit
 
 from celery import signals
-from celery.exceptions import MaxRetriesExceededError
+from celery.exceptions import MaxRetriesExceededError, Reject
 
 from app.config.setting import settings
 from app.core.assembly import get_assembly
@@ -59,5 +59,10 @@ def execute_business_task(self, business_task_id: int) -> None:
             if outcome.retry_attempt is not None:
                 logger.error("Celery 重试次数已耗尽，收口数据库任务 task_id={}", business_task_id)
                 asyncio.run(executor.fail_retry_exhausted(business_task_id, expected_attempt=outcome.retry_attempt))
+            return
+        except Reject:
+            if outcome.retry_attempt is not None:
+                logger.error("Celery 重试消息发布失败，等待恢复扫描 task_id={}", business_task_id)
+                asyncio.run(executor.mark_retry_enqueue_failed(business_task_id, expected_attempt=outcome.retry_attempt))
             return
         raise retry_signal

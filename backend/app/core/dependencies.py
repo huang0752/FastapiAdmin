@@ -391,7 +391,7 @@ async def _get_cached_tenant_menu_ids(auth: AuthSchema, tenant_id: int) -> list[
     return await PackageService.get_tenant_available_menu_ids(auth, tenant_id)
 
 
-async def _tenant_has_active_package(auth: AuthSchema, tenant_id: int) -> bool:
+async def is_tenant_package_active(auth: AuthSchema, tenant_id: int) -> bool:
     """判断普通租户是否仍绑定有效套餐；系统租户不受套餐约束。"""
     if tenant_id == 1:
         return True
@@ -428,7 +428,7 @@ async def resolve_effective_permissions(
     if not auth.user:
         return set()
 
-    if auth.tenant_id is not None and require_active_package and not await _tenant_has_active_package(auth, auth.tenant_id):
+    if auth.tenant_id is not None and require_active_package and not await is_tenant_package_active(auth, auth.tenant_id):
         return set()
 
     if bypass_role_grants:

@@ -175,13 +175,13 @@ Worker 崩溃后，late ack/reject-on-lost 会重投消息；如果重投早于�
 
 ## 重试与取消
 
-只有 `RetryableBusinessTaskError` 或注册项 `retryable_exceptions` 中明确声明的异常自动重试，使用有限次数和指数退避。Worker 按 Celery 当前消息计数加数据库剩余业务重试预算动态设置本次上限；租约冲突产生的延迟不会吞掉业务重试次数。如果 Celery 仍拒绝继续重试，只会在任务仍处于同一数据库 attempt 时将 `retrying` 条件收口为 `failed/RETRIES_EXHAUSTED`，旧消息不能覆盖新的执行代际。payload 校验、未知 handler、actor/权限失效和普通业务错误不自动重试；耗尽后进入 `failed` 并保存安全错误摘要。
+只有 `RetryableBusinessTaskError` 或注册项 `retryable_exceptions` 中明确声明的异常自动重试，使用有限次数和指数退避。Worker 按 Celery 当前消息计数加数据库剩余业务重试预算动态设置本次上限；租约冲突产生的延迟不会吞掉业务重试次数。如果 Celery 仍拒绝继续重试，只会在任务仍处于同一数据库 attempt 时将 `retrying` 条件收口为 `failed/RETRIES_EXHAUSTED`，旧消息不能覆盖新的执行代际；重试消息发布失败则按同一 attempt CAS 转为可由恢复扫描补投的 `enqueue_failed`。payload 校验、未知 handler、actor/权限失效和普通业务错误不自动重试；耗尽后进入 `failed` 并保存安全错误摘要。
 
 `pending/enqueue_failed/queued/retrying` 可直接取消。`running` 只有在处理器声明 `supports_cancel=True` 时接受协作取消，写入 `cancel_requested_at`；处理器须在事务安全点调用 `context.check_cancelled()`。框架默认不使用 `revoke(terminate=True)` 强杀正在执行数据库事务的 Worker。
 
 ## 多租户和后台 actor
 
-Worker 根据任务表可信的 `tenant_id`、`created_id`、task ID 和 trace ID 重建上下文。执行前重新检查用户是否存在、是否启用、租户是否有效、普通用户是否仍属于该租户，以及 handler 所需权限。后台上下文强制租户范围，即使实际 actor 是平台管理员也不会借任务获得跨租户写权限；当前协议不允许缺少 actor 的隐式“系统超级管理员”任务。
+Worker 根据任务表可信的 `tenant_id`、`created_id`、task ID 和 trace ID 重建上下文。执行前重新检查用户是否存在、是否启用、租户及套餐是否有效、普通用户是否仍属于该租户，以及 handler 所需权限；即使 handler 未声明权限，普通租户套餐停用后也不会继续执行。后台上下文强制租户范围，即使实际 actor 是平台管理员也不会借任务获得跨租户写权限；当前协议不允许缺少 actor 的隐式“系统超级管理员”任务。
 
 普通 query/detail/cancel/retry 都经过现有 `AuthSchema`、数据权限和租户过滤。monitor 权限才能查看脱敏 handler、queue、Celery task ID、租约和 trace；普通响应不返回原始 payload、execution token 或完整内部错误。
 

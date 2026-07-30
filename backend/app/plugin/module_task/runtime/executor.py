@@ -217,6 +217,29 @@ class BusinessTaskExecutor:
             )
             await db.commit()
 
+    async def mark_retry_enqueue_failed(self, business_task_id: int, *, expected_attempt: int) -> None:
+        """Celery 重试消息发布失败时，按执行代际转为可恢复投递状态。"""
+        now = utc_now()
+        async with self.session_factory() as db:
+            await db.execute(
+                update(BusinessTaskModel)
+                .where(
+                    BusinessTaskModel.id == business_task_id,
+                    BusinessTaskModel.status == "retrying",
+                    BusinessTaskModel.attempt == expected_attempt,
+                )
+                .values(
+                    status="enqueue_failed",
+                    enqueue_failed_at=now,
+                    execution_token=None,
+                    lease_expires_at=None,
+                    heartbeat_at=now,
+                    error_code="BROKER_PUBLISH_FAILED",
+                    error="任务重试消息暂未进入队列",
+                )
+            )
+            await db.commit()
+
     async def _finish_success(self, task_id: int, token: str, result: dict | None) -> bool:
         now = utc_now()
         async with self.session_factory() as db:
