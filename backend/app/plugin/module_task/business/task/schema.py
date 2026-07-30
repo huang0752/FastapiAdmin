@@ -7,8 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.common.enums import QueueEnum
 from app.core.base_params import BaseQueryParam, TenantByQueryParam, UserByQueryParam
 from app.core.base_schema import BaseSchema, TenantBySchema, UserBySchema
+from app.core.validator import DateTimeStr
 
-BusinessTaskStatus = Literal["pending", "running", "success", "failed", "canceled"]
+BusinessTaskStatus = Literal["pending", "enqueue_failed", "queued", "running", "retrying", "success", "failed", "canceled"]
 
 
 class BusinessTaskCreateSchema(BaseModel):
@@ -45,10 +46,57 @@ class BusinessTaskUpdateSchema(BaseModel):
     error: str | None = Field(default=None, max_length=65535, description="错误信息")
 
 
-class BusinessTaskOutSchema(BusinessTaskCreateSchema, BaseSchema, UserBySchema, TenantBySchema):
-    """业务长任务响应模型。"""
+class BusinessTaskOutSchema(BaseSchema, UserBySchema, TenantBySchema):
+    """普通任务查询响应；不返回 payload、内部 trace 或租约令牌。"""
 
     model_config = ConfigDict(from_attributes=True)
+
+    module: str
+    biz_type: str
+    biz_id: str | None = None
+    title: str | None = None
+    status: BusinessTaskStatus
+    progress: int
+    result: dict | None = None
+    error_code: str | None = None
+    error_summary: str | None = Field(default=None, validation_alias="error")
+    is_demo: bool = False
+    demo_batch_id: str | None = None
+    description: str | None = None
+    attempt: int = 0
+    max_retries: int = 0
+    started_at: DateTimeStr | None = None
+    finished_at: DateTimeStr | None = None
+    cancel_requested_at: DateTimeStr | None = None
+
+
+class BusinessTaskDiagnosticOutSchema(BusinessTaskOutSchema):
+    """受 monitor 权限保护的脱敏运行诊断。"""
+
+    handler_code: str | None = None
+    queue: str | None = None
+    external_task_id: str | None = None
+    lease_expires_at: DateTimeStr | None = None
+    heartbeat_at: DateTimeStr | None = None
+    published_at: DateTimeStr | None = None
+    enqueue_failed_at: DateTimeStr | None = None
+    trace_id: str | None = None
+
+
+class BusinessTaskActionOutSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    status: BusinessTaskStatus
+    cancel_requested_at: DateTimeStr | None = None
+
+
+class BusinessTaskHealthOutSchema(BaseModel):
+    status: Literal["module_task_disabled", "celery_disabled", "broker_unreachable", "broker_reachable_no_worker", "worker_available"]
+    broker_reachable: bool = False
+    worker_available: bool = False
+    worker_count: int = 0
+    detail: str | None = None
 
 
 @dataclass

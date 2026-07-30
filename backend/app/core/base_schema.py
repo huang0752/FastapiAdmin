@@ -112,6 +112,7 @@ class AuthSchema(BaseModel):
     tenant_id: int | None = Field(default=None, description="租户ID,用于用户认证前查询")
     site_id: int | None = Field(default=None, description="品牌站点ID")
     _platform_global_read: bool = PrivateAttr(default=False)
+    _force_tenant_scope: bool = PrivateAttr(default=False)
 
     @classmethod
     def for_platform_global_read(cls, db: AsyncSession) -> "AuthSchema":
@@ -124,6 +125,17 @@ class AuthSchema(BaseModel):
         auth._platform_global_read = True
         return auth
 
+    @classmethod
+    def for_background_task(cls, *, db: AsyncSession, user: Any, tenant_id: int) -> "AuthSchema":
+        """创建严格受任务租户约束的后台执行上下文。
+
+        即使 actor 本人是平台管理员，普通租户业务任务也不能因后台执行而
+        获得跨租户写能力；系统级任务必须使用另行显式设计的协议。
+        """
+        auth = cls(db=db, user=user, tenant_id=tenant_id, check_data_scope=True)
+        auth._force_tenant_scope = True
+        return auth
+
     @property
     def is_platform_global(self) -> bool:
         """是否处于平台全局管理模式。
@@ -132,7 +144,7 @@ class AuthSchema(BaseModel):
         ``tenant_id`` 约束；系统租户 1 或明确绑定 ``SUPER_ADMIN`` 角色的
         多站点平台租户允许绕过租户过滤。
         """
-        if not self.user or not self.user.is_superuser:
+        if self._force_tenant_scope or not self.user or not self.user.is_superuser:
             return False
         if self.tenant_id == 1:
             return True
