@@ -175,7 +175,7 @@ Worker 崩溃后，late ack/reject-on-lost 会重投消息；如果重投早于�
 
 ## 重试与取消
 
-只有 `RetryableBusinessTaskError` 或注册项 `retryable_exceptions` 中明确声明的异常自动重试，使用有限次数和指数退避。payload 校验、未知 handler、actor/权限失效和普通业务错误不自动重试；耗尽后进入 `failed` 并保存安全错误摘要。
+只有 `RetryableBusinessTaskError` 或注册项 `retryable_exceptions` 中明确声明的异常自动重试，使用有限次数和指数退避。Worker 会把数据库任务的 `max_retries` 显式传给 Celery；如果 Celery 仍拒绝继续重试，数据库中的 `retrying` 会条件收口为 `failed/RETRIES_EXHAUSTED`。payload 校验、未知 handler、actor/权限失效和普通业务错误不自动重试；耗尽后进入 `failed` 并保存安全错误摘要。
 
 `pending/enqueue_failed/queued/retrying` 可直接取消。`running` 只有在处理器声明 `supports_cancel=True` 时接受协作取消，写入 `cancel_requested_at`；处理器须在事务安全点调用 `context.check_cancelled()`。框架默认不使用 `revoke(terminate=True)` 强杀正在执行数据库事务的 Worker。
 

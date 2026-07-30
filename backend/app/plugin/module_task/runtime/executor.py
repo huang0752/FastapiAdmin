@@ -27,6 +27,7 @@ from .registry import BusinessTaskRegistry, UnknownBusinessTaskHandlerError, bus
 class ExecutionOutcome:
     status: str
     retry_countdown: int | None = None
+    max_retries: int | None = None
 
 
 class BusinessTaskExecutor:
@@ -177,7 +178,7 @@ class BusinessTaskExecutor:
                     )
                 )
                 await db.commit()
-            return ExecutionOutcome(status="retrying", retry_countdown=countdown)
+            return ExecutionOutcome(status="retrying", retry_countdown=countdown, max_retries=task.max_retries)
         await self._finish_failed(
             task.id,
             token,
@@ -185,6 +186,28 @@ class BusinessTaskExecutor:
             summary=summary,
         )
         return ExecutionOutcome(status="failed")
+
+    async def fail_retry_exhausted(self, business_task_id: int) -> None:
+        """Celery 拒绝继续重试时，收口已经进入 retrying 的数据库状态。"""
+        now = utc_now()
+        async with self.session_factory() as db:
+            await db.execute(
+                update(BusinessTaskModel)
+                .where(
+                    BusinessTaskModel.id == business_task_id,
+                    BusinessTaskModel.status == "retrying",
+                )
+                .values(
+                    status="failed",
+                    finished_at=now,
+                    execution_token=None,
+                    lease_expires_at=None,
+                    heartbeat_at=now,
+                    error_code="RETRIES_EXHAUSTED",
+                    error="Celery 已拒绝继续重试",
+                )
+            )
+            await db.commit()
 
     async def _finish_success(self, task_id: int, token: str, result: dict | None) -> bool:
         now = utc_now()

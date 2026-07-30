@@ -367,6 +367,149 @@ async def test_retryable_error_retries_with_backoff_then_succeeds(test_client, m
 
 
 @pytest.mark.asyncio
+async def test_retry_outcome_carries_persisted_limit_above_celery_default(test_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.plugin.module_task.runtime.dispatcher import BusinessTaskDispatcher, DispatchRequest
+    from app.plugin.module_task.runtime.exceptions import RetryableBusinessTaskError
+    from app.plugin.module_task.runtime.executor import BusinessTaskExecutor
+    from app.plugin.module_task.runtime.registry import BusinessTaskRegistry
+
+    _ = test_client
+
+    async def handler(context, payload: _SamplePayload) -> dict:
+        raise RetryableBusinessTaskError("temporary timeout")
+
+    registry = BusinessTaskRegistry()
+    registry.register(
+        handler_code="sample.retry_five",
+        handler=handler,
+        module="sample",
+        payload_schema=_SamplePayload,
+        max_retries=5,
+    )
+    monkeypatch.setattr("app.plugin.module_task.runtime.dispatcher.settings.CELERY_ENABLED", True)
+    db, auth = await _runtime_auth()
+    try:
+        task = await BusinessTaskDispatcher(registry=registry, publisher=_RecordingPublisher()).dispatch(
+            auth=auth,
+            request=DispatchRequest(
+                handler_code="sample.retry_five",
+                biz_type="retry",
+                payload={"value": 5},
+                idempotency_key="retry-limit-above-celery-default",
+            ),
+        )
+    finally:
+        await db.close()
+
+    executor = BusinessTaskExecutor(registry=registry)
+    outcome = await executor.execute(task.id)
+
+    assert outcome.status == "retrying"
+    assert outcome.retry_countdown == 30
+    assert outcome.max_retries == 5
+    remaining = [await executor.execute(task.id) for _ in range(5)]
+    assert [item.status for item in remaining] == ["retrying", "retrying", "retrying", "retrying", "failed"]
+
+
+def test_worker_passes_persisted_retry_limit_to_celery(monkeypatch: pytest.MonkeyPatch) -> None:
+    celery_app_module = importlib.import_module("app.plugin.module_task.runtime.celery_app")
+    monkeypatch.setattr(celery_app_module.settings, "CELERY_ENABLED", True)
+    monkeypatch.setattr(celery_app_module, "is_plugin_enabled", lambda code: code == "module_task")
+    worker = importlib.import_module("app.plugin.module_task.runtime.worker")
+    from app.plugin.module_task.runtime.executor import ExecutionOutcome
+
+    class FakeExecutor:
+        async def execute(self, business_task_id: int) -> ExecutionOutcome:
+            assert business_task_id == 42
+            return ExecutionOutcome(status="retrying", retry_countdown=30, max_retries=5)
+
+    class RetrySignal(Exception):
+        pass
+
+    captured: dict[str, int | None] = {}
+
+    def fake_retry(*, countdown: int, max_retries: int | None):
+        captured.update(countdown=countdown, max_retries=max_retries)
+        return RetrySignal()
+
+    monkeypatch.setattr(worker, "BusinessTaskExecutor", FakeExecutor)
+    monkeypatch.setattr(worker.execute_business_task, "retry", fake_retry)
+
+    with pytest.raises(RetrySignal):
+        worker.execute_business_task.run(42)
+
+    assert captured == {"countdown": 30, "max_retries": 5}
+
+
+def test_worker_closes_retrying_task_if_celery_rejects_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from celery.exceptions import MaxRetriesExceededError
+
+    celery_app_module = importlib.import_module("app.plugin.module_task.runtime.celery_app")
+    monkeypatch.setattr(celery_app_module.settings, "CELERY_ENABLED", True)
+    monkeypatch.setattr(celery_app_module, "is_plugin_enabled", lambda code: code == "module_task")
+    worker = importlib.import_module("app.plugin.module_task.runtime.worker")
+    from app.plugin.module_task.runtime.executor import ExecutionOutcome
+
+    exhausted: list[int] = []
+
+    class FakeExecutor:
+        async def execute(self, business_task_id: int) -> ExecutionOutcome:
+            return ExecutionOutcome(status="retrying", retry_countdown=30, max_retries=5)
+
+        async def fail_retry_exhausted(self, business_task_id: int) -> None:
+            exhausted.append(business_task_id)
+
+    def reject_retry(*, countdown: int, max_retries: int | None):
+        raise MaxRetriesExceededError()
+
+    monkeypatch.setattr(worker, "BusinessTaskExecutor", FakeExecutor)
+    monkeypatch.setattr(worker.execute_business_task, "retry", reject_retry)
+
+    worker.execute_business_task.run(42)
+
+    assert exhausted == [42]
+
+
+@pytest.mark.asyncio
+async def test_executor_closes_retrying_database_state_after_celery_exhaustion(test_client) -> None:
+    from app.core.database import async_db_session
+    from app.plugin.module_task.business.task.model import BusinessTaskModel
+    from app.plugin.module_task.runtime.executor import BusinessTaskExecutor
+
+    _ = test_client
+    db, auth = await _runtime_auth()
+    try:
+        task = BusinessTaskModel(
+            tenant_id=auth.tenant_id,
+            created_id=auth.user.id,
+            updated_id=auth.user.id,
+            module="sample",
+            biz_type="retry-exhausted",
+            handler_code="sample.retry_exhausted",
+            queue="business_tasks",
+            external_task_id="retry-exhausted-state",
+            status="retrying",
+            progress=0,
+            attempt=4,
+            max_retries=5,
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+    finally:
+        await db.close()
+
+    await BusinessTaskExecutor().fail_retry_exhausted(task.id)
+
+    async with async_db_session() as check_db:
+        failed = await check_db.get(BusinessTaskModel, task.id)
+        assert failed is not None
+        assert failed.status == "failed"
+        assert failed.error_code == "RETRIES_EXHAUSTED"
+        assert failed.finished_at is not None
+
+
+@pytest.mark.asyncio
 async def test_non_retryable_error_fails_without_retry(test_client, monkeypatch: pytest.MonkeyPatch) -> None:
     from sqlalchemy import select
 

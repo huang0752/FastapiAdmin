@@ -9,6 +9,7 @@ import asyncio
 from urllib.parse import urlsplit, urlunsplit
 
 from celery import signals
+from celery.exceptions import MaxRetriesExceededError
 
 from app.config.setting import settings
 from app.core.assembly import get_assembly
@@ -46,6 +47,13 @@ def initialize_business_task_worker(**_kwargs) -> None:
 
 @celery_app.task(bind=True, name=CELERY_EXECUTE_TASK, ignore_result=True)
 def execute_business_task(self, business_task_id: int) -> None:
-    outcome = asyncio.run(BusinessTaskExecutor().execute(business_task_id))
+    executor = BusinessTaskExecutor()
+    outcome = asyncio.run(executor.execute(business_task_id))
     if outcome.retry_countdown is not None:
-        raise self.retry(countdown=outcome.retry_countdown, max_retries=None)
+        try:
+            retry_signal = self.retry(countdown=outcome.retry_countdown, max_retries=outcome.max_retries)
+        except MaxRetriesExceededError:
+            logger.error("Celery 重试次数已耗尽，收口数据库任务 task_id={}", business_task_id)
+            asyncio.run(executor.fail_retry_exhausted(business_task_id))
+            return
+        raise retry_signal
