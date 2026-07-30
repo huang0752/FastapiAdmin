@@ -67,8 +67,13 @@ async def build_background_auth(
         if membership is None:
             raise InvalidBackgroundActorError("任务 actor 已不属于任务租户")
     auth = AuthSchema.for_background_task(db=db, user=user, tenant_id=tenant_id)
-    if required_permissions and not user.is_superuser:
-        missing = set(required_permissions) - await resolve_effective_permissions(auth)
+    if required_permissions:
+        effective_permissions = await resolve_effective_permissions(
+            auth,
+            bypass_role_grants=user.is_superuser,
+            require_active_package=True,
+        )
+        missing = set(required_permissions) - effective_permissions
         if missing:
             raise InvalidBackgroundActorError("任务 actor 已失去处理器所需权限")
     return auth

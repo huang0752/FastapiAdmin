@@ -119,7 +119,7 @@ async def generate_report(context, payload: ReportPayload) -> dict:
     return {"report_id": payload.report_id, "state": "generated"}
 ```
 
-处理器只允许服务端注册，不接受客户端提供 Python 路径、函数名、shell、动态代码或 pickle。`required_permissions` 会在每次执行前按当前 actor 权限重新验证，并与在线请求共用角色状态、菜单状态和租户套餐可用菜单解析逻辑。菜单停用、套餐停用或套餐移除权限后，尚未开始的任务会拒绝执行。
+处理器只允许服务端注册，不接受客户端提供 Python 路径、函数名、shell、动态代码或 pickle。`required_permissions` 会在每次执行前按当前 actor 权限重新验证，并与在线请求共用角色状态、菜单状态和租户套餐可用菜单解析逻辑。菜单停用、套餐停用或套餐移除权限后，尚未开始的任务会拒绝执行；真实超级管理员在租户代管任务中只豁免角色授予，仍受菜单启用状态和套餐 entitlement 约束。
 
 ## 内部投递
 
@@ -175,7 +175,7 @@ Worker 崩溃后，late ack/reject-on-lost 会重投消息；如果重投早于�
 
 ## 重试与取消
 
-只有 `RetryableBusinessTaskError` 或注册项 `retryable_exceptions` 中明确声明的异常自动重试，使用有限次数和指数退避。Worker 会把数据库任务的 `max_retries` 显式传给 Celery；如果 Celery 仍拒绝继续重试，数据库中的 `retrying` 会条件收口为 `failed/RETRIES_EXHAUSTED`。payload 校验、未知 handler、actor/权限失效和普通业务错误不自动重试；耗尽后进入 `failed` 并保存安全错误摘要。
+只有 `RetryableBusinessTaskError` 或注册项 `retryable_exceptions` 中明确声明的异常自动重试，使用有限次数和指数退避。Worker 按 Celery 当前消息计数加数据库剩余业务重试预算动态设置本次上限；租约冲突产生的延迟不会吞掉业务重试次数。如果 Celery 仍拒绝继续重试，只会在任务仍处于同一数据库 attempt 时将 `retrying` 条件收口为 `failed/RETRIES_EXHAUSTED`，旧消息不能覆盖新的执行代际。payload 校验、未知 handler、actor/权限失效和普通业务错误不自动重试；耗尽后进入 `failed` 并保存安全错误摘要。
 
 `pending/enqueue_failed/queued/retrying` 可直接取消。`running` 只有在处理器声明 `supports_cancel=True` 时接受协作取消，写入 `cancel_requested_at`；处理器须在事务安全点调用 `context.check_cancelled()`。框架默认不使用 `revoke(terminate=True)` 强杀正在执行数据库事务的 Worker。
 

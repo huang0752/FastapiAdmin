@@ -406,12 +406,13 @@ async def test_retry_outcome_carries_persisted_limit_above_celery_default(test_c
 
     assert outcome.status == "retrying"
     assert outcome.retry_countdown == 30
-    assert outcome.max_retries == 5
+    assert outcome.retry_budget == 5
+    assert outcome.retry_attempt == 1
     remaining = [await executor.execute(task.id) for _ in range(5)]
     assert [item.status for item in remaining] == ["retrying", "retrying", "retrying", "retrying", "failed"]
 
 
-def test_worker_passes_persisted_retry_limit_to_celery(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worker_adds_database_retry_budget_to_current_celery_count(monkeypatch: pytest.MonkeyPatch) -> None:
     celery_app_module = importlib.import_module("app.plugin.module_task.runtime.celery_app")
     monkeypatch.setattr(celery_app_module.settings, "CELERY_ENABLED", True)
     monkeypatch.setattr(celery_app_module, "is_plugin_enabled", lambda code: code == "module_task")
@@ -421,7 +422,7 @@ def test_worker_passes_persisted_retry_limit_to_celery(monkeypatch: pytest.Monke
     class FakeExecutor:
         async def execute(self, business_task_id: int) -> ExecutionOutcome:
             assert business_task_id == 42
-            return ExecutionOutcome(status="retrying", retry_countdown=30, max_retries=5)
+            return ExecutionOutcome(status="retrying", retry_countdown=30, retry_budget=3, retry_attempt=3)
 
     class RetrySignal(Exception):
         pass
@@ -434,11 +435,47 @@ def test_worker_passes_persisted_retry_limit_to_celery(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(worker, "BusinessTaskExecutor", FakeExecutor)
     monkeypatch.setattr(worker.execute_business_task, "retry", fake_retry)
+    worker.execute_business_task.push_request(retries=4)
 
-    with pytest.raises(RetrySignal):
-        worker.execute_business_task.run(42)
+    try:
+        with pytest.raises(RetrySignal):
+            worker.execute_business_task.run(42)
+    finally:
+        worker.execute_business_task.pop_request()
 
-    assert captured == {"countdown": 30, "max_retries": 5}
+    assert captured == {"countdown": 30, "max_retries": 7}
+
+
+def test_worker_lease_deferral_does_not_consume_business_retry_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    celery_app_module = importlib.import_module("app.plugin.module_task.runtime.celery_app")
+    monkeypatch.setattr(celery_app_module.settings, "CELERY_ENABLED", True)
+    monkeypatch.setattr(celery_app_module, "is_plugin_enabled", lambda code: code == "module_task")
+    worker = importlib.import_module("app.plugin.module_task.runtime.worker")
+    from app.plugin.module_task.runtime.executor import ExecutionOutcome
+
+    class FakeExecutor:
+        async def execute(self, business_task_id: int) -> ExecutionOutcome:
+            return ExecutionOutcome(status="deferred", retry_countdown=30, retry_budget=1)
+
+    class RetrySignal(Exception):
+        pass
+
+    captured: dict[str, int | None] = {}
+
+    def fake_retry(*, countdown: int, max_retries: int | None):
+        captured.update(countdown=countdown, max_retries=max_retries)
+        return RetrySignal()
+
+    monkeypatch.setattr(worker, "BusinessTaskExecutor", FakeExecutor)
+    monkeypatch.setattr(worker.execute_business_task, "retry", fake_retry)
+    worker.execute_business_task.push_request(retries=8)
+    try:
+        with pytest.raises(RetrySignal):
+            worker.execute_business_task.run(42)
+    finally:
+        worker.execute_business_task.pop_request()
+
+    assert captured == {"countdown": 30, "max_retries": 9}
 
 
 def test_worker_closes_retrying_task_if_celery_rejects_retry(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -454,10 +491,10 @@ def test_worker_closes_retrying_task_if_celery_rejects_retry(monkeypatch: pytest
 
     class FakeExecutor:
         async def execute(self, business_task_id: int) -> ExecutionOutcome:
-            return ExecutionOutcome(status="retrying", retry_countdown=30, max_retries=5)
+            return ExecutionOutcome(status="retrying", retry_countdown=30, retry_budget=1, retry_attempt=5)
 
-        async def fail_retry_exhausted(self, business_task_id: int) -> None:
-            exhausted.append(business_task_id)
+        async def fail_retry_exhausted(self, business_task_id: int, *, expected_attempt: int) -> None:
+            exhausted.extend((business_task_id, expected_attempt))
 
     def reject_retry(*, countdown: int, max_retries: int | None):
         raise MaxRetriesExceededError()
@@ -467,7 +504,7 @@ def test_worker_closes_retrying_task_if_celery_rejects_retry(monkeypatch: pytest
 
     worker.execute_business_task.run(42)
 
-    assert exhausted == [42]
+    assert exhausted == [42, 5]
 
 
 @pytest.mark.asyncio
@@ -499,7 +536,7 @@ async def test_executor_closes_retrying_database_state_after_celery_exhaustion(t
     finally:
         await db.close()
 
-    await BusinessTaskExecutor().fail_retry_exhausted(task.id)
+    await BusinessTaskExecutor().fail_retry_exhausted(task.id, expected_attempt=4)
 
     async with async_db_session() as check_db:
         failed = await check_db.get(BusinessTaskModel, task.id)
@@ -507,6 +544,44 @@ async def test_executor_closes_retrying_database_state_after_celery_exhaustion(t
         assert failed.status == "failed"
         assert failed.error_code == "RETRIES_EXHAUSTED"
         assert failed.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_executor_does_not_close_newer_retry_generation(test_client) -> None:
+    from app.core.database import async_db_session
+    from app.plugin.module_task.business.task.model import BusinessTaskModel
+    from app.plugin.module_task.runtime.executor import BusinessTaskExecutor
+
+    _ = test_client
+    db, auth = await _runtime_auth()
+    try:
+        task = BusinessTaskModel(
+            tenant_id=auth.tenant_id,
+            created_id=auth.user.id,
+            updated_id=auth.user.id,
+            module="sample",
+            biz_type="retry-generation",
+            handler_code="sample.retry_generation",
+            queue="business_tasks",
+            external_task_id="retry-generation-state",
+            status="retrying",
+            progress=0,
+            attempt=5,
+            max_retries=5,
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+    finally:
+        await db.close()
+
+    await BusinessTaskExecutor().fail_retry_exhausted(task.id, expected_attempt=4)
+
+    async with async_db_session() as check_db:
+        current = await check_db.get(BusinessTaskModel, task.id)
+        assert current is not None
+        assert current.status == "retrying"
+        assert current.attempt == 5
 
 
 @pytest.mark.asyncio
@@ -813,6 +888,134 @@ async def test_executor_rechecks_effective_package_menu_permissions(
                 await cleanup_db.execute(delete(RoleMenusModel).where(RoleMenusModel.menu_id == menu_id))
                 await cleanup_db.execute(delete(MenuModel).where(MenuModel.id == menu_id))
                 await cleanup_db.commit()
+
+
+@pytest.mark.asyncio
+async def test_background_superuser_bypasses_role_grant_but_not_menu_entitlement(test_client) -> None:
+    from sqlalchemy import delete, select
+
+    from app.api.v1.module_platform.menu.model import MenuModel
+    from app.api.v1.module_platform.package.model import PackageMenuModel
+    from app.api.v1.module_platform.tenant.model import TenantModel
+    from app.api.v1.module_system.user.model import UserModel
+    from app.core.database import async_db_session
+    from app.plugin.module_task.runtime.context import build_background_auth
+    from app.plugin.module_task.runtime.exceptions import InvalidBackgroundActorError
+
+    _ = test_client
+    permission = "tests:background:superuser-entitlement"
+    menu_id: int | None = None
+    actor_id: int | None = None
+    async with async_db_session() as setup_db:
+        actor = (await setup_db.execute(select(UserModel).where(UserModel.username == "super"))).scalar_one()
+        tenant = await setup_db.get(TenantModel, 2)
+        assert actor.is_superuser and tenant is not None and tenant.package_id is not None
+        actor_id = actor.id
+        menu = MenuModel(name="后台超管菜单复核", type=3, order=999, permission=permission, scope="tenant", status=0)
+        setup_db.add(menu)
+        await setup_db.flush()
+        menu_id = menu.id
+        setup_db.add(PackageMenuModel(package_id=tenant.package_id, menu_id=menu.id))
+        await setup_db.commit()
+
+    try:
+        async with async_db_session() as allowed_db:
+            auth = await build_background_auth(
+                allowed_db,
+                tenant_id=2,
+                actor_user_id=actor_id,
+                required_permissions=(permission,),
+            )
+            assert auth.tenant_id == 2
+
+        async with async_db_session() as revoke_db:
+            menu = await revoke_db.get(MenuModel, menu_id)
+            assert menu is not None
+            menu.status = 1
+            await revoke_db.commit()
+
+        async with async_db_session() as denied_db:
+            with pytest.raises(InvalidBackgroundActorError, match="所需权限"):
+                await build_background_auth(
+                    denied_db,
+                    tenant_id=2,
+                    actor_user_id=actor_id,
+                    required_permissions=(permission,),
+                )
+    finally:
+        if menu_id is not None:
+            async with async_db_session() as cleanup_db:
+                await cleanup_db.execute(delete(PackageMenuModel).where(PackageMenuModel.menu_id == menu_id))
+                await cleanup_db.execute(delete(MenuModel).where(MenuModel.id == menu_id))
+                await cleanup_db.commit()
+
+
+@pytest.mark.asyncio
+async def test_disabled_package_revokes_owner_minimum_permission_for_background_task(test_client) -> None:
+    from sqlalchemy import delete, select
+    from sqlalchemy.orm import selectinload
+
+    from app.api.v1.module_platform.menu.model import MenuModel
+    from app.api.v1.module_platform.package.model import PackageModel
+    from app.api.v1.module_platform.tenant.model import TenantModel
+    from app.api.v1.module_system.role.model import RoleMenusModel
+    from app.api.v1.module_system.user.model import UserModel
+    from app.core.database import async_db_session
+    from app.plugin.module_task.runtime.context import build_background_auth
+    from app.plugin.module_task.runtime.exceptions import InvalidBackgroundActorError
+
+    _ = test_client
+    permission = "module_system:user:update"
+    added_role_menu = False
+    role_id: int | None = None
+    menu_id: int | None = None
+    package_id: int | None = None
+    actor_id: int | None = None
+    async with async_db_session() as setup_db:
+        actor = (
+            await setup_db.execute(
+                select(UserModel).options(selectinload(UserModel.roles)).where(UserModel.username == "test_admin")
+            )
+        ).scalar_one()
+        tenant = await setup_db.get(TenantModel, actor.tenant_id)
+        menu = (await setup_db.execute(select(MenuModel).where(MenuModel.permission == permission))).scalar_one()
+        assert tenant is not None and tenant.package_id is not None and actor.roles
+        actor_id = actor.id
+        package_id = tenant.package_id
+        role_id = actor.roles[0].id
+        menu_id = menu.id
+        existing = (
+            await setup_db.execute(
+                select(RoleMenusModel).where(RoleMenusModel.role_id == role_id, RoleMenusModel.menu_id == menu_id)
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            setup_db.add(RoleMenusModel(role_id=role_id, menu_id=menu_id))
+            added_role_menu = True
+        package = await setup_db.get(PackageModel, package_id)
+        assert package is not None
+        package.status = 1
+        await setup_db.commit()
+
+    try:
+        async with async_db_session() as denied_db:
+            with pytest.raises(InvalidBackgroundActorError, match="所需权限"):
+                await build_background_auth(
+                    denied_db,
+                    tenant_id=2,
+                    actor_user_id=actor_id,
+                    required_permissions=(permission,),
+                )
+    finally:
+        async with async_db_session() as cleanup_db:
+            package = await cleanup_db.get(PackageModel, package_id)
+            assert package is not None
+            package.status = 0
+            if added_role_menu:
+                await cleanup_db.execute(
+                    delete(RoleMenusModel).where(RoleMenusModel.role_id == role_id, RoleMenusModel.menu_id == menu_id)
+                )
+            await cleanup_db.commit()
 
 
 @pytest.mark.asyncio

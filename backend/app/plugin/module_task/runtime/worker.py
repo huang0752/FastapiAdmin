@@ -50,10 +50,14 @@ def execute_business_task(self, business_task_id: int) -> None:
     executor = BusinessTaskExecutor()
     outcome = asyncio.run(executor.execute(business_task_id))
     if outcome.retry_countdown is not None:
+        if outcome.retry_budget is None or outcome.retry_budget < 1:
+            raise RuntimeError("执行器返回了无效的 Celery 重试预算")
+        celery_max_retries = self.request.retries + outcome.retry_budget
         try:
-            retry_signal = self.retry(countdown=outcome.retry_countdown, max_retries=outcome.max_retries)
+            retry_signal = self.retry(countdown=outcome.retry_countdown, max_retries=celery_max_retries)
         except MaxRetriesExceededError:
-            logger.error("Celery 重试次数已耗尽，收口数据库任务 task_id={}", business_task_id)
-            asyncio.run(executor.fail_retry_exhausted(business_task_id))
+            if outcome.retry_attempt is not None:
+                logger.error("Celery 重试次数已耗尽，收口数据库任务 task_id={}", business_task_id)
+                asyncio.run(executor.fail_retry_exhausted(business_task_id, expected_attempt=outcome.retry_attempt))
             return
         raise retry_signal

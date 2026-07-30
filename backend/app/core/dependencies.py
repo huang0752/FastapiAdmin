@@ -391,9 +391,65 @@ async def _get_cached_tenant_menu_ids(auth: AuthSchema, tenant_id: int) -> list[
     return await PackageService.get_tenant_available_menu_ids(auth, tenant_id)
 
 
-async def resolve_effective_permissions(auth: AuthSchema) -> set[str]:
-    """解析当前 actor 在租户与套餐约束下仍然有效的权限。"""
-    if not auth.user or not auth.user.roles:
+async def _tenant_has_active_package(auth: AuthSchema, tenant_id: int) -> bool:
+    """判断普通租户是否仍绑定有效套餐；系统租户不受套餐约束。"""
+    if tenant_id == 1:
+        return True
+
+    from app.api.v1.module_platform.package.model import PackageModel
+    from app.api.v1.module_platform.tenant.model import TenantModel
+
+    return bool(
+        (
+            await auth.db.execute(
+                select(TenantModel.id)
+                .join(PackageModel, PackageModel.id == TenantModel.package_id)
+                .where(
+                    TenantModel.id == tenant_id,
+                    PackageModel.status == 0,
+                    PackageModel.is_deleted.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+    )
+
+
+async def resolve_effective_permissions(
+    auth: AuthSchema,
+    *,
+    bypass_role_grants: bool = False,
+    require_active_package: bool = False,
+) -> set[str]:
+    """解析 actor 在角色、菜单与套餐约束下仍然有效的权限。
+
+    ``bypass_role_grants`` 仅供后台租户代管场景的真实超级管理员使用：它只
+    豁免角色授予，菜单启用状态和租户套餐 entitlement 仍然必须成立。
+    """
+    if not auth.user:
+        return set()
+
+    if auth.tenant_id is not None and require_active_package and not await _tenant_has_active_package(auth, auth.tenant_id):
+        return set()
+
+    if bypass_role_grants:
+        from app.api.v1.module_platform.menu.model import MenuModel
+
+        if auth.tenant_id is None:
+            result = await auth.db.execute(select(MenuModel.permission).where(MenuModel.status == 0, MenuModel.permission.is_not(None)))
+        else:
+            allowed_ids = set(await _get_cached_tenant_menu_ids(auth, auth.tenant_id))
+            if not allowed_ids:
+                return set()
+            result = await auth.db.execute(
+                select(MenuModel.permission).where(
+                    MenuModel.id.in_(allowed_ids),
+                    MenuModel.status == 0,
+                    MenuModel.permission.is_not(None),
+                )
+            )
+        return {permission for permission in result.scalars() if permission}
+
+    if not auth.user.roles:
         return set()
 
     role_menus = [
