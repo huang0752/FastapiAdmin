@@ -42,9 +42,17 @@
  */
 
 import { App, Directive } from "vue";
-import hljs from "highlight.js";
 
 export type HighlightDirective = Directive<HTMLElement>;
+
+let highlightPromise: Promise<typeof import("highlight.js")["default"]> | null = null;
+
+function loadHighlight() {
+  if (!highlightPromise) {
+    highlightPromise = import("highlight.js").then((module) => module.default);
+  }
+  return highlightPromise;
+}
 
 /** 扩展 HTMLElement 类型，消除指令内部 _highlightActive / _highlightObserver 的 as any 断言 */
 declare global {
@@ -55,7 +63,8 @@ declare global {
 }
 
 // 高亮代码
-function highlightCode(block: HTMLElement) {
+async function highlightCode(block: HTMLElement) {
+  const hljs = await loadHighlight();
   hljs.highlightElement(block);
 }
 
@@ -116,13 +125,14 @@ function markBlockAsProcessed(block: HTMLElement) {
 }
 
 // 处理单个代码块
-function processBlock(block: HTMLElement) {
+async function processBlock(block: HTMLElement, root: HTMLElement) {
   if (isBlockProcessed(block)) {
     return;
   }
 
   try {
-    highlightCode(block);
+    await highlightCode(block);
+    if (!root._highlightActive) return;
     insertLineNumbers(block);
     addCopyButton(block);
     markBlockAsProcessed(block);
@@ -132,7 +142,7 @@ function processBlock(block: HTMLElement) {
 }
 
 // 查找并处理所有代码块
-function processAllCodeBlocks(el: HTMLElement) {
+async function processAllCodeBlocks(el: HTMLElement) {
   if (!el._highlightActive) return;
   const blocks = Array.from(el.querySelectorAll<HTMLElement>("pre code"));
   const unprocessedBlocks = blocks.filter((block) => !isBlockProcessed(block));
@@ -143,30 +153,28 @@ function processAllCodeBlocks(el: HTMLElement) {
 
   if (unprocessedBlocks.length <= 10) {
     // 如果代码块数量少于等于10，直接处理所有代码块
-    unprocessedBlocks.forEach((block) => processBlock(block));
+    await Promise.all(unprocessedBlocks.map((block) => processBlock(block, el)));
   } else {
     // 定义每次处理的代码块数
     const batchSize = 10;
     let currentIndex = 0;
 
-    const processBatch = () => {
+    const processBatch = async () => {
       if (!el._highlightActive) return; // 组件已卸载则跳过
       const batch = unprocessedBlocks.slice(currentIndex, currentIndex + batchSize);
 
-      batch.forEach((block) => {
-        processBlock(block);
-      });
+      await Promise.all(batch.map((block) => processBlock(block, el)));
 
       // 更新索引并继续处理下一批
       currentIndex += batchSize;
       if (currentIndex < unprocessedBlocks.length) {
         // 使用 requestAnimationFrame 确保下一帧再处理
-        requestAnimationFrame(processBatch);
+        requestAnimationFrame(() => void processBatch());
       }
     };
 
     // 开始处理第一批代码块
-    processBatch();
+    await processBatch();
   }
 }
 
@@ -174,9 +182,9 @@ function processAllCodeBlocks(el: HTMLElement) {
 function retryProcessing(el: HTMLElement, maxRetries: number = 3, delay: number = 200) {
   let retryCount = 0;
 
-  const tryProcess = () => {
+  const tryProcess = async () => {
     if (!el._highlightActive) return; // 组件已卸载则跳过
-    processAllCodeBlocks(el);
+    await processAllCodeBlocks(el);
 
     // 检查是否还有未处理的代码块
     const remainingBlocks = Array.from(el.querySelectorAll<HTMLElement>("pre code")).filter(
@@ -185,11 +193,11 @@ function retryProcessing(el: HTMLElement, maxRetries: number = 3, delay: number 
 
     if (remainingBlocks.length > 0 && retryCount < maxRetries && el._highlightActive) {
       retryCount++;
-      setTimeout(tryProcess, delay * retryCount); // 递增延迟
+      setTimeout(() => void tryProcess(), delay * retryCount); // 递增延迟
     }
   };
 
-  tryProcess();
+  void tryProcess();
 }
 
 // 代码高亮、插入行号、复制按钮
@@ -199,7 +207,7 @@ const highlightDirective: HighlightDirective = {
     el._highlightActive = true;
 
     // 立即尝试处理一次
-    processAllCodeBlocks(el);
+    void processAllCodeBlocks(el);
 
     // 延迟处理，确保 v-html 内容已经渲染
     setTimeout(() => {
@@ -229,7 +237,7 @@ const highlightDirective: HighlightDirective = {
         // 延迟处理新添加的代码块
         setTimeout(() => {
           if (!el._highlightActive) return;
-          processAllCodeBlocks(el);
+          void processAllCodeBlocks(el);
         }, 50);
       }
     });
@@ -248,7 +256,7 @@ const highlightDirective: HighlightDirective = {
     // 当组件更新时，重新处理代码块
     setTimeout(() => {
       if (!el._highlightActive) return;
-      processAllCodeBlocks(el);
+      void processAllCodeBlocks(el);
     }, 50);
   },
 

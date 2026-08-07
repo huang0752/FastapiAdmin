@@ -1,7 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
 import vue from "@vitejs/plugin-vue";
 import autoprefixer from "autoprefixer";
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "url";
 import vueDevTools from "vite-plugin-vue-devtools";
@@ -12,6 +11,7 @@ import ElementPlus from "unplugin-element-plus/vite";
 import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
 import tailwindcss from "@tailwindcss/vite";
 import vitePluginStart from "./build/vitePluginStart";
+import { scanElementPlusStyleIncludes } from "./build/elementPlusStyleIncludes";
 import { name, version, engines, dependencies, devDependencies } from "./package.json";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,50 +20,6 @@ const __APP_INFO__ = {
   pkg: { name, version, engines, dependencies, devDependencies },
   buildTimestamp: Date.now(),
 };
-
-/**
- * 返回所有 Element Plus 组件的样式入口（style/index + style/css）。
- *
- * 这些路径路由懒加载组件首次渲染时若未预热，vite optimizer 会重新处理
- * → "new dependencies optimized → reloading" 循环，导致菜单切换卡顿 + 整页刷新。
- * 提前加入 optimizeDeps.include 可消除此问题（仅影响 dev 启动预编译，不影响生产）。
- *
- * - style/css：预编译 CSS（兜底）
- * - style/index：SCSS 入口。useSource: true 时必须预热，否则懒加载触发 optimizer。
- *
- * 性能权衡
- * --------
- * - 当前实现：一次性预热 ~244 个 EP 路径（122 个组件 × 2 入口），dev 启动慢 1-2 分钟
- *   但后续路由切换零卡顿。
- * - 未来优化：扫描 src/ 中实际用到的 el-xxx 组件名，只预热这部分。
- *   实测本项目用到了约 70 个不同 EP 组件，可减少 40%+ 预热开销。
- *   需在新增 EP 组件时同步更新扫描结果，否则会再次触发菜单卡顿。
- */
-function elementPlusStyleIncludes(): string[] {
-  // 预构建所有 Element Plus 组件的样式，避免开发时访问新页面触发依赖优化刷新
-  const componentsDir = path.join(
-    process.cwd(),
-    "node_modules",
-    "element-plus",
-    "es",
-    "components"
-  );
-  try {
-    const result: string[] = [];
-    for (const entry of fs.readdirSync(componentsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const styleDir = path.join(componentsDir, entry.name, "style");
-      // 只包含实际存在 style 目录的组件
-      if (fs.existsSync(styleDir) && fs.statSync(styleDir).isDirectory()) {
-        result.push(`element-plus/es/components/${entry.name}/style/index`);
-        result.push(`element-plus/es/components/${entry.name}/style/css`);
-      }
-    }
-    return result;
-  } catch {
-    return [];
-  }
-}
 
 export default ({ mode }: { mode: string }) => {
   const root = process.cwd();
@@ -236,18 +192,9 @@ export default ({ mode }: { mode: string }) => {
     ],
     optimizeDeps: {
       include: [
-        "@vue-flow/core",
-        "@vue-flow/background",
-        "@vue-flow/controls",
-        "@vue-flow/minimap",
         "vue",
         "vue-router",
         "vue-i18n",
-        "vue-json-pretty",
-        "vue-web-terminal",
-        "vue3-cron-plus",
-        "vuedraggable",
-        "vue-draggable-plus",
         "element-plus",
         "@element-plus/icons-vue",
         "element-plus/es",
@@ -256,36 +203,18 @@ export default ({ mode }: { mode: string }) => {
         "pinia",
         "axios",
         "@vueuse/core",
-        "codemirror",
-        "codemirror-editor-vue3",
-        "@wangeditor-next/editor",
-        "@wangeditor-next/editor-for-vue",
-        "exceljs",
-        "echarts/core",
-        "echarts/renderers",
-        "echarts/charts",
-        "echarts/components",
         "nprogress",
         "qs",
         "path-to-regexp",
         "path-browserify",
-        "xgplayer",
         "@iconify/vue",
-        "qrcode.vue",
-        "xlsx",
-        "highlight.js",
-        "dagre",
-        "dompurify",
-        "js-beautify",
-        "markdown-it",
-        "markdown-it-highlightjs",
-        "clipboard",
-        "crypto-js",
-        "file-saver",
         "mitt",
         "ohash",
         "pinia-plugin-persistedstate",
-        ...elementPlusStyleIncludes(),
+        ...scanElementPlusStyleIncludes(
+          path.resolve(root, "src"),
+          path.resolve(root, "node_modules/element-plus/es/components")
+        ),
       ],
     },
     css: {

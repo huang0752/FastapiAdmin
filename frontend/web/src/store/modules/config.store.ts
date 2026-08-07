@@ -156,8 +156,27 @@ export const useConfigStore = defineStore(
       }
       configLoading.value = true;
       try {
-        // 1. 获取系统级配置（演示模式、IP黑白名单等）
-        const response = await ParamsAPI.getInitConfig();
+        // 三层配置互不依赖：并发请求，再按 system → site → tenant 的固定优先级合并。
+        const systemPromise = ParamsAPI.getInitConfig();
+        const sitePromise = SiteAPI.getPublicConfig().catch((error) => {
+          console.warn("[configStore] 获取站点公开配置失败（非关键错误）", error);
+          return null;
+        });
+        const tenantPromise =
+          resolvedTenantId === null
+            ? Promise.resolve(null)
+            : TenantAPI.getTenantConfig(resolvedTenantId).catch((error) => {
+                console.warn("[configStore] 获取认证租户配置失败（非关键错误）", error);
+                return null;
+              });
+
+        const [response, siteResp, tenantResp] = await Promise.all([
+          systemPromise,
+          sitePromise,
+          tenantPromise,
+        ]);
+
+        // 1. 系统级配置（演示模式、IP黑白名单等）
         const list = response?.data?.data;
         if (!Array.isArray(list)) {
           console.warn("[configStore] getInitConfig: 响应 data 非数组", response?.data);
@@ -170,25 +189,19 @@ export const useConfigStore = defineStore(
 
         // 2. 当前 Host 由后端解析为 Site，前端不再传递可枚举的 tenant_id。
         replaceSiteConfig(null);
-        try {
-          const siteResp = await SiteAPI.getPublicConfig();
+        if (siteResp) {
           replaceSiteConfig(siteResp?.data?.data);
-        } catch (e) {
-          console.warn("[configStore] 获取站点公开配置失败（非关键错误）", e);
         }
 
         // 3. 只有登录态明确传入 tenantId 时才加载认证租户覆盖层。
         tenantConfigData.value = {};
         if (resolvedTenantId !== null) {
-          try {
-            const tenantResp = await TenantAPI.getTenantConfig(resolvedTenantId);
+          if (tenantResp) {
             const tenantList = tenantResp?.data?.data;
             if (Array.isArray(tenantList)) {
               tenantList.forEach((item) => upsertTenantConfigItem(item));
             }
             currentTenantConfigId.value = resolvedTenantId;
-          } catch (e) {
-            console.warn("[configStore] 获取认证租户配置失败（非关键错误）", e);
           }
         } else {
           currentTenantConfigId.value = null;

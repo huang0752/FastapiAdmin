@@ -76,6 +76,41 @@ describe("Host/Site public branding", () => {
     expect(configStore.configData.favicon?.config_value).toBe("/carbon.ico");
   });
 
+  it("starts system, site, and tenant configuration requests concurrently", async () => {
+    let resolveSystem!: (value: any) => void;
+    let resolveSite!: (value: any) => void;
+    let resolveTenant!: (value: any) => void;
+    getInitConfigMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSystem = resolve;
+      })
+    );
+    requestMock.mockImplementation(({ url }: { url: string }) => {
+      if (url === "/platform/site/public/config") {
+        return new Promise((resolve) => {
+          resolveSite = resolve;
+        });
+      }
+      if (url === "/platform/tenant/9/config") {
+        return new Promise((resolve) => {
+          resolveTenant = resolve;
+        });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+
+    const pending = useConfigStore().getConfig(false, 9);
+    await Promise.resolve();
+
+    expect(getInitConfigMock).toHaveBeenCalledOnce();
+    expect(requestMock).toHaveBeenCalledTimes(2);
+
+    resolveSystem({ data: { data: [] } });
+    resolveSite({ data: { data: { site_code: "main", name: "站点" } } });
+    resolveTenant({ data: { data: [] } });
+    await pending;
+  });
+
   it("clears stale public branding when the current Host has no configured site", async () => {
     vi.spyOn(Date, "now")
       .mockReturnValueOnce(0)

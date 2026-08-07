@@ -22,12 +22,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeMount, onMounted, onUnmounted } from "vue";
+import { computed, defineAsyncComponent, onBeforeMount, onMounted, onUnmounted } from "vue";
 import { useAppStore, useAssemblyStore, useUserStore } from "./store";
 import { useSettingsStore } from "./store/modules/setting.store";
 import { defaultSettings } from "./config/setting";
 import { ComponentSize } from "./enums/settings/layout.enum";
-import AiAssistant from "./components/others/fa-ai-assistant/index.vue";
 import { hexToRgba, toggleTransition } from "./utils/ui";
 import { initializeTheme } from "./hooks/core/useTheme";
 import { useAppBootstrap } from "@/hooks/core/useAppBootstrap";
@@ -35,6 +34,10 @@ import { ThemeMode } from "./enums";
 import en from "element-plus/es/locale/lang/en";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import { router } from "@/router";
+
+const AiAssistant = defineAsyncComponent(
+  () => import("./components/others/fa-ai-assistant/index.vue")
+);
 
 const appStore = useAppStore();
 const settingsStore = useSettingsStore();

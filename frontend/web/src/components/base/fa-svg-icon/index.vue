@@ -5,6 +5,7 @@
 
 <script setup lang="ts">
 import { Icon } from "@iconify/vue";
+import { ensureIconifyCollections } from "@/plugins/iconify";
 
 defineOptions({ name: "FaSvgIcon", inheritAttrs: false });
 
@@ -13,11 +14,18 @@ interface Props {
   icon?: string;
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   icon: "",
 });
 
 const attrs = useAttrs();
+
+const ensureCurrentIcon = (icon?: string) => {
+  if (icon?.trim()) void ensureIconifyCollections();
+};
+
+onMounted(() => ensureCurrentIcon(props.icon));
+watch(() => props.icon, ensureCurrentIcon);
 
 const bindAttrs = computed<{ class: string; style: string }>(() => ({
   class: (attrs.class as string) || "",
