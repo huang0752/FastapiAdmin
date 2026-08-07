@@ -206,6 +206,14 @@
         </ElTabs>
       </template>
     </FaDialog>
+
+    <TenantInitialAdminDialog
+      v-if="initialAdminCredentials"
+      v-model="initialAdminDialogVisible"
+      :tenant-name="createdTenantName"
+      :credentials="initialAdminCredentials"
+      @closed="clearInitialAdminCredentials"
+    />
   </div>
 </template>
 
@@ -219,13 +227,16 @@ import TenantAPI, {
   TENANT_STATUS,
   TENANT_STATUS_META,
   TENANT_STATUS_OPTIONS,
+  extractTenantInitialAdmin,
   resolveNextTenantManualStatus,
   type TenantCreateForm,
   type TenantForm,
+  type TenantInitialAdmin,
   type TenantStatus,
   type TenantTable,
   type TenantUpdateForm,
 } from "@/api/module_platform/tenant";
+import TenantInitialAdminDialog from "./TenantInitialAdminDialog.vue";
 import PackageAPI from "@/api/module_platform/package";
 import SiteAPI from "@/api/module_platform/site";
 import { useAuth } from "@/hooks/core/useAuth";
@@ -511,6 +522,15 @@ const formData = ref<TenantForm>({
 });
 
 const { dialogVisible } = useCrudDialog();
+const initialAdminDialogVisible = ref(false);
+const initialAdminCredentials = ref<TenantInitialAdmin | null>(null);
+const createdTenantName = ref("");
+
+function clearInitialAdminCredentials() {
+  initialAdminDialogVisible.value = false;
+  initialAdminCredentials.value = null;
+  createdTenantName.value = "";
+}
 
 const CODE_PATTERN = /^[A-Za-z0-9]+$/;
 
@@ -930,8 +950,16 @@ async function handleSubmit() {
         sort: formData.value.sort,
         version: formData.value.version,
       };
-      await TenantAPI.createTenant(payload);
+      const createResponse = await TenantAPI.createTenant(payload);
+      const credentials = extractTenantInitialAdmin(createResponse);
       await refreshCreate();
+      if (credentials) {
+        createdTenantName.value = payload.name;
+        initialAdminCredentials.value = credentials;
+        initialAdminDialogVisible.value = true;
+      } else {
+        ElMessage.warning("租户已创建，但未收到初始管理员密码，请立即前往用户管理重置密码");
+      }
     }
     dialogVisible.visible = false;
     dataFormRef.value?.resetFields();

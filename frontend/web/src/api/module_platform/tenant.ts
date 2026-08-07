@@ -56,6 +56,21 @@ export function resolveNextTenantManualStatus(status?: number): TenantManualStat
   return null;
 }
 
+export interface TenantInitialAdmin {
+  username: string;
+  password: string;
+}
+
+export interface TenantCreateResult extends TenantTable {
+  initial_admin?: TenantInitialAdmin | null;
+}
+
+export function extractTenantInitialAdmin(response: {
+  data: ApiResponse<TenantCreateResult>;
+}): TenantInitialAdmin | null {
+  return response.data.data?.initial_admin ?? null;
+}
+
 function assertTenantManualStatus(status: number): asserts status is TenantManualStatus {
   if (status !== TENANT_STATUS.ACTIVE && status !== TENANT_STATUS.SUSPENDED) {
     throw new Error("租户手工状态仅支持正常(0)或暂停(2)");
@@ -79,7 +94,7 @@ const TenantAPI = {
   },
 
   createTenant(body: TenantCreateForm) {
-    return request<ApiResponse>({
+    return request<ApiResponse<TenantCreateResult>>({
       url: `${API_PATH}/create`,
       method: "post",
       data: body,

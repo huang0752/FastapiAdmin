@@ -11,6 +11,7 @@ import TenantAPI, {
   TENANT_MANUAL_STATUS_OPTIONS,
   TENANT_STATUS_META,
   TENANT_STATUS_OPTIONS,
+  extractTenantInitialAdmin,
   resolveNextTenantManualStatus,
   type TenantBatchStatusForm,
 } from "@/api/module_platform/tenant";
@@ -20,6 +21,27 @@ beforeEach(() => {
 });
 
 describe("tenant lifecycle status contract", () => {
+  it("extracts the one-time initial administrator from the create response", () => {
+    const credentials = { username: "demo_admin", password: "Temp#123456" };
+    const response = {
+      data: {
+        code: 200,
+        data: {
+          id: 9,
+          name: "演示租户",
+          code: "demo",
+          site_id: 1,
+          initial_admin: credentials,
+        },
+        msg: "创建租户成功",
+        status_code: 200,
+        success: true,
+      },
+    };
+
+    expect(extractTenantInitialAdmin(response)).toEqual(credentials);
+  });
+
   it("describes every backend lifecycle status from active through archived", () => {
     expect(TENANT_STATUS_OPTIONS).toEqual([
       { label: "正常", value: 0 },
