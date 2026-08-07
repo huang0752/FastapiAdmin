@@ -303,7 +303,11 @@
 <script lang="ts" setup>
 import type { FormInstance, UploadRequestOptions, UploadFile } from "element-plus";
 import type { ElUpload } from "element-plus";
-import UserAPI, { type InfoFormState, type PasswordFormState } from "@/api/module_system/user";
+import UserAPI, {
+  buildCurrentUserProfilePayload,
+  type InfoFormState,
+  type PasswordFormState,
+} from "@/api/module_system/user";
 import { useUserStore, useDictStore } from "@stores";
 import { Camera } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
@@ -621,8 +625,9 @@ const handleSave = async () => {
     if (!valid) {
       return false;
     }
-    const response = await UserAPI.updateCurrentUserInfo({ ...infoFormState });
-    await userStore.setUserInfo(response.data.data);
+    const payload = buildCurrentUserProfilePayload(infoFormState);
+    await UserAPI.updateCurrentUserInfo(payload);
+    await userStore.getUserInfo();
     initInfoForm();
     ElMessage.success("个人资料已保存");
     return true;

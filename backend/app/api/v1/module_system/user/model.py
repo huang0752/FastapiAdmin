@@ -61,6 +61,32 @@ class UserPositionsModel(MappedBase):
     )
 
 
+class UserLoginIdentifierModel(MappedBase):
+    """站点内唯一的用户名、邮箱或手机号登录标识。"""
+
+    __tablename__ = "sys_user_login_identifier"
+    __table_args__ = (
+        UniqueConstraint("site_id", "normalized_value", name="uq_user_login_identifier_site_value"),
+        UniqueConstraint("site_id", "user_id", "identifier_type", name="uq_user_login_identifier_site_user_type"),
+        {"comment": "用户登录标识表"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    site_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("platform_site.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("sys_user.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    identifier_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    normalized_value: Mapped[str] = mapped_column(String(128), nullable=False)
+
 class UserModel(ModelMixin, TenantMixin, UserMixin):
     """
     用户模型

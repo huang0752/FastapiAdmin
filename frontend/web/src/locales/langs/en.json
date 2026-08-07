@@ -344,7 +344,7 @@
     "subTitle": "Enter your account details to start managing your project",
     "versionLabel": "Version",
     "quickSelectAccount": "Quick select account",
-    "mobileLogin": "Mobile login",
+    "mobileLogin": "SMS code login",
     "mobileLoginSubTitle": "Enter your mobile number to start managing your projects",
     "mobilePhonePlaceholder": "Mobile number",
     "getSmsCode": "Get code",
@@ -368,7 +368,7 @@
       "user": "User"
     },
     "placeholder": {
-      "username": "Please enter username",
+      "username": "Username / mobile / email",
       "password": "Please enter password",
       "slider": "Please slide to verify"
     },
@@ -395,7 +395,7 @@
     "capsLock": "Caps Lock is On",
     "message": {
       "username": {
-        "required": "Please enter Username"
+        "required": "Please enter username, mobile or email"
       },
       "password": {
         "required": "Please enter Password",

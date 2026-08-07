@@ -95,6 +95,12 @@ class UserService:
             )
         )
         await self.auth.db.flush()
+        from .login_identifier import sync_user_login_identifiers
+        from .model import UserModel
+
+        user = await self.auth.db.get(UserModel, user_id)
+        if user is not None:
+            await sync_user_login_identifiers(self.auth.db, user)
 
     async def detail(self, id: int) -> UserOutSchema:
         user = await UserCRUD(self.auth).get_or_404(id=id)
@@ -273,21 +279,20 @@ class UserService:
     async def update_current_info(self, data: CurrentUserUpdateSchema) -> UserOutSchema:
         if not self.auth.user or not self.auth.user.id:
             raise CustomException(msg="该数据不存在")
-        user = await UserCRUD(self.auth).get(id=self.auth.user.id)
+        user_crud = UserCRUD(self._auth_for_user(self.auth.user))
+        user = await user_crud.get(id=self.auth.user.id)
         if not user:
             raise CustomException(msg="该数据不存在")
-        if user.is_superuser:
-            raise CustomException(msg="超级管理员不能修改个人信息")
         if data.mobile:
-            exist_mobile_user = await UserCRUD(self.auth).get(mobile=data.mobile)
+            exist_mobile_user = await user_crud.get(mobile=data.mobile)
             if exist_mobile_user and exist_mobile_user.id != self.auth.user.id:
-                raise CustomException(msg="该数据已存在")
+                raise CustomException(msg="该数据已存在", status_code=status.HTTP_409_CONFLICT)
         if data.email:
-            exist_email_user = await UserCRUD(self.auth).get(email=data.email)
+            exist_email_user = await user_crud.get(email=data.email)
             if exist_email_user and exist_email_user.id != self.auth.user.id:
-                raise CustomException(msg="该数据已存在")
-        user_update_data = UserUpdateSchema(**data.model_dump())
-        new_user = await UserCRUD(self.auth).update(id=self.auth.user.id, data=user_update_data)
+                raise CustomException(msg="该数据已存在", status_code=status.HTTP_409_CONFLICT)
+        user_update_data = UserUpdateSchema(**data.model_dump(exclude_unset=True))
+        new_user = await user_crud.update(id=self.auth.user.id, data=user_update_data)
         return UserOutSchema.model_validate(new_user)
 
     async def set_available(self, data: BatchSetAvailable) -> None:
@@ -301,16 +306,17 @@ class UserService:
         if not self.auth.user or not self.auth.user.id:
             raise CustomException(msg="该数据不存在")
         if not data.old_password or not data.new_password:
-            raise CustomException(msg="密码不能为空")
+            raise CustomException(msg="密码不能为空", status_code=status.HTTP_400_BAD_REQUEST)
 
-        user = await UserCRUD(self.auth).get(id=self.auth.user.id)
+        user_crud = UserCRUD(self._auth_for_user(self.auth.user))
+        user = await user_crud.get(id=self.auth.user.id)
         if not user:
             raise CustomException(msg="该数据不存在")
         if not PwdUtil.verify_password(plain_password=data.old_password, password_hash=user.password):
-            raise CustomException(msg="原密码输入错误")
+            raise CustomException(msg="原密码输入错误", status_code=status.HTTP_400_BAD_REQUEST)
 
         new_password_hash = PwdUtil.hash_password(password=data.new_password)
-        new_user = await UserCRUD(self.auth).change_password(id=user.id, password_hash=new_password_hash)
+        new_user = await user_crud.change_password(id=user.id, password_hash=new_password_hash)
         return UserOutSchema.model_validate(new_user)
 
     async def reset_password(self, data: ResetPasswordSchema) -> UserOutSchema:

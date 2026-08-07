@@ -7,7 +7,7 @@ from typing import NewType
 import ua_parser
 from fastapi import BackgroundTasks, Request
 from redis.asyncio.client import Redis
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.module_monitor.online.schema import OnlineOutSchema
@@ -123,34 +123,10 @@ async def get_unique_user_by_username(
     username: str,
     site_id: int | None = None,
 ) -> UserModel | None:
-    """按用户名做全局唯一查询；跨租户重名时拒绝猜测账号归属。"""
-    stmt = select(UserModel).where(
-        UserModel.username == username,
-        UserModel.is_deleted.is_(False),
-    )
-    if site_id is not None:
-        from app.api.v1.module_platform.tenant.model import TenantModel
+    """在当前 Site 内按用户名、邮箱或手机号解析唯一账号。"""
+    from app.api.v1.module_system.user.login_identifier import resolve_user_by_login_identifier
 
-        member_user_ids = (
-            select(TenantUserModel.user_id)
-            .join(TenantModel, TenantModel.id == TenantUserModel.tenant_id)
-            .where(TenantModel.site_id == site_id)
-        )
-        stmt = (
-            stmt.join(TenantModel, TenantModel.id == UserModel.tenant_id)
-            .where(
-                or_(
-                    TenantModel.site_id == site_id,
-                    UserModel.id.in_(member_user_ids),
-                )
-            )
-            .distinct()
-        )
-    stmt = stmt.limit(2)
-    users = list((await db.execute(stmt)).scalars().all())
-    if len(users) > 1:
-        raise CustomException(msg="账号标识不唯一，请联系管理员", status_code=400)
-    return users[0] if users else None
+    return await resolve_user_by_login_identifier(db, username, site_id)
 
 
 async def _async_fill_login_location(
@@ -230,7 +206,7 @@ class LoginService:
                 request_browser=_login_browser,
                 msg="用户不存在",
             )
-            raise CustomException(msg="用户不存在")
+            raise CustomException(msg="账号或密码错误", status_code=400)
 
         if not PwdUtil.verify_password(plain_password=login_form.password, password_hash=user.password):
             await _write_login_log(
@@ -243,7 +219,7 @@ class LoginService:
                 msg="账号或密码错误",
                 tenant_id=user.tenant_id,
             )
-            raise CustomException(msg="账号或密码错误")
+            raise CustomException(msg="账号或密码错误", status_code=400)
         if user.status == 1:
             await _write_login_log(
                 username=_login_username,
@@ -932,24 +908,18 @@ class TenantRegisterService:
         tenant_name: str | None = None,
     ) -> TenantRegisterOutSchema:
         """租户自助注册：一次性创建租户 + 管理员 + owner 角色 + 菜单分配"""
-        from sqlalchemy import func, select
+        from sqlalchemy import select
         from sqlalchemy.exc import IntegrityError
 
         from app.api.v1.module_platform.package.model import PackageModel
         from app.api.v1.module_platform.tenant.model import TenantModel
         from app.api.v1.module_platform.tenant.service import TenantService
+        from app.api.v1.module_system.user.login_identifier import resolve_user_by_login_identifier
         from app.api.v1.module_system.user.model import UserModel
 
-        exists_stmt = (
-            select(func.count())
-            .select_from(UserModel)
-            .where(
-                UserModel.is_deleted.is_(False),
-                (UserModel.username == username) | (UserModel.email == email),
-            )
-        )
-        cnt = (await db.execute(exists_stmt)).scalar() or 0
-        if cnt > 0:
+        if await resolve_user_by_login_identifier(db, username, site_id) or await resolve_user_by_login_identifier(
+            db, email, site_id
+        ):
             raise CustomException(msg="用户名或邮箱已被占用")
 
         pkg_stmt = (

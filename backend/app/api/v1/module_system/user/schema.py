@@ -27,6 +27,7 @@ class CurrentUserUpdateSchema(BaseModel):
     email: EmailStr | None = Field(default=None, description="邮箱")
     gender: str | None = Field(default=None, max_length=1, description="性别(0:男 1:女 2:未知)")
     avatar: str | None = Field(default=None, max_length=255, description="头像")
+    description: str | None = Field(default=None, max_length=255, description="描述")
 
     @field_validator("mobile")
     @classmethod
@@ -42,13 +43,16 @@ class CurrentUserUpdateSchema(BaseModel):
             return value
         return email_validator(value)
 
-    @field_validator("gender")
+    @field_validator("gender", mode="before")
     @classmethod
-    def validate_gender(cls, value: str | None):
+    def validate_gender(cls, value: str | int | None):
         """校验性别：仅支持 0(男)、1(女)、2(未知)"""
-        if value and value not in {"0", "1", "2"}:
+        if value is None or value == "":
+            return None
+        normalized = str(value)
+        if normalized not in {"0", "1", "2"}:
             raise ValueError("性别仅支持 0(男)、1(女)、2(未知)")
-        return value
+        return normalized
 
     @field_validator("avatar")
     @classmethod
@@ -338,6 +342,7 @@ class UserOutSchema(UserUpdateSchema, BaseSchema, UserBySchema, TenantBySchema):
     model_config = ConfigDict(arbitrary_types_allowed=True, from_attributes=True)
 
     username: str | None = Field(default=None, max_length=32, description="用户名")
+    password: str | None = Field(default=None, exclude=True, description="密码哈希（不对外返回）")
 
     tenant_id: int | None = Field(
         default=None,

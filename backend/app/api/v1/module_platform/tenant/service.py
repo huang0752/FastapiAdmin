@@ -365,6 +365,7 @@ class TenantService:
                 .limit(1)
             )
         ).scalar_one_or_none()
+        membership_created = membership is None
         if membership is None:
             db.add(
                 TenantUserModel(
@@ -442,6 +443,12 @@ class TenantService:
             owner_menu_ids=available_ids,
         )
         PackageService.invalidate_tenant_menu_cache(tenant_id)
+        from app.api.v1.module_system.user.login_identifier import sync_user_login_identifiers
+        from app.api.v1.module_system.user.model import UserModel
+
+        user = await db.get(UserModel, user_id)
+        if membership_created and user is not None:
+            await sync_user_login_identifiers(db, user)
 
     @require_platform_admin
     async def detail(self, id: int) -> TenantOutSchema:
@@ -781,6 +788,9 @@ class TenantService:
         )
         self.auth.db.add(tu)
         await self.auth.db.flush()
+        from app.api.v1.module_system.user.login_identifier import sync_user_login_identifiers
+
+        await sync_user_login_identifiers(self.auth.db, user)
         await self._replace_tenant_member_rbac(tenant_id, data.user_id, data.role)
 
         logger.info(f"向租户[{tenant.name}]添加用户[{user.username}]成功, role={data.role}")
@@ -830,6 +840,12 @@ class TenantService:
         await self._remove_tenant_member_rbac(tenant_id, user_id)
         await self.auth.db.delete(tu)
         await self.auth.db.flush()
+        from app.api.v1.module_system.user.login_identifier import sync_user_login_identifiers
+        from app.api.v1.module_system.user.model import UserModel
+
+        user = await self.auth.db.get(UserModel, user_id)
+        if user is not None:
+            await sync_user_login_identifiers(self.auth.db, user)
 
         logger.info(f"从租户[{tenant_id}]移除用户[{user_id}]成功")
 

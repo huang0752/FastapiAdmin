@@ -401,6 +401,16 @@ class InitializeData:
             await db.flush()
             logger.info(f"✅️ 已回填 {added} 条用户租户关系")
 
+        from app.api.v1.module_system.user.login_identifier import sync_user_login_identifiers
+        from app.api.v1.module_system.user.model import UserLoginIdentifierModel
+
+        identifier_count = (
+            await db.execute(select(func.count()).select_from(UserLoginIdentifierModel))
+        ).scalar_one()
+        if identifier_count == 0:
+            for user in users:
+                await sync_user_login_identifiers(db, user)
+
         from app.api.v1.module_platform.tenant.service import TenantService
 
         tenant_ids = set(

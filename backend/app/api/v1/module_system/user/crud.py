@@ -5,6 +5,7 @@ from app.api.v1.module_system.role.crud import RoleCRUD
 from app.core.base_crud import CRUDBase
 from app.core.base_schema import AuthSchema
 
+from .login_identifier import sync_user_login_identifiers
 from .model import UserModel
 from .schema import (
     UserCreateSchema,
@@ -17,6 +18,18 @@ class UserCRUD(CRUDBase[UserModel, UserCreateSchema, UserUpdateSchema]):
 
     def __init__(self, auth: AuthSchema) -> None:
         super().__init__(model=UserModel, auth=auth)
+
+    async def create(self, data) -> UserModel:
+        user = await super().create(data=data)
+        await sync_user_login_identifiers(self.db, user)
+        return user
+
+    async def update(self, id: int, data) -> UserModel:
+        user = await super().update(id=id, data=data)
+        changed_fields = set(data) if isinstance(data, dict) else set(getattr(data, "model_fields_set", set()))
+        if changed_fields & {"username", "email", "mobile"}:
+            await sync_user_login_identifiers(self.db, user)
+        return user
 
     async def update_last_login(self, id: int) -> None:
         """

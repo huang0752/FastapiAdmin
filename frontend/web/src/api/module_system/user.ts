@@ -3,6 +3,17 @@ import { MenuTable, MenuForm } from "@/api/module_platform/menu";
 
 const API_PATH = "/system/user";
 
+export function buildCurrentUserProfilePayload(state: InfoFormState): CurrentUserProfilePayload {
+  return {
+    name: state.name,
+    gender: state.gender == null ? undefined : String(state.gender),
+    mobile: state.mobile,
+    email: state.email,
+    avatar: state.avatar,
+    description: state.description,
+  };
+}
+
 export const UserAPI = {
   getCurrentUserInfo() {
     return request<ApiResponse<UserInfo>>({
@@ -20,7 +31,7 @@ export const UserAPI = {
     });
   },
 
-  updateCurrentUserInfo(body: InfoFormState) {
+  updateCurrentUserInfo(body: CurrentUserProfilePayload) {
     return request<ApiResponse<UserInfo>>({
       url: `${API_PATH}/current/info/update`,
       method: "put",
@@ -30,9 +41,12 @@ export const UserAPI = {
 
   changeCurrentUserPassword(body: PasswordFormState) {
     return request<ApiResponse>({
-      url: `${API_PATH}/current/password/change`,
+      url: `${API_PATH}/password/change`,
       method: "put",
-      data: body,
+      data: {
+        old_password: body.old_password,
+        new_password: body.new_password,
+      },
     });
   },
 
@@ -194,7 +208,6 @@ export interface UserInfo extends BaseType {
   email?: string;
   mobile?: string;
   gender?: string;
-  password?: string;
   menus?: MenuTable[];
   dept?: deptTreeType;
   dept_id?: deptTreeType["id"];
@@ -264,6 +277,15 @@ export interface InfoFormState {
   github_login?: string;
   wx_login?: string;
   qq_login?: string;
+}
+
+export interface CurrentUserProfilePayload {
+  name?: string;
+  gender?: string;
+  mobile?: string;
+  email?: string;
+  avatar?: string;
+  description?: string;
 }
 
 export interface PasswordFormState {
