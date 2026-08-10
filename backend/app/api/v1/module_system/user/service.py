@@ -27,6 +27,7 @@ from app.utils.excel_util import ExcelUtil
 from app.utils.hash_bcrpy_util import PwdUtil
 
 from .crud import UserCRUD
+from .model import UserModel
 from .schema import (
     CurrentUserUpdateSchema,
     ResetPasswordSchema,
@@ -52,6 +53,11 @@ class UserService:
 
     def __init__(self, auth: AuthSchema) -> None:
         self.auth = auth
+
+    @staticmethod
+    def ensure_password_login_enabled(user: UserModel) -> None:
+        if not user.password_login_enabled or user.auth_source == "federated":
+            raise CustomException(msg="统一登录账号不支持本地密码操作", status_code=400)
 
     async def _get_unique_user_by_username(self, username: str):
         """认证前账号查询必须在全局范围内唯一，避免跨租户误命中。"""
@@ -312,6 +318,7 @@ class UserService:
         user = await user_crud.get(id=self.auth.user.id)
         if not user:
             raise CustomException(msg="该数据不存在")
+        self.ensure_password_login_enabled(user)
         if not PwdUtil.verify_password(plain_password=data.old_password, password_hash=user.password):
             raise CustomException(msg="原密码输入错误", status_code=status.HTTP_400_BAD_REQUEST)
 
@@ -326,6 +333,7 @@ class UserService:
         user = await UserCRUD(self.auth).get(id=data.id)
         if not user:
             raise CustomException(msg="该数据不存在")
+        self.ensure_password_login_enabled(user)
 
         if user.is_superuser:
             raise CustomException(msg="超级管理员密码不能重置")
@@ -356,6 +364,7 @@ class UserService:
         user = await self._get_unique_user_by_username(data.username)
         if not user:
             raise CustomException(msg="该数据不存在")
+        self.ensure_password_login_enabled(user)
         if user.status == 1:
             raise CustomException(msg="用户已停用")
 
@@ -419,6 +428,8 @@ class UserService:
             user is not None
             and user.status != 1
             and not user.is_superuser
+            and user.password_login_enabled
+            and user.auth_source != "federated"
             and bool(user.email)
             and str(user.email).strip().lower() == email
         )
@@ -477,6 +488,7 @@ class UserService:
         if not user or user.id != payload.get("user_id") or str(user.email or "").strip().lower() != email:
             await redis_curd.delete(reset_key)
             raise CustomException(msg="验证码已过期或不存在", status_code=status.HTTP_400_BAD_REQUEST)
+        self.ensure_password_login_enabled(user)
         if user.status == 1:
             raise CustomException(msg="用户已停用", status_code=status.HTTP_400_BAD_REQUEST)
         if user.is_superuser:

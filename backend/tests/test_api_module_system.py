@@ -3,14 +3,27 @@
 认证数据测试：admin 登录后验证 CRUD 真实数据。
 """
 
+import asyncio
 from uuid import uuid4
 
 from conftest import assert_route  # noqa: F401
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.api.v1.module_system.ticket.controller import TicketRouter
+from app.api.v1.module_system.user.model import UserModel
 from app.config.setting import settings
+from app.core.database import async_db_session
 from app.core.dependencies import AuthPermission
+
+
+async def _mark_user_federated(username: str) -> int:
+    async with async_db_session() as db:
+        user = (await db.execute(select(UserModel).where(UserModel.username == username))).scalar_one()
+        user.auth_source = "federated"
+        user.password_login_enabled = False
+        await db.commit()
+        return user.id
 
 
 def _ticket_auth_permissions(path: str, method: str) -> list[str]:
@@ -183,6 +196,94 @@ class TestUser:
             test_client, "PATCH", "/system/user/status/batch", auth=auth_headers,
             json={"ids": [1], "status": 1},
         )
+
+    def test_admin_cannot_reset_federated_user_password(
+        self,
+        test_client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        username = "federated_admin_reset"
+        create_resp = test_client.post(
+            "/system/user/create",
+            headers=auth_headers,
+            json={"username": username, "password": "localPass123", "name": "联邦管理员重置测试"},
+        )
+        assert create_resp.status_code == 200, create_resp.text
+        user_id = asyncio.run(_mark_user_federated(username))
+
+        response = test_client.put(
+            f"/system/user/password/reset/{user_id}",
+            headers=auth_headers,
+            json={"password": "newLocalPass123"},
+        )
+
+        assert response.status_code == 400, response.text
+        assert response.json()["msg"] == "统一登录账号不支持本地密码操作"
+
+    def test_federated_user_cannot_change_password(
+        self,
+        test_client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        username = "federated_change_password"
+        password = "localPass123"
+        create_resp = test_client.post(
+            "/system/user/create",
+            headers=auth_headers,
+            json={"username": username, "password": password, "name": "联邦本人改密测试"},
+        )
+        assert create_resp.status_code == 200, create_resp.text
+        login_resp = test_client.post(
+            "/system/auth/login",
+            data={"username": username, "password": password, "login_type": "PC端"},
+        )
+        assert login_resp.status_code == 200, login_resp.text
+        token = login_resp.json()["data"]["access_token"]
+        asyncio.run(_mark_user_federated(username))
+
+        response = test_client.put(
+            "/system/user/password/change",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"old_password": password, "new_password": "newLocalPass123"},
+        )
+
+        assert response.status_code == 400, response.text
+        assert response.json()["msg"] == "统一登录账号不支持本地密码操作"
+
+    def test_federated_user_cannot_use_mobile_forget_password(
+        self,
+        test_client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        username = "federated_mobile_reset"
+        mobile = "13900000001"
+        create_resp = test_client.post(
+            "/system/user/create",
+            headers=auth_headers,
+            json={
+                "username": username,
+                "password": "localPass123",
+                "name": "联邦手机重置测试",
+                "mobile": mobile,
+            },
+        )
+        assert create_resp.status_code == 200, create_resp.text
+        asyncio.run(_mark_user_federated(username))
+        old_enabled = settings.AUTH_LOGIN_FORGOT_PASSWORD_ENABLE
+        old_mode = settings.AUTH_PASSWORD_RESET_MODE
+        settings.AUTH_LOGIN_FORGOT_PASSWORD_ENABLE = True
+        settings.AUTH_PASSWORD_RESET_MODE = "legacy_mobile"
+        try:
+            response = test_client.post(
+                "/system/user/password/forget",
+                json={"username": username, "mobile": mobile, "new_password": "newLocalPass123"},
+            )
+        finally:
+            settings.AUTH_LOGIN_FORGOT_PASSWORD_ENABLE = old_enabled
+            settings.AUTH_PASSWORD_RESET_MODE = old_mode
+
+        assert response.status_code == 400, response.text
+        assert response.json()["msg"] == "统一登录账号不支持本地密码操作"
 
 
 class TestRole:
