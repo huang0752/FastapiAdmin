@@ -347,6 +347,29 @@ export const staticRoutes: AppRouteRecordRaw[] = [
     meta: { hidden: true, isHideTab: true, title: "menus.login.title", routeGroup: "auth" },
     component: () => import("@views/module_system/auth/login/index.vue"),
   },
+  {
+    path: "/auth/control/callback",
+    name: "ControlSsoCallback",
+    component: () => import("@/views/module_system/auth/control-callback/index.vue"),
+    meta: {
+      hidden: true,
+      isHideTab: true,
+      title: "统一登录",
+      routeGroup: "auth",
+      publicAuthCallback: true,
+    },
+  },
+  {
+    path: "/auth/control/waiting",
+    name: "ControlSsoWaiting",
+    component: () => import("@/views/module_system/auth/control-waiting/index.vue"),
+    meta: {
+      hidden: true,
+      isHideTab: true,
+      title: "等待管理员授权",
+      routeGroup: "auth",
+    },
+  },
   /** 无 Layout 全屏异常页；守卫与白名单跳转使用（勿再在 RootLayout 下重复挂载同组件） */
   {
     path: "/401",

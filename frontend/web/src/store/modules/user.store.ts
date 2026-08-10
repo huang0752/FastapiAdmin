@@ -11,7 +11,7 @@ import { AppRouteRecord } from "@/types/router";
 import { Auth, setPageTitle, StorageConfig } from "@utils";
 import AuthAPI from "@/api/module_system/auth";
 import UserAPI from "@/api/module_system/user";
-import type { TenantOption } from "@/api/module_system/auth";
+import type { JWTOut, TenantOption } from "@/api/module_system/auth";
 import type { MenuTable } from "@/api/module_platform/menu";
 import { ResultEnum } from "@/enums/api/result.enum";
 import { ElNotification } from "element-plus";
@@ -297,6 +297,42 @@ export const useUserStore = defineStore(
     }
 
     /**
+     * 使用后端签发的令牌建立完整前端会话。
+     * 密码登录与中控统一登录共用此流程，避免两类会话初始化顺序漂移。
+     */
+    async function establishSession(
+      tokens: JWTOut,
+      remember = Auth.getRememberMe(),
+      initialTenants: TenantOption[] = []
+    ) {
+      rememberMe.value = remember;
+      (await getRouterUtils()).resetRouteInitState();
+      Auth.setTokens(tokens.access_token, tokens.refresh_token, remember);
+      setToken(tokens.access_token, tokens.refresh_token);
+
+      if (initialTenants.length > 0) {
+        tenantList.value = initialTenants;
+      }
+
+      await getUserInfo();
+      const tenants = await fetchTenants();
+      const ui = info.value as UserInfoLike;
+      const availableTenants = tenants.length > 0 ? tenants : initialTenants;
+      const activeTenantId = ui.tenant_id || currentTenant.value?.id || availableTenants[0]?.id;
+      if (activeTenantId) {
+        const found = availableTenants.find(
+          (tenant: TenantOption) => String(tenant.id) === String(activeTenantId)
+        );
+        if (found) {
+          setCurrentTenant(found);
+        }
+      }
+      await useConfigStore().getConfig(true, activeTenantId);
+      resolveAndApplyPreset();
+      setLoginStatus(true);
+    }
+
+    /**
      * 登录
      */
     async function login(loginForm: any) {
@@ -311,35 +347,18 @@ export const useUserStore = defineStore(
       }
       rememberMe.value = loginForm.remember;
 
-      const accessToken = data?.access_token || "";
-      const refreshToken = data?.refresh_token || "";
-      if (!accessToken) {
+      const tokens: JWTOut = {
+        access_token: data?.access_token || "",
+        refresh_token: data?.refresh_token || "",
+        token_type: data?.token_type || "bearer",
+        expires_in: data?.expires_in || 0,
+      };
+      if (!tokens.access_token) {
         console.error("[Login Debug] ⚠️ 未获取到 access_token！字段名可能与后端不匹配");
       }
 
-      // 清除上次会话里「动态路由初始化失败」标记，避免重新登录后侧栏/菜单不注册
-      (await getRouterUtils()).resetRouteInitState();
-      Auth.setTokens(accessToken, refreshToken, rememberMe.value);
-      setToken(accessToken, refreshToken);
-
-      // 检查登录响应中的租户列表
       const tenants = data?.tenants || [];
-      if (tenants.length > 0) {
-        tenantList.value = tenants;
-      }
-
-      await getUserInfo();
-      const ui = info.value as UserInfoLike;
-      const activeTenantId = ui.tenant_id || currentTenant.value?.id || tenants[0]?.id;
-      if (activeTenantId) {
-        const found = tenants.find((t: TenantOption) => String(t.id) === String(activeTenantId));
-        if (found) {
-          setCurrentTenant(found);
-        }
-      }
-      await useConfigStore().getConfig(true, activeTenantId);
-      resolveAndApplyPreset();
-      setLoginStatus(true);
+      await establishSession(tokens, rememberMe.value, tenants);
     }
 
     /**
@@ -482,6 +501,7 @@ export const useUserStore = defineStore(
       setAvatar,
       setRoute,
       setPermissions,
+      establishSession,
       login,
       logout,
       checkAndClearWorktabs,

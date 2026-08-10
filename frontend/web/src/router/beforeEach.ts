@@ -229,6 +229,10 @@ function handleLoginStatus(
     return undefined;
   }
 
+  if (to.meta.publicAuthCallback) {
+    return useAssemblyStore().authFeatures.controlSso ? undefined : { name: "404", replace: true };
+  }
+
   if (isLoginRoute(to) || isAnonymousPublicPath(to.path)) {
     return undefined;
   }

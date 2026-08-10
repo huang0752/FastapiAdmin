@@ -22,6 +22,15 @@ const AuthAPI = {
     });
   },
 
+  /** 使用中控一次性启动码建立本地会话 */
+  controlExchange(code: string) {
+    return request<ApiResponse<JWTOut>>({
+      url: `${API_PATH}/control/exchange`,
+      method: "post",
+      data: { code },
+    });
+  },
+
   refreshToken(body: RefreshToekenBody) {
     return request<ApiResponse<JWTOut>>({
       url: `${API_PATH}/token/refresh`,

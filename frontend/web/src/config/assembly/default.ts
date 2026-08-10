@@ -19,6 +19,7 @@ export interface AuthFeatures {
   qrLogin: boolean;
   rememberMe: boolean;
   demoAccounts: boolean;
+  controlSso: boolean;
 }
 
 export const defaultAssemblySummary: AssemblySummary = {
@@ -45,4 +46,5 @@ export const defaultAuthFeatures: AuthFeatures = {
   qrLogin: false,
   rememberMe: true,
   demoAccounts: false,
+  controlSso: false,
 };
