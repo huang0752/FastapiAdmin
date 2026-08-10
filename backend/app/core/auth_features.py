@@ -23,6 +23,7 @@ class AuthFeatures(BaseModel):
     qrLogin: bool = Field(default=False, description="扫码登录入口")
     rememberMe: bool = Field(default=True, description="记住密码")
     demoAccounts: bool = Field(default=False, description="演示快捷账号")
+    controlSso: bool = Field(default=False, description="中控统一登录")
 
 
 _OAUTH_PROVIDER_CREDENTIALS: dict[OAuthProvider, tuple[str, str]] = {
@@ -57,6 +58,7 @@ def get_auth_features() -> AuthFeatures:
         qrLogin=settings.AUTH_LOGIN_QR_ENABLE,
         rememberMe=settings.AUTH_LOGIN_REMEMBER_ME_ENABLE,
         demoAccounts=settings.AUTH_LOGIN_DEMO_ACCOUNTS_ENABLE,
+        controlSso=settings.CONTROL_SSO_ENABLED,
     )
 
 

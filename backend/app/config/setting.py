@@ -42,6 +42,15 @@ class Settings(BaseSettings):
             if self.ENVIRONMENT == EnvironmentEnum.PROD and broker.hostname not in {"localhost", "127.0.0.1", "::1"}:
                 if broker.scheme != "rediss" or broker.password is None:
                     raise ValueError("生产环境的远程 Celery Redis Broker 必须使用 rediss 和认证")
+        if self.CONTROL_SSO_ENABLED:
+            if not self.CONTROL_SSO_ISSUER.strip():
+                raise ValueError("启用中控 SSO 时必须配置 issuer")
+            if not self.CONTROL_SSO_CLIENT_ID.strip():
+                raise ValueError("启用中控 SSO 时必须配置 client ID")
+            if not self.CONTROL_SSO_CLIENT_SECRET.strip():
+                raise ValueError("启用中控 SSO 时必须配置 client secret")
+            if self.CONTROL_SSO_TIMEOUT_SECONDS <= 0:
+                raise ValueError("中控 SSO 超时必须大于 0")
 
     # ================================================= #
     # ******************* 项目环境 ****************** #
@@ -97,6 +106,11 @@ class Settings(BaseSettings):
     AUTH_LOGIN_QR_ENABLE: bool = False  # 是否开放扫码登录入口
     AUTH_LOGIN_REMEMBER_ME_ENABLE: bool = True  # 是否显示记住密码
     AUTH_LOGIN_DEMO_ACCOUNTS_ENABLE: bool = False  # 是否显示演示快捷账号
+    CONTROL_SSO_ENABLED: bool = False  # 是否接受中控启动码登录
+    CONTROL_SSO_ISSUER: str = ""  # 中控 API 根地址
+    CONTROL_SSO_CLIENT_ID: str = ""  # 当前应用在中控登记的客户端 ID
+    CONTROL_SSO_CLIENT_SECRET: str = ""  # 当前应用在中控登记的客户端密钥
+    CONTROL_SSO_TIMEOUT_SECONDS: float = 5.0  # 启动码兑换 HTTP 超时
 
     # 多租户中间件白名单路径（不需要租户上下文的公开接口）
     TENANT_WHITELIST_PATHS: list[str] = [

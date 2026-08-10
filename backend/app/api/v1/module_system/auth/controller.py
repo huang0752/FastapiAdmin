@@ -24,6 +24,8 @@ from app.core.redis_crud import RedisCURD
 from app.core.router_class import OperationLogRoute
 from app.core.security import CustomOAuth2PasswordRequestForm, OAuth2Schema
 
+from .control_sso_schema import ControlExchangeIn
+from .control_sso_service import ControlSSOClientService
 from .oauth_service import (
     STATE_PREFIX,
     _callback_url,
@@ -56,6 +58,23 @@ from .service import (
 AuthRouter = APIRouter(route_class=OperationLogRoute, prefix="/auth", tags=["系统管理", "认证授权"])
 
 _AUTH_TENANTS_NS = "auth_tenants"
+
+
+@AuthRouter.post(
+    "/control/exchange",
+    summary="兑换中控启动码",
+    response_model=ResponseSchema[JWTOutSchema],
+)
+async def control_sso_exchange_controller(
+    request: Request,
+    data: ControlExchangeIn,
+    redis: Annotated[Redis, Depends(redis_getter)],
+    db: Annotated[AsyncSession, Depends(db_getter)],
+) -> JSONResponse:
+    if not settings.CONTROL_SSO_ENABLED:
+        raise HTTPException(status_code=404, detail="中控 SSO 未启用")
+    token = await ControlSSOClientService.exchange_and_login(request, db, redis, data.code)
+    return SuccessResponse(data=token, msg="统一登录成功")
 
 
 @AuthRouter.post(

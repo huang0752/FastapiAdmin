@@ -1,6 +1,7 @@
+import pytest
 from fastapi.testclient import TestClient
 
-from app.config.setting import settings
+from app.config.setting import Settings, settings
 
 
 def test_public_config_info_returns_auth_features_defaults(test_client: TestClient) -> None:
@@ -31,7 +32,31 @@ def test_public_config_info_returns_auth_features_defaults(test_client: TestClie
         "qrLogin": False,
         "rememberMe": True,
         "demoAccounts": False,
+        "controlSso": False,
     }
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"CONTROL_SSO_ISSUER": ""}, "issuer"),
+        ({"CONTROL_SSO_CLIENT_ID": ""}, "client ID"),
+        ({"CONTROL_SSO_CLIENT_SECRET": ""}, "secret"),
+        ({"CONTROL_SSO_TIMEOUT_SECONDS": 0}, "超时"),
+    ],
+)
+def test_enabled_control_sso_requires_complete_configuration(overrides: dict, message: str) -> None:
+    config = {
+        "CONTROL_SSO_ENABLED": True,
+        "CONTROL_SSO_ISSUER": "https://control.example/api/v1",
+        "CONTROL_SSO_CLIENT_ID": "client",
+        "CONTROL_SSO_CLIENT_SECRET": "secret",
+        "CONTROL_SSO_TIMEOUT_SECONDS": 5,
+        **overrides,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        Settings(**config)
 
 
 def test_public_config_info_exposes_configured_oauth_provider(test_client: TestClient) -> None:
