@@ -96,8 +96,28 @@ class UserModel(ModelMixin, TenantMixin, UserMixin):
     __table_args__ = (UniqueConstraint("tenant_id", "username"), {"comment": "用户表"})
     __loader_options__: list[str] = ["dept", "roles", "positions", "created_by", "updated_by", "deleted_by", "tenant_by"]
 
+    def __init__(self, **kwargs) -> None:
+        kwargs.setdefault("auth_source", "local")
+        kwargs.setdefault("password_login_enabled", True)
+        super().__init__(**kwargs)
+
     username: Mapped[str] = mapped_column(String(64), nullable=False, comment="用户名/登录账号")
     password: Mapped[str] = mapped_column(String(255), nullable=False, comment="密码哈希")
+    auth_source: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="local",
+        server_default="local",
+        index=True,
+        comment="认证来源",
+    )
+    password_login_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+        comment="是否允许密码登录",
+    )
     name: Mapped[str] = mapped_column(String(32), nullable=False, comment="昵称")
     mobile: Mapped[str | None] = mapped_column(String(11), nullable=True, comment="手机号")
     email: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="邮箱")

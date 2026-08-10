@@ -100,7 +100,40 @@ def test_empty_postgresql_database_can_upgrade_and_downgrade() -> None:
                 """
             )
             tables = {row[0] for row in cursor.fetchall()}
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'sys_user'
+                """
+            )
+            user_columns = {row[0] for row in cursor.fetchall()}
         assert {"platform_tenant", "platform_package", "platform_site", "sys_user"} <= tables
+        assert "sys_federated_identity" in tables
+        assert {"auth_source", "password_login_enabled"} <= user_columns
+
+        downgrade_sso_client = _run_alembic(database_name, "downgrade", "20260807_01")
+        assert downgrade_sso_client.returncode == 0, f"{downgrade_sso_client.stdout}\n{downgrade_sso_client.stderr}"
+
+        with psycopg.connect(**_connection_kwargs(database_name)) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                """
+            )
+            tables = {row[0] for row in cursor.fetchall()}
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'sys_user'
+                """
+            )
+            user_columns = {row[0] for row in cursor.fetchall()}
+        assert "sys_federated_identity" not in tables
+        assert {"auth_source", "password_login_enabled"}.isdisjoint(user_columns)
 
         downgrade = _run_alembic(database_name, "downgrade", "base")
         assert downgrade.returncode == 0, f"{downgrade.stdout}\n{downgrade.stderr}"
