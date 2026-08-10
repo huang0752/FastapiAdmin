@@ -229,9 +229,11 @@ function handleLoginStatus(
     return undefined;
   }
 
-  if (to.meta.publicAuthCallback) {
-    return useAssemblyStore().authFeatures.controlSso ? undefined : { name: "404", replace: true };
-  }
+  const publicAuthCallbackAccess = resolvePublicAuthCallbackAccess(
+    Boolean(to.meta.publicAuthCallback),
+    useAssemblyStore().authFeatures.controlSso
+  );
+  if (publicAuthCallbackAccess) return publicAuthCallbackAccess;
 
   if (isLoginRoute(to) || isAnonymousPublicPath(to.path)) {
     return undefined;
@@ -239,6 +241,14 @@ function handleLoginStatus(
 
   userStore.resetAllState();
   return { name: "Login", query: { redirect: to.fullPath }, replace: true };
+}
+
+export function resolvePublicAuthCallbackAccess(
+  publicAuthCallback: boolean,
+  controlSsoEnabled: boolean
+): Record<string, unknown> | undefined {
+  if (!publicAuthCallback) return undefined;
+  return controlSsoEnabled ? undefined : { name: "404", replace: true };
 }
 
 /** 登录页（项目里同时存在 `/login` 与 `/auth/login` 等多套入口） */

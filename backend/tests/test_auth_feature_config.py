@@ -2,6 +2,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config.setting import Settings, settings
+from app.core.auth_features import AuthFeatures
+
+
+def test_legacy_auth_features_payload_defaults_control_sso_to_false() -> None:
+    legacy_payload = {
+        "register": True,
+        "forgotPassword": True,
+        "passwordResetMode": "email_code",
+    }
+
+    payload = AuthFeatures.model_validate(legacy_payload).model_dump(by_alias=True)
+
+    assert payload["controlSso"] is False
 
 
 def test_public_config_info_returns_auth_features_defaults(test_client: TestClient) -> None:

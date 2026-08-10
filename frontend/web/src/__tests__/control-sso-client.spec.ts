@@ -9,6 +9,7 @@ import { defaultAuthFeatures } from "@/config/assembly/default";
 import { useAssemblyStore } from "@/store/modules/assembly.store";
 import { useUserStore } from "@/store/modules/user.store";
 import { useConfigStore } from "@/store/modules/config.store";
+import { resolvePublicAuthCallbackAccess } from "@/router/beforeEach";
 import { Auth } from "@utils";
 
 vi.hoisted(() => {
@@ -67,6 +68,36 @@ describe("control SSO client", () => {
     await assemblyStore.loadPublicConfig();
 
     expect(assemblyStore.authFeatures.controlSso).toBe(false);
+  });
+
+  it("blocks a legacy-config callback before exchange or navigation side effects", async () => {
+    vi.spyOn(SystemConfigAPI, "getPublicConfigInfo").mockResolvedValue({
+      data: {
+        data: {
+          assembly: null,
+          authFeatures: {
+            register: true,
+          },
+        },
+      },
+    } as never);
+    const exchange = vi.spyOn(AuthAPI, "controlExchange");
+    const replace = vi.fn();
+
+    const assemblyStore = useAssemblyStore();
+    await assemblyStore.loadPublicConfig();
+    const decision = resolvePublicAuthCallbackAccess(
+      true,
+      assemblyStore.authFeatures.controlSso
+    );
+    if (!decision) {
+      await AuthAPI.controlExchange("legacy-launch-code");
+      await replace("/");
+    }
+
+    expect(decision).toEqual({ name: "404", replace: true });
+    expect(exchange).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
   });
 
   it("establishes password and control sessions through the same ordered workflow", async () => {
@@ -143,6 +174,7 @@ describe("control SSO client", () => {
     expect(routesSource).toContain("ControlSsoWaiting");
     expect(loginSource).not.toContain("controlExchange");
     expect(loginSource).not.toContain("ControlSsoCallback");
+    expect(loginSource).not.toContain("统一登录");
   });
 
   it("callback exchanges once and sends users without menus or permissions to waiting", () => {
