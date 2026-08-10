@@ -315,9 +315,9 @@ export const useUserStore = defineStore(
       }
 
       await getUserInfo();
-      const tenants = await fetchTenants();
+      const tenants = initialTenants.length > 0 ? initialTenants : await fetchTenants();
       const ui = info.value as UserInfoLike;
-      const availableTenants = tenants.length > 0 ? tenants : initialTenants;
+      const availableTenants = tenants;
       const activeTenantId = ui.tenant_id || currentTenant.value?.id || availableTenants[0]?.id;
       if (activeTenantId) {
         const found = availableTenants.find(

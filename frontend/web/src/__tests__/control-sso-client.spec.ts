@@ -100,6 +100,37 @@ describe("control SSO client", () => {
     expect(userStore.accessToken).toBe("access");
   });
 
+  it("keeps password login on its existing network sequence when tenants are already returned", async () => {
+    const events: string[] = [];
+    const tokens: JWTOut = {
+      access_token: "password-access",
+      refresh_token: "password-refresh",
+      token_type: "bearer",
+      expires_in: 1800,
+    };
+    const initialTenants = [{ id: 3, name: "租户", code: "tenant" }];
+    vi.spyOn(Auth, "setTokens").mockImplementation(() => events.push("tokens"));
+    vi.spyOn(UserAPI, "getCurrentUserInfo").mockImplementation(async () => {
+      events.push("current-user");
+      return {
+        data: {
+          data: { id: 7, tenant_id: 3, roles: [], menus: [] },
+        },
+      } as never;
+    });
+    const getTenants = vi.spyOn(AuthAPI, "getTenants");
+    vi.spyOn(useConfigStore(), "getConfig").mockImplementation(async () => {
+      events.push("config");
+    });
+
+    const userStore = useUserStore();
+    await userStore.establishSession(tokens, true, initialTenants);
+
+    expect(getTenants).not.toHaveBeenCalled();
+    expect(events).toEqual(["tokens", "current-user", "config"]);
+    expect(userStore.tenantList).toEqual(initialTenants);
+  });
+
   it("registers guarded callback routes without adding a login-page redirect", () => {
     const userStoreSource = source("src/store/modules/user.store.ts");
     const guardSource = source("src/router/beforeEach.ts");
