@@ -6,6 +6,7 @@
  */
 import { useSiteConfig } from "@/hooks/core/useSiteConfig";
 import { useAssemblyStore } from "@stores";
+import { resolveAndApplyPreset } from "@/hooks/core/useThemePreset";
 import {
   checkStorageCompatibility,
   startVersionPolling,
@@ -25,7 +26,8 @@ export function useAppBootstrap() {
       systemUpgrade();
       startVersionPolling();
     }
-    initSiteConfig();
+    await initSiteConfig();
+    resolveAndApplyPreset();
   };
 
   return { bootstrap };

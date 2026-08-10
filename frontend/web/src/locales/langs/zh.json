@@ -132,6 +132,18 @@
       "title": "主题风格",
       "list": ["浅色", "深色", "系统"]
     },
+    "themePreset": {
+      "title": "主题预设",
+      "presets": {
+        "default": "默认",
+        "ocean": "海洋蓝",
+        "forest": "森林绿",
+        "violet": "优雅紫",
+        "sunset": "活力橙"
+      },
+      "custom": "自定义",
+      "hint": "可继续单独调整主题色和菜单风格"
+    },
     "menu": {
       "title": "菜单风格"
     },

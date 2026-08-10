@@ -55,27 +55,43 @@ import { useSettingsStore } from "@stores";
 import { getCssVar } from "@utils";
 import type { BaseChartProps, ChartThemeConfig, UseChartOptions } from "@/types/component/chart";
 
+const getPresetChartColors = (): string[] => {
+  const colors: string[] = [];
+  for (let index = 1; index <= 8; index++) {
+    const color = getCssVar(`--fa-chart-${index}`).trim();
+    if (!color) break;
+    colors.push(color);
+  }
+  return colors;
+};
+
 // 图表主题配置
-export const useChartOps = (): ChartThemeConfig => ({
-  /** */
-  chartHeight: "16rem",
-  /** 字体大小 */
-  fontSize: 13,
-  /** 字体颜色 */
-  fontColor: "#999",
-  /** 主题颜色 */
-  themeColor: getCssVar("--el-color-primary-light-1"),
-  /** 颜色组 */
-  colors: [
-    getCssVar("--el-color-primary-light-1"),
-    "#4ABEFF",
-    "#EDF2FF",
-    "#14DEBA",
-    "#FFAF20",
-    "#FA8A6C",
-    "#FFAF20",
-  ],
-});
+export const useChartOps = (): ChartThemeConfig => {
+  const presetColors = getPresetChartColors();
+  return {
+    /** */
+    chartHeight: "16rem",
+    /** 字体大小 */
+    fontSize: 13,
+    /** 字体颜色 */
+    fontColor: "#999",
+    /** 主题颜色 */
+    themeColor: getCssVar("--el-color-primary-light-1"),
+    /** 颜色组 */
+    colors:
+      presetColors.length > 0
+        ? presetColors
+        : [
+            getCssVar("--el-color-primary-light-1"),
+            "#4ABEFF",
+            "#EDF2FF",
+            "#14DEBA",
+            "#FFAF20",
+            "#FA8A6C",
+            "#FFAF20",
+          ],
+  };
+};
 
 // 常量定义
 const RESIZE_DELAYS = [50, 100, 200, 350] as const;

@@ -132,6 +132,18 @@
       "title": "Theme Style",
       "list": ["Light", "Dark", "System"]
     },
+    "themePreset": {
+      "title": "Theme Presets",
+      "presets": {
+        "default": "Default",
+        "ocean": "Ocean",
+        "forest": "Forest",
+        "violet": "Violet",
+        "sunset": "Sunset"
+      },
+      "custom": "Custom",
+      "hint": "Theme color and menu style remain independently adjustable"
+    },
     "menu": {
       "title": "Menu Style"
     },

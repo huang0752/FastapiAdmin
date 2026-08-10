@@ -8,21 +8,14 @@ import { MenuThemeType } from "@/types/store";
 import AppConfig from "@/config";
 import { SystemThemeEnum, MenuThemeEnum, MenuTypeEnum, ContainerWidthEnum } from "@/enums/appEnum";
 import { SETTING_DEFAULT_CONFIG } from "@/config/setting";
-import {
-  setElementThemeColor,
-  formatToDate,
-  StorageConfig,
-  applyTheme,
-  generateThemeColors,
-  toggleDarkMode,
-  toggleSidebarColor,
-} from "@utils";
+import { setElementThemeColor, formatToDate, StorageConfig, toggleSidebarColor } from "@utils";
 import { SETTINGS_KEYS } from "@/constants";
 import { useStorage } from "@vueuse/core";
 import { defaultSettings } from "@/config/setting";
 import { SidebarColor, ThemeMode } from "@/enums/settings/theme.enum";
 import type { LayoutMode } from "@/enums/settings/layout.enum";
 import type { Ref } from "vue";
+import { getThemePreset, type ThemePresetCode } from "@/config/themePresets";
 
 export const useSettingsStore = defineStore(
   "settingStore",
@@ -38,6 +31,9 @@ export const useSettingsStore = defineStore(
     const systemThemeMode = ref(SETTING_DEFAULT_CONFIG.systemThemeMode);
     const menuThemeType = ref(SETTING_DEFAULT_CONFIG.menuThemeType);
     const systemThemeColor = ref(SETTING_DEFAULT_CONFIG.systemThemeColor);
+    const themePreset = ref<ThemePresetCode>("default");
+    const presetAppliedPrimary = ref<string | null>(null);
+    const presetAppliedMenuTheme = ref<MenuThemeEnum | null>(null);
 
     // 显示
     const showMenuButton = ref(SETTING_DEFAULT_CONFIG.showMenuButton);
@@ -134,6 +130,17 @@ export const useSettingsStore = defineStore(
     );
 
     const getMenuTheme = computed((): MenuThemeType => {
+      const preset = getThemePreset(themePreset.value);
+      if (preset && menuThemeType.value === presetAppliedMenuTheme.value) {
+        const tokens = isDark.value ? preset.modes.dark : preset.modes.light;
+        return {
+          theme: menuThemeType.value,
+          background: tokens.sidebarBackground,
+          systemNameColor: tokens.sidebarTitle,
+          iconColor: tokens.sidebarIcon,
+          textColor: tokens.sidebarText,
+        } as MenuThemeType;
+      }
       const list = AppConfig.themeList.filter((item) => item.theme === menuThemeType.value);
       if (isDark.value) {
         return AppConfig.darkMenuStyles[0]!;
@@ -178,20 +185,6 @@ export const useSettingsStore = defineStore(
     } as const;
 
     watch(
-      [theme, themeColor],
-      ([newTheme, newThemeColor]) => {
-        try {
-          toggleDarkMode(newTheme === ThemeMode.DARK);
-          const colors = generateThemeColors(newThemeColor, newTheme);
-          applyTheme(colors);
-        } catch (error) {
-          console.error("[SettingStore] 主题初始化失败:", error);
-        }
-      },
-      { immediate: true }
-    );
-
-    watch(
       [sidebarColorScheme],
       ([newSidebarColorScheme]) => {
         toggleSidebarColor(newSidebarColorScheme === SidebarColor.CLASSIC_BLUE);
@@ -222,12 +215,25 @@ export const useSettingsStore = defineStore(
     };
 
     const switchMenuStyles = (theme: MenuThemeEnum) => {
+      if (presetAppliedMenuTheme.value !== null && theme !== presetAppliedMenuTheme.value) {
+        presetAppliedMenuTheme.value = null;
+      }
       menuThemeType.value = theme;
     };
 
     const setElementTheme = (theme: string) => {
+      if (
+        presetAppliedPrimary.value !== null &&
+        theme.toLowerCase() !== presetAppliedPrimary.value.toLowerCase()
+      ) {
+        presetAppliedPrimary.value = null;
+      }
       systemThemeColor.value = theme;
       setElementThemeColor(theme);
+    };
+
+    const setThemePreset = (preset: ThemePresetCode) => {
+      themePreset.value = preset;
     };
 
     const setBorderMode = () => {
@@ -398,6 +404,9 @@ export const useSettingsStore = defineStore(
       layout.value = defaultSettings.layout as LayoutMode;
       themeColor.value = defaultSettings.themeColor;
       theme.value = defaultSettings.theme;
+      systemThemeColor.value = defaultSettings.systemThemeColor;
+      systemThemeType.value = defaultSettings.systemThemeType;
+      systemThemeMode.value = defaultSettings.systemThemeMode;
 
       // 系统设置
       grayMode.value = defaultSettings.grayMode;
@@ -419,6 +428,9 @@ export const useSettingsStore = defineStore(
       systemThemeMode,
       menuThemeType,
       systemThemeColor,
+      themePreset,
+      presetAppliedPrimary,
+      presetAppliedMenuTheme,
       showMenuButton,
       showFastEnter,
       showRefreshButton,
@@ -474,6 +486,7 @@ export const useSettingsStore = defineStore(
       setGlopTheme,
       switchMenuStyles,
       setElementTheme,
+      setThemePreset,
       setBorderMode,
       setContainerWidth,
       setUniqueOpened,
@@ -518,6 +531,7 @@ export const useSettingsStore = defineStore(
     persist: {
       key: "setting",
       storage: localStorage,
+      omit: ["themePreset", "presetAppliedPrimary", "presetAppliedMenuTheme"],
     },
   }
 );

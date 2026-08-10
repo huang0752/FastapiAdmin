@@ -17,6 +17,7 @@ import { ResultEnum } from "@/enums/api/result.enum";
 import { ElNotification } from "element-plus";
 import { store, useDictStore } from "@stores";
 import type { UserInfo } from "@/api/module_system/user";
+import { applyPreset, resolveAndApplyPreset } from "@/hooks/core/useThemePreset";
 
 /** 延迟加载 beforeEach 工具函数，避免 user.store 与 beforeEach 的循环依赖 */
 let _routerUtilsPromise: Promise<typeof import("@/router/beforeEach")> | null = null;
@@ -216,6 +217,7 @@ export const useUserStore = defineStore(
           localStorage.setItem(StorageConfig.LAST_TENANT_ID_KEY, String(found.id));
         }
         await useConfigStore().getConfig(true, tenantId);
+        resolveAndApplyPreset();
       }
     }
 
@@ -336,6 +338,7 @@ export const useUserStore = defineStore(
         }
       }
       await useConfigStore().getConfig(true, activeTenantId);
+      resolveAndApplyPreset();
       setLoginStatus(true);
     }
 
@@ -368,6 +371,7 @@ export const useUserStore = defineStore(
         }
       }
 
+      applyPreset("default", { restoreFactory: false });
       resetAllState();
       sessionStorage.removeItem("iframeRoutes");
       useMenuStore().setHomePath("");

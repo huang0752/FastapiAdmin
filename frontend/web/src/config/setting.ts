@@ -97,7 +97,7 @@ export const SETTING_DEFAULT_CONFIG = {
   /** 菜单风格 */
   menuThemeType: MenuThemeEnum.DESIGN,
   /** 系统主题颜色 */
-  systemThemeColor: AppConfig.systemMainColor[0],
+  systemThemeColor: AppConfig.systemMainColor[0]!,
   /** 是否显示菜单按钮 */
   showMenuButton: true,
   /** 是否显示快速入口 */

@@ -19,6 +19,9 @@
 // 暗黑主题
 @use "./element-plus/dark";
 
+// ---------- theme presets/ ----------
+@use "./theme-presets";
+
 // ---------- animations/ ----------
 @use "./animations/router-transition";
 @use "./animations/theme-change";

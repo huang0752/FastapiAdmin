@@ -18,6 +18,7 @@ import { useClipboard } from "@vueuse/core";
 import { useI18n } from "vue-i18n";
 import { MenuThemeEnum } from "@/enums/appEnum";
 import { useTheme } from "@/hooks/core/useTheme";
+import { resetToDefaultPreset } from "@/hooks/core/useThemePreset";
 import { ElMessage } from "element-plus";
 
 defineOptions({ name: "SettingActions" });
@@ -232,6 +233,7 @@ const handleResetConfig = async () => {
     // 节日相关
     settingStore.setFestivalDate(config.festivalDate);
     settingStore.setholidayFireworksLoaded(config.holidayFireworksLoaded);
+    resetToDefaultPreset();
 
     location.reload();
   } catch (error) {

@@ -72,7 +72,6 @@ import { ElMessage } from "element-plus";
 import { ArrowDown, CopyDocument } from "@element-plus/icons-vue";
 import { useClipboard } from "@vueuse/core";
 import { useSettingsStore } from "@stores";
-import { ThemeMode } from "@/enums/settings/theme.enum";
 import {
   getExampleFromPresetMasterSub,
   getExampleFromPresetSingle,
@@ -98,7 +97,7 @@ const settingsStore = useSettingsStore();
 const sqlText = ref("");
 const sqlRef = ref<CmComponentRef>();
 
-const codeTheme = ref(settingsStore.theme === ThemeMode.DARK ? "dracula" : "default");
+const codeTheme = ref(settingsStore.isDark ? "dracula" : "default");
 
 const sqlOptions: EditorConfiguration = {
   mode: "text/x-sql",
@@ -113,9 +112,9 @@ const sqlOptions: EditorConfiguration = {
 };
 
 watch(
-  () => settingsStore.theme,
-  (t) => {
-    const newTheme = t === ThemeMode.DARK ? "dracula" : "default";
+  () => settingsStore.isDark,
+  (isDark) => {
+    const newTheme = isDark ? "dracula" : "default";
     codeTheme.value = newTheme;
     sqlOptions.theme = newTheme;
     if (sqlRef.value?.cminstance) {

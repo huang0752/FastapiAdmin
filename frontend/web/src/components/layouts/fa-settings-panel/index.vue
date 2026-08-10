@@ -6,6 +6,8 @@
       <FaSettingHeader @close="closeDrawer" />
       <!-- 主题风格 -->
       <FaThemeSettings />
+      <!-- 通用主题预设 -->
+      <FaThemePresetSettings />
       <!-- 菜单布局 -->
       <FaMenuLayoutSettings />
       <!-- 菜单风格 -->

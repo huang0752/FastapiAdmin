@@ -30,7 +30,6 @@ import { ComponentSize } from "./enums/settings/layout.enum";
 import { hexToRgba, toggleTransition } from "./utils/ui";
 import { initializeTheme } from "./hooks/core/useTheme";
 import { useAppBootstrap } from "@/hooks/core/useAppBootstrap";
-import { ThemeMode } from "./enums";
 import en from "element-plus/es/locale/lang/en";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import { router } from "@/router";
@@ -62,12 +61,12 @@ const enableAiAssistant = computed(() => {
 
 // 水印文字默认使用当前主题色（半透明），随主题色设置变化
 const fontColor = computed(() => {
-  const hex = settingsStore.themeColor || defaultSettings.themeColor;
-  const alpha = settingsStore.theme === ThemeMode.DARK ? 0.22 : 0.16;
+  const hex = settingsStore.systemThemeColor || defaultSettings.systemThemeColor;
+  const alpha = settingsStore.isDark ? 0.22 : 0.16;
   try {
     return hexToRgba(hex, alpha).rgba;
   } catch {
-    return hexToRgba(defaultSettings.themeColor, alpha).rgba;
+    return hexToRgba(defaultSettings.systemThemeColor, alpha).rgba;
   }
 });
 
