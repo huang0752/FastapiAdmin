@@ -39,6 +39,8 @@ Python uses Ruff with 4-space indentation, double quotes, import sorting, and a 
 
 Frontend code uses TypeScript, Vue SFCs, ESLint, Prettier, and Stylelint. Prefer existing `fa-*` components and Element Plus patterns before adding new primitives. Avoid importing heavy libraries in router, store, or app entry files.
 
+Before adding or modifying a global theme preset, read `docs/framework/theme-preset-extension-guide.md`. Theme presets are framework capabilities: keep names, colors, previews, persistence keys, and tests product-neutral, and never copy product menus, terminology, branding, or business data into the framework.
+
 Permission codes should follow module namespaces, for example `module_platform:tenant:update`.
 
 ## Testing Guidelines
