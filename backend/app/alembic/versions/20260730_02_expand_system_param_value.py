@@ -29,11 +29,18 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    params_table = sa.table("sys_param", sa.column("config_value", sa.Text()))
+    max_value_length = op.get_bind().scalar(
+        sa.select(sa.func.max(sa.func.char_length(params_table.c.config_value)))
+    )
+    target_length = max(500, int(max_value_length or 0))
+
     op.alter_column(
         "sys_param",
         "config_value",
         existing_type=sa.Text(),
-        type_=sa.String(length=500),
+        # 降级不得截断扩容后已经写入的参数值；空表仍恢复原始 500 长度。
+        type_=sa.String(length=target_length),
         existing_nullable=True,
         existing_comment="参数键值",
     )

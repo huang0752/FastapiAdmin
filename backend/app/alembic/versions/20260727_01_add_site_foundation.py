@@ -78,11 +78,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    connection = op.get_bind()
-    site_table = sa.table("platform_site", sa.column("id", sa.Integer()), sa.column("code", sa.String()), sa.column("name", sa.String()))
-    site_id = connection.execute(sa.select(site_table.c.id).where(site_table.c.code == "default", site_table.c.name == "FastapiAdmin")).scalar_one_or_none()
-    if site_id is None:
-        return
-    domain_table = sa.table("platform_site_domain", sa.column("site_id", sa.Integer()))
-    connection.execute(domain_table.delete().where(domain_table.c.site_id == site_id))
-    connection.execute(site_table.delete().where(site_table.c.id == site_id))
+    # ``20260726_00`` 已包含完整 Site 结构；本 revision 只是兼容标记。
+    # 默认 Site 可能已被 Seed、套餐和租户引用，标记降级不得删除共享数据。
+    pass
