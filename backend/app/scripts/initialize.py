@@ -11,7 +11,7 @@ import re
 from datetime import datetime, time
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.module_platform.email.model import EmailConfigModel, EmailTemplateModel
@@ -40,6 +40,48 @@ from app.plugin.module_task.business.task.model import BusinessTaskModel
 from app.plugin.module_task.cronjob.node.model import NodeModel
 from app.plugin.module_task.workflow.nodes.model import WorkflowNodeTypeModel
 from app.scripts.seed_loader import resolve_seed_files
+
+
+def assign_seed_primary_keys(model: type, data: list[dict]) -> list[dict]:
+    """为空表种子注入确定性主键，避免序列漂移破坏固定外键引用。"""
+    if "id" not in model.__table__.c:
+        return data
+
+    next_id = 1
+
+    def assign_rows(rows: list[dict]) -> list[dict]:
+        nonlocal next_id
+        assigned: list[dict] = []
+        for item in rows:
+            row = dict(item)
+            row_id = row.get("id")
+            if row_id is None:
+                row_id = next_id
+                row["id"] = row_id
+            next_id = max(next_id, int(row_id) + 1)
+            children = row.get("children")
+            if isinstance(children, list):
+                row["children"] = assign_rows(children)
+            assigned.append(row)
+        return assigned
+
+    return assign_rows(data)
+
+
+async def sync_seed_primary_key_sequence(db: AsyncSession, model: type) -> None:
+    """显式种子主键写入后，将 PostgreSQL 序列推进到表内最大主键。"""
+    bind = db.bind
+    if bind is None or bind.dialect.name != "postgresql" or "id" not in model.__table__.c:
+        return
+    table_name = model.__tablename__
+    quoted_table = bind.dialect.identifier_preparer.quote(table_name)
+    await db.execute(
+        text(
+            "SELECT setval(pg_get_serial_sequence(:table_name, 'id'), "
+            f"COALESCE(MAX(id), 1), MAX(id) IS NOT NULL) FROM {quoted_table}"
+        ),
+        {"table_name": table_name},
+    )
 
 
 class InitializeData:
@@ -147,6 +189,7 @@ class InitializeData:
                     item if item.get("tenant_id") is not None else {**item, "tenant_id": 1}
                     for item in data
                 ]
+            data = assign_seed_primary_keys(model, data)
 
             try:
                 # 树形表（platform_menu / sys_dept）：递归创建含 children 的对象
@@ -158,6 +201,7 @@ class InitializeData:
                     objs = self.__create_objects_with_children(data, model)
                     db.add_all(objs)
                     await db.flush()
+                    await sync_seed_primary_key_sequence(db, model)
                     logger.info(f"✅️ 已向 {table_name} 写入初始化数据")
                     continue
 
@@ -170,6 +214,7 @@ class InitializeData:
                     resolved_rows = await self.resolve_package_menu_seed(db, data)
                     db.add_all([model(**item) for item in resolved_rows])
                     await db.flush()
+                    await sync_seed_primary_key_sequence(db, model)
                     logger.info(f"✅️ 已向 {table_name} 写入 {len(resolved_rows)} 条稳定菜单关联")
                     continue
 
@@ -186,6 +231,7 @@ class InitializeData:
                         dict_type_mapping[item["dict_type"]] = obj
                     db.add_all(objs)
                     await db.flush()
+                    await sync_seed_primary_key_sequence(db, model)
                     logger.info(f"✅️ 已向 {table_name} 写入初始化数据")
                     continue
 
@@ -205,6 +251,7 @@ class InitializeData:
                         objs.append(model(**item))
                     db.add_all(objs)
                     await db.flush()
+                    await sync_seed_primary_key_sequence(db, model)
                     logger.info(f"✅️ 已向 {table_name} 写入初始化数据")
                     continue
 
@@ -217,6 +264,7 @@ class InitializeData:
                     objs = [model(**item) for item in data]
                     db.add_all(objs)
                     await db.flush()
+                    await sync_seed_primary_key_sequence(db, model)
                     logger.info(f"✅️ 已向 {table_name} 写入 {len(objs)} 条")
                     continue
 
@@ -228,6 +276,7 @@ class InitializeData:
                 objs = [model(**item) for item in data]
                 db.add_all(objs)
                 await db.flush()
+                await sync_seed_primary_key_sequence(db, model)
                 logger.info(f"✅️ 已向 {table_name} 写入初始化数据")
 
             except Exception:
