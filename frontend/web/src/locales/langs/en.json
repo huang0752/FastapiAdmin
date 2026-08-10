@@ -139,7 +139,13 @@
         "ocean": "Ocean",
         "forest": "Forest",
         "violet": "Violet",
-        "sunset": "Sunset"
+        "sunset": "Sunset",
+        "cherry": "Cherry",
+        "amber": "Amber",
+        "porcelain": "Porcelain",
+        "midnight": "Midnight",
+        "graphite": "Graphite",
+        "neon": "Neon"
       },
       "custom": "Custom",
       "hint": "Theme color and menu style remain independently adjustable"

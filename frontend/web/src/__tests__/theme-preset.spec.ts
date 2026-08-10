@@ -41,6 +41,7 @@ import {
 } from "@/config/themePresets";
 import {
   applyPreset,
+  getThemePresetContext,
   getThemePresetStorageKey,
   resolveAndApplyPreset,
   resetToDefaultPreset,
@@ -79,9 +80,20 @@ beforeEach(() => {
 });
 
 describe("通用主题预设注册表", () => {
-  it("提供四套编码唯一的通用预设", () => {
+  it("提供十套编码唯一的通用预设", () => {
     const codes = THEME_PRESETS.map((preset) => preset.code);
-    expect(codes).toEqual(["ocean", "forest", "violet", "sunset"]);
+    expect(codes).toEqual([
+      "ocean",
+      "forest",
+      "violet",
+      "sunset",
+      "cherry",
+      "amber",
+      "porcelain",
+      "midnight",
+      "graphite",
+      "neon",
+    ]);
     expect(new Set(codes).size).toBe(codes.length);
   });
 
@@ -99,6 +111,17 @@ describe("通用主题预设注册表", () => {
     expect(getThemePreset("missing")).toBeNull();
     expect(isThemePresetCode("ocean")).toBe(true);
     expect(isThemePresetCode("default")).toBe(false);
+  });
+
+  it("识别新增预设并可应用极夜主题", () => {
+    for (const code of ["cherry", "amber", "porcelain", "midnight", "graphite", "neon"]) {
+      expect(isThemePresetCode(code)).toBe(true);
+    }
+
+    setupContext({ siteCode: "main", tenantId: 3, userId: 15 });
+    expect(selectPreset("midnight")).toBe(true);
+    expect(document.documentElement.dataset.themePreset).toBe("midnight");
+    expect(useSettingsStore().systemThemeColor).toBe(getThemePreset("midnight")!.primary.light);
   });
 
   it("汇总所有预设明暗主色供状态迁移判断", () => {
@@ -124,6 +147,55 @@ describe("通用主题预设状态与隔离持久化", () => {
     expect(
       localStorage.getItem(getThemePresetStorageKey({ siteCode: "main", tenantId: 9, userId: 15 })!)
     ).toBeNull();
+  });
+
+  it("无业务租户的平台管理员使用独立 platform 作用域", () => {
+    setupContext({ siteCode: "main", tenantId: null, userId: 15 });
+
+    const context = getThemePresetContext();
+    expect(context.tenantId).toBe("platform");
+    expect(selectPreset("midnight")).toBe(true);
+    expect(localStorage.getItem(getThemePresetStorageKey(context)!)).toBe("midnight");
+  });
+
+  it("配置完成但 Host 未匹配站点时使用当前 Origin 作用域", () => {
+    setupContext({ siteCode: null, tenantId: null, userId: 15 });
+    useConfigStore().isConfigLoaded = true;
+
+    const context = getThemePresetContext();
+    expect(context.siteCode).toBe("origin");
+    expect(selectPreset("midnight")).toBe(true);
+    expect(localStorage.getItem(getThemePresetStorageKey(context)!)).toBe("midnight");
+  });
+
+  it("冷启动上下文延迟就绪后自动恢复隔离预设", async () => {
+    const key = getThemePresetStorageKey({ siteCode: "main", tenantId: 3, userId: 15 })!;
+    localStorage.setItem(key, "midnight");
+
+    expect(resolveAndApplyPreset()).toBe("default");
+    expect(document.documentElement.hasAttribute("data-theme-preset")).toBe(false);
+
+    setupContext({ siteCode: "main", tenantId: 3, userId: 15 });
+    await nextTick();
+
+    expect(document.documentElement.dataset.themePreset).toBe("midnight");
+    expect(useSettingsStore().systemThemeColor).toBe(getThemePreset("midnight")!.primary.light);
+  });
+
+  it("冷启动恢复与预设一致的主色和菜单所有权", () => {
+    setupContext({ siteCode: "main", tenantId: 3, userId: 15 });
+    const store = useSettingsStore();
+    const preset = getThemePreset("midnight")!;
+    const key = getThemePresetStorageKey({ siteCode: "main", tenantId: 3, userId: 15 })!;
+    localStorage.setItem(key, "midnight");
+    store.systemThemeColor = preset.primary.light;
+    store.menuThemeType = preset.recommendedMenuTheme;
+    store.presetAppliedPrimary = null;
+    store.presetAppliedMenuTheme = null;
+
+    expect(resolveAndApplyPreset()).toBe("midnight");
+    expect(store.presetAppliedPrimary).toBe(preset.primary.light);
+    expect(store.presetAppliedMenuTheme).toBe(preset.recommendedMenuTheme);
   });
 
   it("运行时预设状态不进入全局 setting 持久化", async () => {
@@ -194,6 +266,18 @@ describe("主题状态单一真源", () => {
     expect(source).not.toContain("applyTheme,");
   });
 
+  it("设置面板初始化认可主题预设主色，不会在挂载时回退默认蓝色", () => {
+    const source = readFileSync(
+      resolve(
+        process.cwd(),
+        "src/components/layouts/fa-settings-panel/composables/useSettingsPanel.ts"
+      ),
+      "utf8"
+    );
+    expect(source).toContain("listPresetPrimaryColors");
+    expect(source).toContain("presetPrimaryColors.includes(systemThemeColor.value.toLowerCase())");
+  });
+
   it("水印与代码编辑器读取 systemThemeColor/isDark", () => {
     const app = readFileSync(resolve(process.cwd(), "src/App.vue"), "utf8");
     const watermark = readFileSync(
@@ -250,6 +334,12 @@ describe("主题预设设置界面与视觉约束", () => {
       forest: "森林绿",
       violet: "优雅紫",
       sunset: "活力橙",
+      cherry: "樱桃",
+      amber: "琥珀",
+      porcelain: "青瓷",
+      midnight: "极夜",
+      graphite: "石墨",
+      neon: "荧光",
     });
     expect(en.setting.themePreset.presets).toMatchObject({
       default: "Default",
@@ -257,6 +347,12 @@ describe("主题预设设置界面与视觉约束", () => {
       forest: "Forest",
       violet: "Violet",
       sunset: "Sunset",
+      cherry: "Cherry",
+      amber: "Amber",
+      porcelain: "Porcelain",
+      midnight: "Midnight",
+      graphite: "Graphite",
+      neon: "Neon",
     });
   });
 

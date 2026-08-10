@@ -139,7 +139,13 @@
         "ocean": "海洋蓝",
         "forest": "森林绿",
         "violet": "优雅紫",
-        "sunset": "活力橙"
+        "sunset": "活力橙",
+        "cherry": "樱桃",
+        "amber": "琥珀",
+        "porcelain": "青瓷",
+        "midnight": "极夜",
+        "graphite": "石墨",
+        "neon": "荧光"
       },
       "custom": "自定义",
       "hint": "可继续单独调整主题色和菜单风格"

@@ -11,7 +11,7 @@ import { StorageConfig, getDarkColor, getLightColor, setElementThemeColor } from
 
 export interface ThemePresetContext {
   siteCode: string | null;
-  tenantId: number | null;
+  tenantId: number | "platform" | null;
   userId: number | null;
 }
 
@@ -22,14 +22,20 @@ export function getThemePresetContext(): ThemePresetContext {
   const rawUserId = info.id ?? info.user_id;
   const rawTenantId = info.tenant_id ?? userStore.currentTenant?.id;
   const userId = rawUserId == null || rawUserId === "" ? null : Number(rawUserId);
-  const tenantId = rawTenantId == null || rawTenantId === "" ? null : Number(rawTenantId);
+  const numericTenantId = rawTenantId == null || rawTenantId === "" ? null : Number(rawTenantId);
+  const tenantId =
+    numericTenantId !== null && Number.isFinite(numericTenantId)
+      ? numericTenantId
+      : userId !== null
+        ? "platform"
+        : null;
 
   return {
     siteCode:
       configStore.siteConfigData?.site_code?.config_value ??
       configStore.configData?.site_code?.config_value ??
-      null,
-    tenantId: tenantId !== null && Number.isFinite(tenantId) ? tenantId : null,
+      (configStore.isConfigLoaded ? "origin" : null),
+    tenantId,
     userId: userId !== null && Number.isFinite(userId) ? userId : null,
   };
 }
@@ -78,6 +84,7 @@ export function restoreFactoryThemeAppearance(): void {
 }
 
 let stopModeWatcher: (() => void) | null = null;
+let stopPendingContextWatcher: (() => void) | null = null;
 
 function ensureModeWatcher(): void {
   if (stopModeWatcher) return;
@@ -88,6 +95,25 @@ function ensureModeWatcher(): void {
       const preset = getThemePreset(store.themePreset);
       if (preset) applyPreset(preset.code);
     }
+  );
+}
+
+/**
+ * 冷启动时配置、用户与路由可能并发就绪。首次解析若缺少隔离上下文，等待完整 key
+ * 出现后只重放一次，避免初始化早到导致已保存主题永久回落为 default。
+ */
+function ensurePendingContextWatcher(): void {
+  if (stopPendingContextWatcher) return;
+  stopPendingContextWatcher = watch(
+    () => getThemePresetStorageKey(getThemePresetContext()),
+    (key) => {
+      if (!key) return;
+      const stop = stopPendingContextWatcher;
+      stopPendingContextWatcher = null;
+      stop?.();
+      resolveAndApplyPreset();
+    },
+    { flush: "post" }
   );
 }
 
@@ -114,20 +140,24 @@ export function applyPreset(
   const currentPrimary = (store.systemThemeColor ?? "").toLowerCase();
   const factoryPrimary = SETTING_DEFAULT_CONFIG.systemThemeColor.toLowerCase();
   const appliedPrimary = store.presetAppliedPrimary?.toLowerCase() ?? null;
+  const targetPrimary = store.isDark ? preset.primary.dark : preset.primary.light;
   const primaryIsPresetOwned =
-    force || currentPrimary === factoryPrimary || currentPrimary === appliedPrimary;
+    force ||
+    currentPrimary === factoryPrimary ||
+    currentPrimary === appliedPrimary ||
+    currentPrimary === targetPrimary.toLowerCase();
   const menuIsPresetOwned =
     force ||
     store.menuThemeType === SETTING_DEFAULT_CONFIG.menuThemeType ||
-    store.menuThemeType === store.presetAppliedMenuTheme;
+    store.menuThemeType === store.presetAppliedMenuTheme ||
+    store.menuThemeType === preset.recommendedMenuTheme;
 
   store.setThemePreset(preset.code);
   document.documentElement.setAttribute("data-theme-preset", preset.code);
   if (primaryIsPresetOwned) {
-    const target = store.isDark ? preset.primary.dark : preset.primary.light;
-    store.systemThemeColor = target;
-    setElementThemeColor(target);
-    store.presetAppliedPrimary = target;
+    store.systemThemeColor = targetPrimary;
+    setElementThemeColor(targetPrimary);
+    store.presetAppliedPrimary = targetPrimary;
   } else {
     setElementThemeColor(store.systemThemeColor);
     store.presetAppliedPrimary = null;
@@ -145,13 +175,15 @@ export function applyPreset(
 export function selectPreset(code: ThemePresetCode | string): boolean {
   const normalized: ThemePresetCode = isThemePresetCode(code) ? code : "default";
   applyPreset(normalized, { select: true });
-  const key = getThemePresetStorageKey(getThemePresetContext());
+  const context = getThemePresetContext();
+  const key = getThemePresetStorageKey(context);
   if (key) localStorage.setItem(key, normalized);
   return true;
 }
 
 export function resolveAndApplyPreset(): ThemePresetCode {
   const key = getThemePresetStorageKey(getThemePresetContext());
+  if (!key) ensurePendingContextWatcher();
   const saved = key ? localStorage.getItem(key) : null;
   const normalized: ThemePresetCode =
     saved === "default" || isThemePresetCode(saved) ? saved : "default";

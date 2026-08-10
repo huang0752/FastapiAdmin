@@ -9,6 +9,7 @@ import { useTheme } from "@/hooks/core/useTheme";
 import { useCeremony } from "@/hooks/core/useCeremony";
 import { useSettingsState } from "./useSettingsState";
 import { useSettingsHandlers } from "./useSettingsHandlers";
+import { listPresetPrimaryColors } from "@/config/themePresets";
 
 /**
  * 设置面板核心逻辑管理
@@ -52,12 +53,17 @@ export function useSettingsPanel() {
 
   // 计算属性
   const systemThemeColor = computed(() => settingStore.systemThemeColor as string);
+  const presetPrimaryColors = listPresetPrimaryColors();
 
   // 主题相关处理
   const useThemeHandlers = () => {
     // 初始化系统颜色
     const initSystemColor = () => {
-      if (!AppConfig.systemMainColor.includes(systemThemeColor.value)) {
+      const isSystemPrimary = AppConfig.systemMainColor.some(
+        (color) => color.toLowerCase() === systemThemeColor.value.toLowerCase()
+      );
+      const isPresetPrimary = presetPrimaryColors.includes(systemThemeColor.value.toLowerCase());
+      if (!isSystemPrimary && !isPresetPrimary) {
         settingStore.setElementTheme(AppConfig.systemMainColor[0]!);
         settingStore.reload();
       }
