@@ -78,6 +78,7 @@
         <FaLogo v-if="!isDualMenu" class="logo" :src="sidebarLogoSrc" />
 
         <p
+          class="sidebar-title"
           :class="{ 'is-dual-menu-name': isDualMenu }"
           :style="{
             color: getMenuTheme.systemNameColor,
@@ -523,6 +524,19 @@ watch(menuOpen, (isMenuOpen: boolean) => {
       box-sizing: border-box;
       margin-left: 10px;
       font-size: 18px;
+
+      &.sidebar-title:not(.is-dual-menu-name) {
+        top: 50%;
+        right: 16px;
+        bottom: auto;
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-line-clamp: 2;
+        line-height: 22px;
+        overflow-wrap: anywhere;
+        transform: translateY(-50%);
+        -webkit-box-orient: vertical;
+      }
 
       &.is-dual-menu-name {
         left: 25px;
