@@ -413,14 +413,15 @@ async def test_default_recovery_loads_handlers_before_scanning_after_cold_start(
     from app.plugin.module_task.business.task.model import BusinessTaskModel
     from app.plugin.module_task.runtime import dispatcher as dispatcher_module
     from app.plugin.module_task.runtime.dispatcher import BusinessTaskDispatcher, DispatchRequest
-    from app.plugin.module_task.runtime.registry import business_task_registry
+    from app.plugin.module_task.runtime.registry import BusinessTaskRegistry
 
     _ = test_client
     publisher = _RecordingPublisher()
-    dispatcher = BusinessTaskDispatcher(publisher=publisher)
+    isolated_registry = BusinessTaskRegistry()
+    monkeypatch.setattr(dispatcher_module, "business_task_registry", isolated_registry)
+    dispatcher = BusinessTaskDispatcher(registry=isolated_registry, publisher=publisher)
     monkeypatch.setattr(dispatcher_module.settings, "CELERY_ENABLED", True)
-    business_task_registry.clear()
-    business_task_registry.register(
+    isolated_registry.register(
         handler_code="sample.cold_start_recovery",
         handler=_sample_handler,
         module="sample",
@@ -441,13 +442,13 @@ async def test_default_recovery_loads_handlers_before_scanning_after_cold_start(
     finally:
         await db.close()
 
-    business_task_registry.clear()
+    isolated_registry.clear()
     load_calls = 0
 
     def load_cold_start_handlers() -> tuple[str, ...]:
         nonlocal load_calls
         load_calls += 1
-        business_task_registry.register(
+        isolated_registry.register(
             handler_code="sample.cold_start_recovery",
             handler=_sample_handler,
             module="sample",
@@ -465,7 +466,7 @@ async def test_default_recovery_loads_handlers_before_scanning_after_cold_start(
                 )
             ).scalar_one()
     finally:
-        business_task_registry.clear()
+        isolated_registry.clear()
 
     assert load_calls == 1
     assert recovered == 1
