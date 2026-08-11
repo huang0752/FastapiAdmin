@@ -9,22 +9,18 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { Loading } from "@element-plus/icons-vue";
-import AuthAPI from "@/api/module_system/auth";
 import { useUserStore } from "@stores";
+import { exchangeControlCodeOnce } from "./control-exchange";
 
 const route = useRoute();
 const router = useRouter();
 const userStore = useUserStore();
-const exchangeStarted = ref(false);
 
 onMounted(async () => {
-  if (exchangeStarted.value) return;
-  exchangeStarted.value = true;
-
   const rawCode = route.query.code;
   const code = typeof rawCode === "string" ? rawCode.trim() : "";
   if (!code) {
@@ -34,7 +30,7 @@ onMounted(async () => {
   }
 
   try {
-    const response = await AuthAPI.controlExchange(code);
+    const response = await exchangeControlCodeOnce(code);
     const tokens = response.data.data;
     await userStore.establishSession(tokens);
 

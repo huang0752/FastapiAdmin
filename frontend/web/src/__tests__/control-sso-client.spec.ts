@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import AuthAPI, { type JWTOut } from "@/api/module_system/auth";
 import UserAPI from "@/api/module_system/user";
@@ -183,9 +183,17 @@ describe("control SSO client", () => {
 
   it("callback exchanges once and sends users without menus or permissions to waiting", () => {
     const callbackSource = source("src/views/module_system/auth/control-callback/index.vue");
+    const exchangeHelperPath = resolve(
+      process.cwd(),
+      "src/views/module_system/auth/control-callback/control-exchange.ts"
+    );
 
-    expect(callbackSource).toContain("exchangeStarted");
-    expect(callbackSource.match(/AuthAPI\.controlExchange\(/g)).toHaveLength(1);
+    expect(existsSync(exchangeHelperPath)).toBe(true);
+    const exchangeHelperSource = readFileSync(exchangeHelperPath, "utf8");
+    expect(exchangeHelperSource).toContain("controlExchangePromises");
+    expect(callbackSource).toContain("exchangeControlCodeOnce");
+    expect(exchangeHelperSource.match(/AuthAPI\.controlExchange\(/g)).toHaveLength(1);
+    expect(callbackSource).not.toContain("AuthAPI.controlExchange(");
     expect(callbackSource).toContain("userStore.establishSession");
     expect(callbackSource).toContain("userStore.routeList.length === 0");
     expect(callbackSource).toContain("userStore.prems.length === 0");
