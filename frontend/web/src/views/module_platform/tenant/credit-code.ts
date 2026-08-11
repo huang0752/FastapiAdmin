@@ -16,7 +16,7 @@ export function validateCreditCode(value?: string | null): boolean {
 
   const weightedSum = values
     .slice(0, 17)
-    .reduce((sum, value, index) => sum + value * CREDIT_CODE_WEIGHTS[index], 0);
+    .reduce((sum, value, index) => sum + value * CREDIT_CODE_WEIGHTS[index]!, 0);
   const expectedCheckValue = (31 - (weightedSum % 31)) % 31;
   return values[17] === expectedCheckValue;
 }
