@@ -36,6 +36,7 @@ class UserAuthorizationResolver:
                 MenuModel.status == 0,
                 MenuModel.client == "pc",
                 MenuModel.scope == "tenant",
+                MenuModel.is_deleted.is_(False),
             )
             .order_by(MenuModel.order.asc())
         )
@@ -55,11 +56,12 @@ class UserAuthorizationResolver:
         return {
             menu.id
             for role in user.roles or []
-            if role.status == 0
+            if role.status == 0 and not role.is_deleted
             for menu in role.menus or []
             if menu.id in allowed_ids
             and menu.status == 0
             and menu.client == "pc"
+            and not menu.is_deleted
         }
 
     async def authorized_federated_user_ids(self) -> set[int]:
@@ -70,13 +72,17 @@ class UserAuthorizationResolver:
             select(UserRolesModel.user_id)
             .join(RoleModel, RoleModel.id == UserRolesModel.role_id)
             .join(RoleMenusModel, RoleMenusModel.role_id == RoleModel.id)
+            .join(MenuModel, MenuModel.id == RoleMenusModel.menu_id)
             .join(UserModel, UserModel.id == UserRolesModel.user_id)
             .where(
                 UserModel.tenant_id == self.auth.tenant_id,
                 UserModel.auth_source == "federated",
+                UserModel.is_deleted.is_(False),
                 RoleModel.tenant_id == self.auth.tenant_id,
                 RoleModel.status == 0,
+                RoleModel.is_deleted.is_(False),
                 RoleMenusModel.menu_id.in_(allowed_ids),
+                MenuModel.is_deleted.is_(False),
             )
             .distinct()
         )
@@ -85,6 +91,7 @@ class UserAuthorizationResolver:
             UserModel.tenant_id == self.auth.tenant_id,
             UserModel.auth_source == "federated",
             UserModel.is_superuser.is_(True),
+            UserModel.is_deleted.is_(False),
         )
         ids.update((await self.auth.db.scalars(super_stmt)).all())
         return ids
@@ -95,6 +102,7 @@ class UserAuthorizationResolver:
         stmt = select(UserModel.id).where(
             UserModel.tenant_id == self.auth.tenant_id,
             UserModel.auth_source == "federated",
+            UserModel.is_deleted.is_(False),
         )
         return set((await self.auth.db.scalars(stmt)).all())
 

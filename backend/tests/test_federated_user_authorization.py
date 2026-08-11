@@ -339,3 +339,37 @@ async def test_current_info_and_list_status_use_same_effective_menu_rule(
     allowed = await UserAuthorizationResolver(fixture.auth).authorized_federated_user_ids()
 
     assert bool(current.menus) is (fixture.authorized_user_id in allowed)
+
+
+@pytest.mark.asyncio
+async def test_soft_deleted_role_does_not_authorize_federated_user(db_session):
+    fixture = await seed_federated_authorization_fixture(db_session)
+    role = fixture.authorized_auth.user.roles[0]
+    role.is_deleted = True
+    await db_session.flush()
+    resolver = UserAuthorizationResolver(fixture.authorized_auth)
+
+    effective = await resolver.effective_menu_ids_for_user(
+        fixture.authorized_auth.user
+    )
+    authorized = await resolver.authorized_federated_user_ids()
+
+    assert effective == set()
+    assert fixture.authorized_user_id not in authorized
+
+
+@pytest.mark.asyncio
+async def test_soft_deleted_menu_does_not_authorize_federated_user(db_session):
+    fixture = await seed_federated_authorization_fixture(db_session)
+    menu = fixture.authorized_auth.user.roles[0].menus[0]
+    menu.is_deleted = True
+    await db_session.flush()
+    resolver = UserAuthorizationResolver(fixture.authorized_auth)
+
+    effective = await resolver.effective_menu_ids_for_user(
+        fixture.authorized_auth.user
+    )
+    authorized = await resolver.authorized_federated_user_ids()
+
+    assert effective == set()
+    assert fixture.authorized_user_id not in authorized
