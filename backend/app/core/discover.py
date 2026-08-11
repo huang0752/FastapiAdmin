@@ -360,11 +360,24 @@ def _purge_plugin_modules() -> None:
     prefix = "app.plugin.module_"
     purged: list[str] = []
     preserved_models: list[str] = []
+    preserved_stateful: list[str] = []
+    stateful_modules = (
+        "app.plugin.module_task.runtime",
+        *get_assembly().business_task_modules(),
+    )
     for mod_name in list(sys.modules):
         if not mod_name.startswith(prefix):
             continue
         if mod_name.rsplit(".", 1)[-1] in {"model", "models"}:
             preserved_models.append(mod_name)
+            continue
+        if any(
+            mod_name == stateful
+            or mod_name.startswith(f"{stateful}.")
+            or stateful.startswith(f"{mod_name}.")
+            for stateful in stateful_modules
+        ):
+            preserved_stateful.append(mod_name)
             continue
         del sys.modules[mod_name]
         purged.append(mod_name)
@@ -377,6 +390,11 @@ def _purge_plugin_modules() -> None:
         logger.info(
             "🧱 已保留 {} 个 ORM 模型模块；模型定义变更需重启进程",
             len(preserved_models),
+        )
+    if preserved_stateful:
+        logger.info(
+            "🧩 已保留 {} 个任务运行时模块；处理器变更需重启进程",
+            len(preserved_stateful),
         )
 
 
