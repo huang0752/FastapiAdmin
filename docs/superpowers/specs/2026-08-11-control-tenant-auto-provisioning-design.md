@@ -277,16 +277,20 @@ POST /control/provisioning/exchange
 
 ```json
 {
-  "provision_request_uuid": "...",
-  "central_tenant_uuid": "...",
+  "provision_request_uuid": "11111111-1111-4111-8111-111111111111",
+  "central_tenant_uuid": "22222222-2222-4222-8222-222222222222",
   "central_tenant_code": "ACME01",
   "tenant_name": "示例企业",
   "unified_social_credit_code": "91310000XXXXXXXXXX",
+  "contact_name": "企业联系人",
+  "contact_phone": "13800000000",
+  "contact_email": "contact@example.com",
+  "address": "企业地址",
   "site_code": "default",
   "target_tenant_code": "ACME01",
-  "target_package_code": "wms_pro",
+  "target_package_code": "wmspro",
   "owner": {
-    "central_user_uuid": "...",
+    "central_user_uuid": "33333333-3333-4333-8333-333333333333",
     "username": "ACME01_admin",
     "name": "示例企业管理员",
     "mobile": null,
