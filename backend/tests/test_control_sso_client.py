@@ -351,6 +351,32 @@ def test_control_exchange_accepts_standard_provider_response_envelope(test_clien
     assert response.json()["data"]["access_token"]
 
 
+def test_control_exchange_does_not_send_one_time_code_to_operation_log(
+    test_client, auth_headers, monkeypatch
+) -> None:
+    from app.core import router_class
+
+    subject = f"operation-log-{uuid.uuid4()}"
+    code = f"sso-{uuid.uuid4().hex}"
+    captured: list[dict] = []
+
+    async def capture(log_data: dict) -> None:
+        captured.append(log_data)
+
+    _enable_control_sso(monkeypatch, [_claims(subject)])
+    monkeypatch.setattr(settings, "OPERATION_LOG_RECORD", True)
+    monkeypatch.setattr(router_class, "_write_operation_log_async", capture)
+
+    response = test_client.post(
+        "/system/auth/control/exchange",
+        headers=auth_headers,
+        json={"code": code},
+    )
+
+    assert response.status_code == 200, response.text
+    assert all(code not in entry.get("request_payload", "") for entry in captured)
+
+
 def test_control_exchange_creates_shadow_user_membership_without_role(test_client, monkeypatch) -> None:
     subject = f"create-{uuid.uuid4()}"
     _enable_control_sso(monkeypatch, [_claims(subject)])

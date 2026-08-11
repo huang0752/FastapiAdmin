@@ -362,6 +362,32 @@ def test_tenant_provision_creates_federated_owner_without_local_admin(
     assert snapshot["local_admin"] is None
 
 
+def test_tenant_provision_does_not_send_one_time_code_to_operation_log(
+    test_client, auth_headers, monkeypatch
+) -> None:
+    from app.core import router_class
+
+    claims = _claims("operation-log")
+    code = f"provision-{uuid.uuid4().hex}"
+    captured: list[dict] = []
+
+    async def capture(log_data: dict) -> None:
+        captured.append(log_data)
+
+    _enable_provisioning(monkeypatch, [claims])
+    monkeypatch.setattr(settings, "OPERATION_LOG_RECORD", True)
+    monkeypatch.setattr(router_class, "_write_operation_log_async", capture)
+
+    response = test_client.post(
+        "/system/auth/control/tenant/provision",
+        headers=auth_headers,
+        json={"code": code},
+    )
+
+    assert response.status_code == 200, response.text
+    assert all(code not in entry.get("request_payload", "") for entry in captured)
+
+
 def test_repeated_provision_is_idempotent_and_does_not_exchange_twice_per_request(
     test_client, monkeypatch
 ) -> None:

@@ -39,6 +39,8 @@ class OperationLogRoute(APIRoute):
             start = time.time()
             response: Response = await original_route_handler(request)
 
+            if getattr(request.state, "skip_operation_log", False):
+                return response
             if not settings.OPERATION_LOG_RECORD or request.method not in settings.OPERATION_RECORD_METHOD:
                 return response
             route: APIRoute = request.scope.get("route", None)

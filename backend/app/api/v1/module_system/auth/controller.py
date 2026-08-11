@@ -72,6 +72,7 @@ async def control_sso_exchange_controller(
     redis: Annotated[Redis, Depends(redis_getter)],
     db: Annotated[AsyncSession, Depends(db_getter)],
 ) -> JSONResponse:
+    request.state.skip_operation_log = True
     if not settings.CONTROL_SSO_ENABLED:
         raise HTTPException(status_code=404, detail="中控 SSO 未启用")
     token = await ControlSSOClientService.exchange_and_login(request, db, redis, data.code)
@@ -88,6 +89,7 @@ async def control_tenant_provision_controller(
     data: ControlTenantProvisionIn,
     db: Annotated[AsyncSession, Depends(db_getter)],
 ) -> JSONResponse:
+    request.state.skip_operation_log = True
     if not settings.CONTROL_TENANT_PROVISIONING_ENABLED:
         raise HTTPException(status_code=404, detail="中控租户自动开户未启用")
     result = await ControlTenantProvisioningService.provision(
