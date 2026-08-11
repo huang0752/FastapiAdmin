@@ -132,6 +132,14 @@
         </FaDescriptions>
       </template>
       <template v-else>
+        <ElAlert
+          v-if="isEditingFederatedUser"
+          class="mb-4"
+          type="info"
+          title="身份资料由中控统一维护；本系统只维护部门、岗位和角色"
+          :closable="false"
+          show-icon
+        />
         <FaForm
           :key="userFormRenderKey"
           ref="dataFormRef"
@@ -210,7 +218,7 @@ defineOptions({
 
 import { h } from "vue";
 import { UserFilled } from "@element-plus/icons-vue";
-import { ElAvatar } from "element-plus";
+import { ElAvatar, ElTag } from "element-plus";
 import { DeviceEnum } from "@/enums/settings/device.enum";
 import { ResultEnum } from "@/enums/api/result.enum";
 import { useTable } from "@/hooks/core/useTable";
@@ -220,10 +228,20 @@ import { useCrudDialog } from "@/hooks/core/useCrudDialog";
 import { confirmDelete, confirmBatchDelete, confirmToggleStatus } from "@/hooks/core/useConfirm";
 import { cleanEmptyArrayParams, stripPaginationParams } from "@/utils/query";
 import UserAPI, {
+  type UserAuthSource,
   type UserForm,
   type UserInfo,
   type UserPageQuery,
 } from "@/api/module_system/user";
+import {
+  authorizationLabel,
+  buildUserReplaceParams,
+  isFederatedIdentityFieldReadonly,
+  isPendingFederatedUser,
+  shouldShowResetPassword,
+  sourceLabel,
+  type UserAuthorizationSearch,
+} from "./user-authorization";
 import {
   formatTree,
   renderTableOperationCell,
@@ -249,24 +267,7 @@ const { hasAuth } = useAuth();
 const appStore = useAppStore();
 const userStore = useUserStore();
 
-type UserSearchForm = {
-  username?: string;
-  name?: string;
-  status?: number;
-  created_id?: number;
-  created_time?: string[];
-};
-
-function buildUserReplaceParams(u: UserSearchForm): Record<string, unknown> {
-  return {
-    username: u.username,
-    name: u.name,
-    status: u.status,
-    created_id: u.created_id,
-    created_time:
-      Array.isArray(u.created_time) && u.created_time.length === 2 ? u.created_time : undefined,
-  };
-}
+type UserSearchForm = UserAuthorizationSearch;
 
 function fetchUserTableList(params: Record<string, unknown>) {
   return UserAPI.listUser({
@@ -290,8 +291,22 @@ function buildUserRowActions(
   }
 ): TableOperationAction[] {
   const sys = row.is_superuser === true;
-  const all: TableOperationAction[] = [
-    {
+  const all: TableOperationAction[] = [];
+  if (isPendingFederatedUser(row)) {
+    all.push({
+      key: "grant",
+      label: "去授权",
+      artType: "edit",
+      perm: "module_system:user:update",
+      disabled: sys,
+      run: () => {
+        if (sys) return;
+        ctx.onEdit(row.id!);
+      },
+    });
+  }
+  if (shouldShowResetPassword(row)) {
+    all.push({
       key: "resetPwd",
       label: "重置密码",
       artType: "edit",
@@ -302,7 +317,9 @@ function buildUserRowActions(
         if (sys) return;
         ctx.onResetPwd(row);
       },
-    },
+    });
+  }
+  all.push(
     {
       key: "detail",
       label: "详情",
@@ -331,8 +348,8 @@ function buildUserRowActions(
         if (sys) return;
         ctx.onDelete(row.id!);
       },
-    },
-  ];
+    }
+  );
   return all.filter((a) => a.perm != null && hasAuth(a.perm));
 }
 
@@ -356,7 +373,12 @@ const deptOptions = ref<OptionType[]>();
 const roleOptions = ref<Array<{ value: number; label: string; disabled?: boolean }>>();
 const positionOptions = ref<Array<{ value: number; label: string; disabled?: boolean }>>();
 const { importVisible, exportVisible, openImport, openExport } = useImportExport();
+const { dialogVisible } = useCrudDialog();
 const detailFormData = ref<UserInfo>({});
+const editingAuthSource = ref<UserAuthSource>();
+const isEditingFederatedUser = computed(
+  () => dialogVisible.type === "update" && editingAuthSource.value === "federated"
+);
 
 // 用户详情描述项配置 —— 数据驱动 + 关键字段用具名插槽覆盖
 const userDetailItems: DescriptionsItem[] = [
@@ -398,9 +420,22 @@ const userDialogFormItems = computed<FormItem[]>(() => [
     key: "username",
     label: "账号",
     type: "input",
-    props: { placeholder: "请输入账号", disabled: !!formData.value.id },
+    props: {
+      placeholder: "请输入账号",
+      disabled:
+        !!formData.value.id ||
+        isFederatedIdentityFieldReadonly("username", editingAuthSource.value),
+    },
   },
-  { key: "name", label: "用户名", type: "input", props: { placeholder: "请输入用户名" } },
+  {
+    key: "name",
+    label: "用户名",
+    type: "input",
+    props: {
+      placeholder: "请输入用户名",
+      disabled: isFederatedIdentityFieldReadonly("name", editingAuthSource.value),
+    },
+  },
   {
     key: "gender",
     label: "性别",
@@ -418,13 +453,21 @@ const userDialogFormItems = computed<FormItem[]>(() => [
     key: "mobile",
     label: "手机号",
     type: "input",
-    props: { placeholder: "请输入手机号码", maxlength: 11 },
+    props: {
+      placeholder: "请输入手机号码",
+      maxlength: 11,
+      disabled: isFederatedIdentityFieldReadonly("mobile", editingAuthSource.value),
+    },
   },
   {
     key: "email",
     label: "邮箱",
     type: "input",
-    props: { placeholder: "请输入邮箱", maxlength: 50 },
+    props: {
+      placeholder: "请输入邮箱",
+      maxlength: 50,
+      disabled: isFederatedIdentityFieldReadonly("email", editingAuthSource.value),
+    },
   },
   { key: "dept_id", label: "部门", type: "input" /* 实际渲染由 #dept_id 插槽接管 */ },
   { key: "role_ids", label: "角色", type: "input" /* 实际渲染由 #role_ids 插槽接管 */ },
@@ -442,6 +485,7 @@ const userDialogFormItems = computed<FormItem[]>(() => [
     label: "状态",
     type: "radiogroup",
     props: {
+      disabled: isFederatedIdentityFieldReadonly("status", editingAuthSource.value),
       options: [
         { label: "启用", value: 0 },
         { label: "停用", value: 1 },
@@ -466,6 +510,8 @@ const searchForm = ref<UserSearchForm>({
   username: undefined,
   name: undefined,
   status: undefined,
+  auth_source: undefined,
+  authorization_status: undefined,
   created_id: undefined,
   created_time: undefined,
 });
@@ -478,6 +524,16 @@ const statusOptions = ref([
   { label: "启用", value: 0 },
   { label: "停用", value: 1 },
 ]);
+
+const authSourceOptions = [
+  { label: "本地账号", value: "local" },
+  { label: "统一登录", value: "federated" },
+];
+
+const authorizationStatusOptions = [
+  { label: "待授权", value: "pending" },
+  { label: "已授权", value: "authorized" },
+];
 
 const userSearchItems = computed<SearchFormItem[]>(() => [
   {
@@ -503,6 +559,28 @@ const userSearchItems = computed<SearchFormItem[]>(() => [
     props: {
       placeholder: "请选择状态",
       options: statusOptions.value,
+      clearable: true,
+    },
+    span: 6,
+  },
+  {
+    label: "账号来源",
+    key: "auth_source",
+    type: "select",
+    props: {
+      placeholder: "请选择账号来源",
+      options: authSourceOptions,
+      clearable: true,
+    },
+    span: 6,
+  },
+  {
+    label: "授权状态",
+    key: "authorization_status",
+    type: "select",
+    props: {
+      placeholder: "请选择授权状态",
+      options: authorizationStatusOptions,
       clearable: true,
     },
     span: 6,
@@ -596,6 +674,33 @@ const {
       },
       { prop: "username", label: "账号", minWidth: 100, showOverflowTooltip: true },
       { prop: "name", label: "用户名", minWidth: 100, showOverflowTooltip: true },
+      {
+        prop: "auth_source",
+        label: "账号来源",
+        width: 104,
+        formatter: (row: UserInfo) =>
+          h(
+            ElTag,
+            { type: row.auth_source === "federated" ? "primary" : "info", effect: "plain" },
+            () => sourceLabel(row.auth_source)
+          ),
+      },
+      {
+        prop: "authorization_status",
+        label: "授权状态",
+        width: 104,
+        formatter: (row: UserInfo) => {
+          if (row.auth_source !== "federated") return authorizationLabel(null);
+          return h(
+            ElTag,
+            {
+              type: row.authorization_status === "authorized" ? "success" : "warning",
+              effect: "plain",
+            },
+            () => authorizationLabel(row.authorization_status)
+          );
+        },
+      },
       {
         prop: "status",
         label: "状态",
@@ -710,8 +815,6 @@ const formData = ref<UserForm>({
   description: undefined,
 });
 
-const { dialogVisible } = useCrudDialog();
-
 const rules = reactive({
   username: [{ required: true, message: "请输入账号", trigger: "blur" }],
   name: [{ required: true, message: "请输入用户名", trigger: "blur" }],
@@ -765,6 +868,8 @@ function onResetSearch() {
     username: undefined,
     name: undefined,
     status: undefined,
+    auth_source: undefined,
+    authorization_status: undefined,
     created_id: undefined,
     created_time: undefined,
   };
@@ -800,6 +905,7 @@ async function resetForm() {
     dataFormRef.value.clearValidate();
   }
   Object.assign(formData.value, initialFormData);
+  editingAuthSource.value = undefined;
 }
 
 async function handleCloseDialog() {
@@ -825,6 +931,7 @@ async function handleOpenDialog(type: "create" | "update" | "detail", id?: numbe
       Object.assign(detailFormData.value, response.data.data ?? {});
     } else if (type === "update") {
       dialogVisible.title = "修改用户";
+      editingAuthSource.value = response.data.data.auth_source;
       Object.assign(formData.value, response.data.data);
       formData.value.role_ids = (response.data.data.roles || []).map((item) => item.id as number);
       formData.value.position_ids = (response.data.data.positions || []).map(
@@ -834,6 +941,7 @@ async function handleOpenDialog(type: "create" | "update" | "detail", id?: numbe
   } else {
     dialogVisible.title = "新增用户";
     Object.assign(formData.value, initialFormData);
+    editingAuthSource.value = undefined;
     formData.value.id = undefined;
     userFormRenderKey.value += 1;
   }

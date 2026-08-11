@@ -188,12 +188,17 @@ export interface RegisterForm {
   email?: string;
 }
 
+export type UserAuthSource = "local" | "federated";
+export type UserAuthorizationStatus = "pending" | "authorized";
+
 export interface UserPageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {
   username?: string;
   name?: string;
   mobile?: string;
   email?: string;
   dept_id?: number;
+  auth_source?: UserAuthSource;
+  authorization_status?: UserAuthorizationStatus;
 }
 
 export interface searchSelectDataType {
@@ -231,6 +236,9 @@ export interface UserInfo extends BaseType {
   qq_login?: string;
   status?: number;
   description?: string;
+  auth_source?: UserAuthSource;
+  password_login_enabled?: boolean;
+  authorization_status?: UserAuthorizationStatus | null;
 }
 
 export interface deptTreeType {
