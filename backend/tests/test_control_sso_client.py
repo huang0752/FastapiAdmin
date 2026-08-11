@@ -7,6 +7,10 @@ import httpx
 from sqlalchemy import UniqueConstraint, func, select
 
 from app.api.v1.module_platform.tenant.model import TenantUserModel
+from app.api.v1.module_system.auth.federated_identity_service import (
+    FederatedIdentityService,
+    FederatedUserProfile,
+)
 from app.api.v1.module_system.auth.model import FederatedIdentityModel
 from app.api.v1.module_system.user.model import UserModel, UserRolesModel
 from app.api.v1.module_system.user.schema import UserOutSchema
@@ -149,6 +153,120 @@ async def _set_legacy_synthetic_username(subject: str) -> None:
         await db.commit()
 
 
+async def _rollback_new_federated_identity(subject: str) -> tuple[int, int, int]:
+    async with async_db_session() as db:
+        user = await FederatedIdentityService.upsert_user_and_membership(
+            db=db,
+            site_id=1,
+            issuer="https://control.example/api/v1",
+            tenant_id=2,
+            profile=FederatedUserProfile(
+                central_user_uuid=subject,
+                name="联邦负责人",
+                mobile=None,
+                email=None,
+                avatar=None,
+                status=0,
+            ),
+        )
+        assert user.id is not None
+        user_id = user.id
+        await db.rollback()
+
+    async with async_db_session() as db:
+        identity_count = (
+            await db.execute(
+                select(func.count()).select_from(FederatedIdentityModel).where(
+                    FederatedIdentityModel.issuer == "https://control.example/api/v1",
+                    FederatedIdentityModel.central_user_uuid == subject,
+                )
+            )
+        ).scalar_one()
+        user_count = (
+            await db.execute(select(func.count()).select_from(UserModel).where(UserModel.id == user_id))
+        ).scalar_one()
+        membership_count = (
+            await db.execute(select(func.count()).select_from(TenantUserModel).where(TenantUserModel.user_id == user_id))
+        ).scalar_one()
+        return user_count, identity_count, membership_count
+
+
+async def _rollback_reused_federated_identity(subject: str) -> tuple[str, int, bool]:
+    initial_profile = FederatedUserProfile(
+        central_user_uuid=subject,
+        name="初始姓名",
+        mobile=None,
+        email=None,
+        avatar=None,
+        status=0,
+    )
+    async with async_db_session() as db:
+        await FederatedIdentityService.upsert_user_and_membership(
+            db=db,
+            site_id=1,
+            issuer="https://control.example/api/v1",
+            tenant_id=2,
+            profile=initial_profile,
+        )
+        await db.commit()
+
+    async with async_db_session() as db:
+        original_last_login_time = (
+            await db.execute(
+                select(FederatedIdentityModel.last_login_time).where(
+                    FederatedIdentityModel.issuer == "https://control.example/api/v1",
+                    FederatedIdentityModel.central_user_uuid == subject,
+                )
+            )
+        ).scalar_one()
+        await FederatedIdentityService.upsert_user_and_membership(
+            db=db,
+            site_id=1,
+            issuer="https://control.example/api/v1",
+            tenant_id=1,
+            profile=FederatedUserProfile(
+                central_user_uuid=subject,
+                name="不应提交的新姓名",
+                mobile="13900001111",
+                email="rollback@example.com",
+                avatar=None,
+                status=0,
+            ),
+        )
+        await db.rollback()
+
+    async with async_db_session() as db:
+        identity = (
+            await db.execute(
+                select(FederatedIdentityModel).where(
+                    FederatedIdentityModel.issuer == "https://control.example/api/v1",
+                    FederatedIdentityModel.central_user_uuid == subject,
+                )
+            )
+        ).scalar_one()
+        user = (await db.execute(select(UserModel).where(UserModel.id == identity.local_user_id))).scalar_one()
+        membership_count = (
+            await db.execute(select(func.count()).select_from(TenantUserModel).where(TenantUserModel.user_id == user.id))
+        ).scalar_one()
+        return user.name, membership_count, identity.last_login_time == original_last_login_time
+
+
+def test_federated_identity_primitive_flushes_new_records_without_committing() -> None:
+    subject = f"primitive-create-{uuid.uuid4()}"
+
+    assert asyncio.run(_rollback_new_federated_identity(subject)) == (0, 0, 0)
+
+
+def test_federated_identity_primitive_flushes_reuse_without_committing() -> None:
+    subject = f"primitive-reuse-{uuid.uuid4()}"
+
+    name, membership_count, identity_unchanged = asyncio.run(_rollback_reused_federated_identity(subject))
+
+    assert name == "初始姓名"
+    assert membership_count == 1
+    assert identity_unchanged is True
+
+
 def test_control_exchange_returns_404_when_disabled(test_client, monkeypatch) -> None:
     monkeypatch.setattr(settings, "CONTROL_SSO_ENABLED", False, raising=False)
 
@@ -215,7 +333,7 @@ def test_control_exchange_reuses_identity_and_updates_profile(test_client, monke
 
     first_response = test_client.post("/system/auth/control/exchange", json={"code": "a" * 20})
     asyncio.run(_set_legacy_synthetic_username(subject))
-    asyncio.run(_set_membership_role(subject, "admin"))
+    asyncio.run(_set_membership_role(subject, "owner"))
     second_response = test_client.post("/system/auth/control/exchange", json={"code": "b" * 20})
 
     assert first_response.status_code == second_response.status_code == 200
@@ -232,7 +350,7 @@ def test_control_exchange_reuses_identity_and_updates_profile(test_client, monke
                 await db.execute(select(TenantUserModel.role).where(TenantUserModel.user_id == user.id))
             ).scalar_one()
 
-    assert asyncio.run(membership_role()) == "admin"
+    assert asyncio.run(membership_role()) == "owner"
 
 
 def test_concurrent_exchange_creates_one_identity(test_client, monkeypatch) -> None:
