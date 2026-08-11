@@ -272,6 +272,8 @@ class BusinessTaskDispatcher:
 
     async def recover_pending(self, *, limit: int = 100) -> int:
         """扫描 commit 后未发布/发布失败任务并使用原 ID 安全重投。"""
+        if self.registry is business_task_registry:
+            load_business_task_modules()
         async with self.session_factory() as db:
             task_ids = (
                 await db.execute(

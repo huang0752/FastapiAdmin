@@ -403,6 +403,77 @@ async def test_prepare_commit_can_publish_and_recovery_can_publish_pending(test_
 
 
 @pytest.mark.asyncio
+async def test_default_recovery_loads_handlers_before_scanning_after_cold_start(
+    test_client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy import select
+
+    from app.core.database import async_db_session
+    from app.plugin.module_task.business.task.model import BusinessTaskModel
+    from app.plugin.module_task.runtime import dispatcher as dispatcher_module
+    from app.plugin.module_task.runtime.dispatcher import BusinessTaskDispatcher, DispatchRequest
+    from app.plugin.module_task.runtime.registry import business_task_registry
+
+    _ = test_client
+    publisher = _RecordingPublisher()
+    dispatcher = BusinessTaskDispatcher(publisher=publisher)
+    monkeypatch.setattr(dispatcher_module.settings, "CELERY_ENABLED", True)
+    business_task_registry.clear()
+    business_task_registry.register(
+        handler_code="sample.cold_start_recovery",
+        handler=_sample_handler,
+        module="sample",
+        payload_schema=_SamplePayload,
+    )
+    db, auth = await _runtime_auth()
+    try:
+        pending = await dispatcher.prepare(
+            auth=auth,
+            request=DispatchRequest(
+                handler_code="sample.cold_start_recovery",
+                biz_type="prepare",
+                payload={"value": 4},
+                idempotency_key="cold-start-recovery",
+            ),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    business_task_registry.clear()
+    load_calls = 0
+
+    def load_cold_start_handlers() -> tuple[str, ...]:
+        nonlocal load_calls
+        load_calls += 1
+        business_task_registry.register(
+            handler_code="sample.cold_start_recovery",
+            handler=_sample_handler,
+            module="sample",
+            payload_schema=_SamplePayload,
+        )
+        return ("tests.cold_start_tasks",)
+
+    monkeypatch.setattr(dispatcher_module, "load_business_task_modules", load_cold_start_handlers)
+    try:
+        recovered = await dispatcher.recover_pending()
+        async with async_db_session() as check_db:
+            status = (
+                await check_db.execute(
+                    select(BusinessTaskModel.status).where(BusinessTaskModel.id == pending.id)
+                )
+            ).scalar_one()
+    finally:
+        business_task_registry.clear()
+
+    assert load_calls == 1
+    assert recovered == 1
+    assert status == "queued"
+    assert [message["business_task_id"] for message in publisher.messages] == [pending.id]
+
+
+@pytest.mark.asyncio
 async def test_broker_failure_is_recorded_as_recoverable(test_client, monkeypatch: pytest.MonkeyPatch) -> None:
     from sqlalchemy import select
 
