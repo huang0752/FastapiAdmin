@@ -294,7 +294,7 @@ export interface TenantUpdateForm extends BaseFormType {
   contact_name?: string;
   contact_phone?: string;
   contact_email?: string;
-  unified_social_credit_code?: string;
+  unified_social_credit_code?: string | null;
   address?: string;
   domain?: string;
   logo_url?: string;

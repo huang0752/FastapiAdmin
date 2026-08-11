@@ -237,7 +237,11 @@ import TenantAPI, {
   type TenantUpdateForm,
 } from "@/api/module_platform/tenant";
 import TenantInitialAdminDialog from "./TenantInitialAdminDialog.vue";
-import { normalizeCreditCode, validateCreditCode } from "./credit-code";
+import {
+  normalizeCreditCode,
+  normalizeCreditCodeForUpdate,
+  validateCreditCode,
+} from "./credit-code";
 import PackageAPI from "@/api/module_platform/package";
 import SiteAPI from "@/api/module_platform/site";
 import { useAuth } from "@/hooks/core/useAuth";
@@ -958,7 +962,9 @@ async function handleSubmit() {
         contact_name: formData.value.contact_name,
         contact_phone: formData.value.contact_phone,
         contact_email: formData.value.contact_email,
-        unified_social_credit_code: normalizeCreditCode(formData.value.unified_social_credit_code),
+        unified_social_credit_code: normalizeCreditCodeForUpdate(
+          formData.value.unified_social_credit_code
+        ),
         address: formData.value.address,
         domain: formData.value.domain,
         logo_url: formData.value.logo_url,

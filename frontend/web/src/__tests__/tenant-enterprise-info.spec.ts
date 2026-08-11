@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   normalizeCreditCode,
+  normalizeCreditCodeForUpdate,
   validateCreditCode,
 } from "@/views/module_platform/tenant/credit-code";
 
@@ -28,20 +29,29 @@ describe("tenant enterprise information contract", () => {
     expect(validateCreditCode("91350100M000100Y4")).toBe(false);
   });
 
+  it("serializes a cleared credit code as an explicit null update", () => {
+    const payload = {
+      unified_social_credit_code: normalizeCreditCodeForUpdate(" "),
+    };
+
+    expect(payload.unified_social_credit_code).toBeNull();
+    expect(JSON.parse(JSON.stringify(payload))).toEqual({
+      unified_social_credit_code: null,
+    });
+    expect(normalizeCreditCodeForUpdate(" 91350100m000100y43 ")).toBe(VALID_CREDIT_CODE);
+  });
+
   it("exposes the credit code in every tenant API contract", () => {
     const source = readSource("src/api/module_platform/tenant.ts");
 
-    for (const contract of [
-      "TenantPageQuery",
-      "TenantTable",
-      "TenantForm",
-      "TenantCreateForm",
-      "TenantUpdateForm",
-    ]) {
+    for (const contract of ["TenantPageQuery", "TenantTable", "TenantForm", "TenantCreateForm"]) {
       const block = source.match(new RegExp(`interface ${contract}[^}]+}`))?.[0];
       expect(block, `${contract} should exist`).toBeDefined();
       expect(block).toContain("unified_social_credit_code?: string;");
     }
+
+    const updateBlock = source.match(/interface TenantUpdateForm[^}]+}/)?.[0];
+    expect(updateBlock).toContain("unified_social_credit_code?: string | null;");
   });
 
   it("supports exact search, list, detail, create and update without a product wizard", () => {
@@ -53,11 +63,12 @@ describe("tenant enterprise information contract", () => {
     expect(source).toMatch(
       /unified_social_credit_code:\s*normalizeCreditCode\(p\.unified_social_credit_code\)/
     );
-    expect(
-      source.match(
-        /unified_social_credit_code:\s*normalizeCreditCode\(\s*formData\.value\.unified_social_credit_code\s*\)/g
-      )
-    ).toHaveLength(2);
+    expect(source).toMatch(
+      /unified_social_credit_code:\s*normalizeCreditCodeForUpdate\(\s*formData\.value\.unified_social_credit_code\s*\)/
+    );
+    expect(source).toMatch(
+      /unified_social_credit_code:\s*normalizeCreditCode\(\s*formData\.value\.unified_social_credit_code\s*\)/
+    );
     expect(source).not.toContain("产品与套餐");
     expect(source).not.toContain("provisioning");
   });

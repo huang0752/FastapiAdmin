@@ -6,6 +6,10 @@ export function normalizeCreditCode(value?: string | null): string | undefined {
   return normalized || undefined;
 }
 
+export function normalizeCreditCodeForUpdate(value?: string | null): string | null {
+  return normalizeCreditCode(value) ?? null;
+}
+
 export function validateCreditCode(value?: string | null): boolean {
   const normalized = normalizeCreditCode(value);
   if (!normalized) return true;
