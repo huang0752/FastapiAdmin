@@ -108,9 +108,65 @@ def test_empty_postgresql_database_can_upgrade_and_downgrade() -> None:
                 """
             )
             user_columns = {row[0] for row in cursor.fetchall()}
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'platform_tenant'
+                """
+            )
+            tenant_columns = {row[0] for row in cursor.fetchall()}
         assert {"platform_tenant", "platform_package", "platform_site", "sys_user"} <= tables
         assert "sys_federated_identity" in tables
+        assert "platform_federated_tenant" in tables
         assert {"auth_source", "password_login_enabled"} <= user_columns
+        assert "unified_social_credit_code" in tenant_columns
+
+        downgrade_tenant_provisioning = _run_alembic(database_name, "downgrade", "20260810_01")
+        assert downgrade_tenant_provisioning.returncode == 0, f"{downgrade_tenant_provisioning.stdout}\n{downgrade_tenant_provisioning.stderr}"
+
+        with psycopg.connect(**_connection_kwargs(database_name)) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                """
+            )
+            downgraded_tables = {row[0] for row in cursor.fetchall()}
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'platform_tenant'
+                """
+            )
+            downgraded_tenant_columns = {row[0] for row in cursor.fetchall()}
+        assert "platform_federated_tenant" not in downgraded_tables
+        assert "unified_social_credit_code" not in downgraded_tenant_columns
+
+        reupgrade_tenant_provisioning = _run_alembic(database_name, "upgrade", "head")
+        assert reupgrade_tenant_provisioning.returncode == 0, f"{reupgrade_tenant_provisioning.stdout}\n{reupgrade_tenant_provisioning.stderr}"
+
+        with psycopg.connect(**_connection_kwargs(database_name)) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                """
+            )
+            reupgraded_tables = {row[0] for row in cursor.fetchall()}
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'platform_tenant'
+                """
+            )
+            reupgraded_tenant_columns = {row[0] for row in cursor.fetchall()}
+        assert "platform_federated_tenant" in reupgraded_tables
+        assert "unified_social_credit_code" in reupgraded_tenant_columns
 
         downgrade_sso_client = _run_alembic(database_name, "downgrade", "20260807_01")
         assert downgrade_sso_client.returncode == 0, f"{downgrade_sso_client.stdout}\n{downgrade_sso_client.stderr}"

@@ -37,7 +37,14 @@ class TenantModel(ModelMixin):
     """
 
     __tablename__: str = "platform_tenant"
-    __table_args__: dict[str, str] = {"comment": "租户表"}
+    __table_args__ = (
+        UniqueConstraint(
+            "site_id",
+            "unified_social_credit_code",
+            name="uq_platform_tenant_site_uscc",
+        ),
+        {"comment": "租户表"},
+    )
     __permission_strategy__: PermissionFilterStrategy = PermissionFilterStrategy.DATA_SCOPE
 
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, comment="租户名称")
@@ -46,6 +53,12 @@ class TenantModel(ModelMixin):
     contact_phone: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None, comment="联系人电话")
     contact_email: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None, comment="联系人邮箱")
     address: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None, comment="地址")
+    unified_social_credit_code: Mapped[str | None] = mapped_column(
+        String(18),
+        nullable=True,
+        default=None,
+        comment="统一社会信用代码",
+    )
     domain: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None, comment="域名")
     logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None, comment="Logo URL")
     sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="排序")

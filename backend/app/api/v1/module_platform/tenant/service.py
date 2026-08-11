@@ -173,6 +173,31 @@ class TenantService:
     def __init__(self, auth: AuthSchema) -> None:
         self.auth = auth
 
+    async def _ensure_uscc_available(
+        self,
+        *,
+        site_id: int,
+        unified_social_credit_code: str | None,
+        exclude_tenant_id: int | None = None,
+    ) -> None:
+        """在数据库约束前返回稳定、可理解的同站点信用代码冲突。"""
+        if unified_social_credit_code is None:
+            return
+        conditions = [
+            TenantModel.site_id == site_id,
+            TenantModel.unified_social_credit_code == unified_social_credit_code,
+        ]
+        if exclude_tenant_id is not None:
+            conditions.append(TenantModel.id != exclude_tenant_id)
+        existing_id = (
+            await self.auth.db.execute(sa.select(TenantModel.id).where(*conditions).limit(1))
+        ).scalar_one_or_none()
+        if existing_id is not None:
+            raise CustomException(
+                msg="统一社会信用代码在当前站点已存在",
+                status_code=400,
+            )
+
     async def _replace_tenant_member_rbac(self, tenant_id: int, user_id: int, role_code: str) -> None:
         """让成员身份成为租户内 RBAC 绑定的唯一事实来源。"""
         from app.api.v1.module_platform.package.service import PackageService
@@ -497,6 +522,10 @@ class TenantService:
             raise CustomException(msg="创建失败，名称已存在")
         if await TenantCRUD(self.auth).get(code=data.code):
             raise CustomException(msg="创建失败，编码已存在")
+        await self._ensure_uscc_available(
+            site_id=data.site_id,
+            unified_social_credit_code=data.unified_social_credit_code,
+        )
 
         tenant_obj = await TenantCRUD(self.auth).create(data=data)
         if not tenant_obj:
@@ -605,6 +634,16 @@ class TenantService:
             exist = await TenantCRUD(self.auth).get(code=data.code)
             if exist and exist.id != id:
                 raise CustomException(msg="更新失败，编码重复")
+        target_uscc = (
+            data.unified_social_credit_code
+            if "unified_social_credit_code" in data.model_fields_set
+            else obj.unified_social_credit_code
+        )
+        await self._ensure_uscc_available(
+            site_id=target_site_id,
+            unified_social_credit_code=target_uscc,
+            exclude_tenant_id=id,
+        )
 
         update_data = data.model_dump(exclude_unset=True, exclude={"package_id"})
         updated = await TenantCRUD(self.auth).update(id=id, data=update_data)

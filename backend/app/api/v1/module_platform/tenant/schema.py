@@ -8,6 +8,7 @@ from app.core.base_params import BaseQueryParam
 from app.core.base_schema import BaseSchema
 from app.core.validator import DateTimeStr, email_validator, mobile_validator
 
+from .credit_code import validate_unified_social_credit_code
 from .model import TENANT_STATUS_DESCRIPTION, TenantStatus
 
 
@@ -23,6 +24,11 @@ class TenantBaseSchema(BaseModel):
     contact_phone: str | None = Field(default=None, max_length=20, description="联系人电话")
     contact_email: str | None = Field(default=None, max_length=128, description="联系人邮箱")
     address: str | None = Field(default=None, max_length=255, description="地址")
+    unified_social_credit_code: str | None = Field(
+        default=None,
+        max_length=18,
+        description="统一社会信用代码",
+    )
     domain: str | None = Field(default=None, max_length=255, description="域名")
     logo_url: str | None = Field(default=None, max_length=500, description="Logo URL")
     sort: int = Field(default=0, ge=0, description="排序")
@@ -68,6 +74,11 @@ class TenantBaseSchema(BaseModel):
             return v
         return email_validator(v)
 
+    @field_validator("unified_social_credit_code", mode="before")
+    @classmethod
+    def _validate_unified_social_credit_code(cls, v: str | None) -> str | None:
+        return validate_unified_social_credit_code(v)
+
     @model_validator(mode="after")
     def _validate_time_range(self):
         if self.start_time and self.end_time and self.start_time > self.end_time:
@@ -107,6 +118,11 @@ class TenantUpdateSchema(TenantBaseSchema):
     contact_phone: str | None = Field(default=None, max_length=20, description="联系人电话")
     contact_email: str | None = Field(default=None, max_length=128, description="联系人邮箱")
     address: str | None = Field(default=None, max_length=255, description="地址")
+    unified_social_credit_code: str | None = Field(
+        default=None,
+        max_length=18,
+        description="统一社会信用代码",
+    )
     domain: str | None = Field(default=None, max_length=255, description="域名")
     logo_url: str | None = Field(default=None, max_length=500, description="Logo URL")
     sort: int | None = Field(default=None, ge=0, description="排序")
@@ -210,6 +226,7 @@ class TenantQueryParam(BaseQueryParam):
 
     name: str | None = Query(None, description="租户名称")
     code: str | None = Query(None, description="租户编码")
+    unified_social_credit_code: str | None = Query(None, description="统一社会信用代码")
     status: int | None = Query(
         None,
         ge=TenantStatus.ACTIVE,
@@ -222,6 +239,11 @@ class TenantQueryParam(BaseQueryParam):
             self.name = (QueueEnum.like.value, self.name)
         if self.code:
             self.code = (QueueEnum.like.value, self.code)
+        if self.unified_social_credit_code:
+            self.unified_social_credit_code = (
+                QueueEnum.eq.value,
+                validate_unified_social_credit_code(self.unified_social_credit_code),
+            )
         if isinstance(self.status, int):
             try:
                 TenantStatus(self.status)
