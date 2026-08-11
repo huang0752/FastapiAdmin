@@ -15,6 +15,7 @@ from app.api.v1.module_system.position.model import PositionModel
 from app.api.v1.module_system.role.model import RoleMenusModel, RoleModel
 from app.api.v1.module_system.user.authorization import UserAuthorizationResolver
 from app.api.v1.module_system.user.model import UserModel, UserPositionsModel, UserRolesModel
+from app.api.v1.module_system.user.schema import UserAuthorizationStatus, UserQueryParam
 from app.api.v1.module_system.user.service import UserService
 from app.core.base_schema import AuthSchema
 from app.core.database import async_db_session
@@ -373,3 +374,123 @@ async def test_soft_deleted_menu_does_not_authorize_federated_user(db_session):
 
     assert effective == set()
     assert fixture.authorized_user_id not in authorized
+
+
+@pytest.mark.asyncio
+async def test_user_page_exposes_federated_authorization_status(
+    federated_authorization_fixture,
+    monkeypatch,
+):
+    fixture = federated_authorization_fixture
+    monkeypatch.setattr(
+        "app.api.v1.module_system.user.authorization.filter_menu_tree_by_assembly",
+        _filter_test_assembly,
+    )
+
+    result = await UserService(fixture.auth).page(
+        page_no=1,
+        page_size=20,
+        search=UserQueryParam(auth_source="federated"),
+    )
+
+    by_name = {item["username"]: item for item in result.items}
+    assert result.total == 4
+    assert by_name[fixture.authorized_username]["authorization_status"] == "authorized"
+    assert by_name[fixture.pending_username]["authorization_status"] == "pending"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("authorization_status", "expected_total", "expected_username"),
+    [
+        (UserAuthorizationStatus.AUTHORIZED, 1, "authorized_username"),
+        (UserAuthorizationStatus.PENDING, 3, "pending_username"),
+    ],
+)
+async def test_user_page_filters_authorization_status_before_pagination(
+    federated_authorization_fixture,
+    monkeypatch,
+    authorization_status,
+    expected_total,
+    expected_username,
+):
+    fixture = federated_authorization_fixture
+    monkeypatch.setattr(
+        "app.api.v1.module_system.user.authorization.filter_menu_tree_by_assembly",
+        _filter_test_assembly,
+    )
+
+    result = await UserService(fixture.auth).page(
+        page_no=1,
+        page_size=1,
+        search=UserQueryParam(authorization_status=authorization_status),
+    )
+
+    assert result.total == expected_total
+    assert len(result.items) == 1
+    assert result.items[0]["auth_source"] == "federated"
+    assert result.items[0]["authorization_status"] == authorization_status
+    assert result.items[0]["username"] == getattr(fixture, expected_username)
+
+
+@pytest.mark.asyncio
+async def test_local_user_authorization_status_is_null(
+    federated_authorization_fixture,
+):
+    fixture = federated_authorization_fixture
+
+    result = await UserService(fixture.auth).page(
+        page_no=1,
+        page_size=20,
+        search=UserQueryParam(auth_source="local"),
+    )
+
+    assert result.total == 1
+    assert all(item["authorization_status"] is None for item in result.items)
+
+
+@pytest.mark.asyncio
+async def test_user_page_authorization_status_is_tenant_scoped(
+    db_session,
+    monkeypatch,
+):
+    first = await seed_federated_authorization_fixture(db_session)
+    second = await seed_federated_authorization_fixture(db_session)
+    monkeypatch.setattr(
+        "app.api.v1.module_system.user.authorization.filter_menu_tree_by_assembly",
+        _filter_test_assembly,
+    )
+
+    result = await UserService(first.auth).page(
+        page_no=1,
+        page_size=20,
+        search=UserQueryParam(auth_source="federated"),
+    )
+
+    usernames = {item["username"] for item in result.items}
+    assert result.total == 4
+    assert first.authorized_username in usernames
+    assert second.authorized_username not in usernames
+
+
+@pytest.mark.asyncio
+async def test_authorized_filter_with_empty_include_ids_returns_empty_page(
+    federated_authorization_fixture,
+    monkeypatch,
+):
+    fixture = federated_authorization_fixture
+    monkeypatch.setattr(
+        "app.api.v1.module_system.user.authorization.filter_menu_tree_by_assembly",
+        lambda items, *, audience=None: [],
+    )
+
+    result = await UserService(fixture.auth).page(
+        page_no=1,
+        page_size=20,
+        search=UserQueryParam(
+            authorization_status=UserAuthorizationStatus.AUTHORIZED,
+        ),
+    )
+
+    assert result.total == 0
+    assert result.items == []

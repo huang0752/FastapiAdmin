@@ -31,6 +31,7 @@ from .model import UserModel
 from .schema import (
     CurrentUserUpdateSchema,
     ResetPasswordSchema,
+    UserAuthorizationStatus,
     UserChangePasswordSchema,
     UserCreateSchema,
     UserForgetPasswordEmailCodeSchema,
@@ -132,13 +133,36 @@ class UserService:
         order_by: list[dict[str, str]] | None = None,
     ) -> dict:
         offset = (page_no - 1) * page_size
-        return await UserCRUD(self.auth).page(
+        authorization_status = search.authorization_status if search else None
+        search_dict = vars(search).copy() if search else {}
+        search_dict.pop("authorization_status", None)
+
+        resolver = UserAuthorizationResolver(self.auth)
+        authorized_ids = await resolver.authorized_federated_user_ids()
+        include_ids: set[int] | None = None
+        if authorization_status == UserAuthorizationStatus.AUTHORIZED:
+            search_dict["auth_source"] = "federated"
+            include_ids = authorized_ids
+        elif authorization_status == UserAuthorizationStatus.PENDING:
+            search_dict["auth_source"] = "federated"
+            federated_ids = await resolver.federated_user_ids()
+            include_ids = federated_ids - authorized_ids
+
+        result = await UserCRUD(self.auth).page_with_user_ids(
             offset=offset,
             limit=page_size,
             order_by=order_by or [{"id": "asc"}],
-            search=vars(search) if search else None,
-            out_schema=UserOutSchema,
+            search=search_dict,
+            include_ids=include_ids,
         )
+        for item in result.items:
+            if item["auth_source"] == "federated":
+                item["authorization_status"] = (
+                    UserAuthorizationStatus.AUTHORIZED
+                    if item["id"] in authorized_ids
+                    else UserAuthorizationStatus.PENDING
+                )
+        return result
 
     async def create(self, data: UserCreateSchema) -> UserOutSchema:
         if not data.username:

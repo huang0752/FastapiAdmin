@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from enum import StrEnum
 from urllib.parse import urlparse
 
 from fastapi import Query
@@ -336,6 +337,13 @@ class UserUpdateSchema(CurrentUserUpdateSchema):
         return value
 
 
+class UserAuthorizationStatus(StrEnum):
+    """联邦账号在目标系统的本地授权状态。"""
+
+    PENDING = "pending"
+    AUTHORIZED = "authorized"
+
+
 class UserOutSchema(UserUpdateSchema, BaseSchema, UserBySchema, TenantBySchema):
     """响应"""
 
@@ -344,6 +352,10 @@ class UserOutSchema(UserUpdateSchema, BaseSchema, UserBySchema, TenantBySchema):
     username: str | None = Field(default=None, max_length=32, description="用户名")
     password: str | None = Field(default=None, exclude=True, description="密码哈希（不对外返回）")
     auth_source: str = Field(default="local", description="认证来源")
+    authorization_status: UserAuthorizationStatus | None = Field(
+        default=None,
+        description="联邦账号在当前租户的本地菜单授权状态",
+    )
     password_login_enabled: bool = Field(default=True, description="是否允许密码登录")
 
     tenant_id: int | None = Field(
@@ -384,6 +396,8 @@ class UserQueryParam(BaseQueryParam, UserByQueryParam, TenantByQueryParam):
     )
     dept_id: int | None = Query(None, description="部门ID")
     status: int | None = Query(None, description="是否可用")
+    auth_source: str | None = Query(None, pattern=r"^(local|federated)$")
+    authorization_status: UserAuthorizationStatus | None = Query(None)
 
     def __post_init__(self) -> None:
         self.username = (QueueEnum.like.value, self.username)

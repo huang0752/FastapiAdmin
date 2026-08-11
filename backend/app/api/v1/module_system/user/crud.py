@@ -9,6 +9,7 @@ from .login_identifier import sync_user_login_identifiers
 from .model import UserModel
 from .schema import (
     UserCreateSchema,
+    UserOutSchema,
     UserUpdateSchema,
 )
 
@@ -30,6 +31,27 @@ class UserCRUD(CRUDBase[UserModel, UserCreateSchema, UserUpdateSchema]):
         if changed_fields & {"username", "email", "mobile"}:
             await sync_user_login_identifiers(self.db, user)
         return user
+
+    async def page_with_user_ids(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        order_by: list[dict[str, str]],
+        search: dict,
+        include_ids: set[int] | None = None,
+    ):
+        """在数据库分页前按用户 ID 集合收窄查询。"""
+        scoped = dict(search)
+        if include_ids is not None:
+            scoped["id"] = ("in", sorted(include_ids) or [-1])
+        return await self.page(
+            offset=offset,
+            limit=limit,
+            order_by=order_by,
+            search=scoped,
+            out_schema=UserOutSchema,
+        )
 
     async def update_last_login(self, id: int) -> None:
         """
