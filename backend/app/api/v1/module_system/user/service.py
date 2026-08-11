@@ -11,7 +11,6 @@ from sqlalchemy import select
 from app.api.v1.module_platform.email.service import EmailSendService
 from app.api.v1.module_platform.menu.crud import MenuCRUD
 from app.api.v1.module_platform.menu.schema import MenuOutSchema
-from app.api.v1.module_platform.package.service import PackageService
 from app.api.v1.module_platform.tenant.model import TenantUserModel
 from app.api.v1.module_platform.tenant.service import TenantService
 from app.api.v1.module_system.dept.crud import DeptCRUD
@@ -26,6 +25,7 @@ from app.utils.common_util import traversal_to_tree
 from app.utils.excel_util import ExcelUtil
 from app.utils.hash_bcrpy_util import PwdUtil
 
+from .authorization import UserAuthorizationResolver
 from .crud import UserCRUD
 from .model import UserModel
 from .schema import (
@@ -253,16 +253,9 @@ class UserService:
             )
             menus = [MenuOutSchema.model_validate(menu) for menu in menu_all]
         else:
-            if self.auth.user.is_superuser and self.auth.tenant_id:
-                allowed_ids = await PackageService(self.auth).get_tenant_available_menu_ids(self.auth.tenant_id)
-                menu_ids = set(allowed_ids)
-            else:
-                menu_ids = {menu.id for role in self.auth.user.roles or [] for menu in role.menus if menu.status == 0 and getattr(menu, "client", "pc") == "pc"}
-
-                if menu_ids and self.auth.tenant_id:
-                    allowed_ids = await PackageService(self.auth).get_tenant_available_menu_ids(self.auth.tenant_id)
-                    allowed_set = set(allowed_ids)
-                    menu_ids = menu_ids & allowed_set
+            menu_ids = await UserAuthorizationResolver(
+                self.auth
+            ).effective_menu_ids_for_user(self.auth.user)
 
             menus = (
                 [
