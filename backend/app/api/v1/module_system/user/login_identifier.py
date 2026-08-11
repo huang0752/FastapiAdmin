@@ -15,8 +15,9 @@ def normalize_login_identifier(value: str) -> str:
 
 
 def user_login_identifiers(user: UserModel) -> list[tuple[str, str]]:
+    identifier_types = ("username",) if user.auth_source == "federated" else LOGIN_IDENTIFIER_TYPES
     values: list[tuple[str, str]] = []
-    for identifier_type in LOGIN_IDENTIFIER_TYPES:
+    for identifier_type in identifier_types:
         raw_value = getattr(user, identifier_type, None)
         if raw_value:
             values.append((identifier_type, normalize_login_identifier(str(raw_value))))

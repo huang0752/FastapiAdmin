@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 
 from app.api.v1.module_platform.site.model import SiteDomainModel, SiteModel
 from app.api.v1.module_platform.tenant.model import TenantModel, TenantUserModel
-from app.api.v1.module_system.user.login_identifier import sync_user_login_identifiers
+from app.api.v1.module_system.user.login_identifier import sync_user_login_identifiers, user_login_identifiers
 from app.api.v1.module_system.user.model import UserLoginIdentifierModel, UserModel
 from app.core.database import async_db_session
 from app.utils.hash_bcrpy_util import PwdUtil
@@ -43,6 +43,21 @@ def _login(test_client: TestClient, identifier: str, password: str = "Login123")
         "/system/auth/login",
         data={"username": identifier, "password": password, "login_type": "PC端"},
     )
+
+
+def test_federated_user_only_registers_synthetic_username_as_login_identifier() -> None:
+    user = UserModel(
+        username="control_1234567890abcdef12345678",
+        password="unavailable",
+        name="中控影子用户",
+        email="super@example.com",
+        mobile="13800138000",
+        tenant_id=2,
+        auth_source="federated",
+        password_login_enabled=False,
+    )
+
+    assert user_login_identifiers(user) == [("username", "control_1234567890abcdef12345678")]
 
 
 async def _create_other_site_user(*, email: str, mobile: str) -> tuple[int, str]:
