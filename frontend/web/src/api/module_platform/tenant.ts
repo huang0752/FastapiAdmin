@@ -195,6 +195,7 @@ export default TenantAPI;
 export interface TenantPageQuery extends PageQuery, UserByQueryParams, TenantByQueryParams {
   name?: string;
   code?: string;
+  unified_social_credit_code?: string;
   site_id?: number;
   status?: TenantStatus;
 }
@@ -209,6 +210,7 @@ export interface TenantTable extends BaseType {
   contact_name?: string;
   contact_phone?: string;
   contact_email?: string;
+  unified_social_credit_code?: string;
   address?: string;
   domain?: string;
   logo_url?: string;
@@ -236,6 +238,7 @@ export interface TenantForm extends BaseFormType {
   contact_name?: string;
   contact_phone?: string;
   contact_email?: string;
+  unified_social_credit_code?: string;
   address?: string;
   domain?: string;
   logo_url?: string;
@@ -263,6 +266,7 @@ export interface TenantCreateForm extends BaseFormType {
   contact_name?: string;
   contact_phone?: string;
   contact_email?: string;
+  unified_social_credit_code?: string;
   address?: string;
   domain?: string;
   logo_url?: string;
@@ -290,6 +294,7 @@ export interface TenantUpdateForm extends BaseFormType {
   contact_name?: string;
   contact_phone?: string;
   contact_email?: string;
+  unified_social_credit_code?: string;
   address?: string;
   domain?: string;
   logo_url?: string;

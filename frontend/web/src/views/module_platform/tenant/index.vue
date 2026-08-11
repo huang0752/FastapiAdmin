@@ -237,6 +237,7 @@ import TenantAPI, {
   type TenantUpdateForm,
 } from "@/api/module_platform/tenant";
 import TenantInitialAdminDialog from "./TenantInitialAdminDialog.vue";
+import { normalizeCreditCode, validateCreditCode } from "./credit-code";
 import PackageAPI from "@/api/module_platform/package";
 import SiteAPI from "@/api/module_platform/site";
 import { useAuth } from "@/hooks/core/useAuth";
@@ -259,6 +260,7 @@ const { hasAuth } = useAuth();
 type TenantSearchForm = {
   name?: string;
   code?: string;
+  unified_social_credit_code?: string;
   status?: TenantStatus;
   created_time?: string[];
 };
@@ -267,6 +269,7 @@ function buildTenantReplaceParams(p: TenantSearchForm): Record<string, unknown> 
   return {
     name: p.name,
     code: p.code,
+    unified_social_credit_code: normalizeCreditCode(p.unified_social_credit_code),
     status: p.status,
     created_time:
       Array.isArray(p.created_time) && p.created_time.length === 2 ? p.created_time : undefined,
@@ -329,6 +332,7 @@ function buildTenantRowActions(
 const searchForm = ref<TenantSearchForm>({
   name: undefined,
   code: undefined,
+  unified_social_credit_code: undefined,
   status: undefined,
   created_time: undefined,
 });
@@ -351,6 +355,14 @@ const tenantSearchItems = computed<SearchFormItem[]>(() => [
     key: "code",
     type: "input",
     placeholder: "请输入租户编码",
+    clearable: true,
+    span: 6,
+  },
+  {
+    label: "统一社会信用代码",
+    key: "unified_social_credit_code",
+    type: "input",
+    placeholder: "请输入18位统一社会信用代码",
     clearable: true,
     span: 6,
   },
@@ -435,6 +447,12 @@ const {
       { prop: "name", label: "租户名称", minWidth: 120, showOverflowTooltip: true },
       { prop: "code", label: "租户编码", minWidth: 120, showOverflowTooltip: true },
       {
+        prop: "unified_social_credit_code",
+        label: "统一社会信用代码",
+        minWidth: 190,
+        showOverflowTooltip: true,
+      },
+      {
         prop: "status",
         label: "状态",
         width: 80,
@@ -477,6 +495,7 @@ const tenantDetailItems: import("@/components/others/fa-descriptions/index.vue")
     { label: "联系人", prop: "contact_name" },
     { label: "联系电话", prop: "contact_phone" },
     { label: "联系邮箱", prop: "contact_email" },
+    { label: "统一社会信用代码", prop: "unified_social_credit_code" },
     { label: "域名", prop: "domain" },
     { label: "地址", prop: "address" },
     { label: "Logo地址", prop: "logo_url", slot: "logo_url" },
@@ -506,6 +525,7 @@ const formData = ref<TenantForm>({
   contact_name: "",
   contact_phone: "",
   contact_email: "",
+  unified_social_credit_code: undefined,
   address: "",
   domain: "",
   logo_url: "",
@@ -546,6 +566,18 @@ const validateTimeRange = (_rule: unknown, _value: unknown, callback: (e?: Error
   }
 };
 
+const validateEnterpriseCreditCode = (
+  _rule: unknown,
+  value: string | undefined,
+  callback: (e?: Error) => void
+) => {
+  if (validateCreditCode(value)) {
+    callback();
+    return;
+  }
+  callback(new Error("请输入有效的18位统一社会信用代码"));
+};
+
 const rules = reactive({
   name: [{ required: true, message: "请输入租户名称", trigger: "blur" }],
   site_id: [{ required: true, message: "请选择所属站点", trigger: "change" }],
@@ -558,6 +590,9 @@ const rules = reactive({
     },
   ],
   end_time: [{ validator: validateTimeRange, trigger: "change" }],
+  unified_social_credit_code: [
+    { validator: validateEnterpriseCreditCode, trigger: ["blur", "change"] },
+  ],
 });
 
 const initialFormData: TenantForm = {
@@ -572,6 +607,7 @@ const initialFormData: TenantForm = {
   contact_name: "",
   contact_phone: "",
   contact_email: "",
+  unified_social_credit_code: undefined,
   address: "",
   domain: "",
   logo_url: "",
@@ -756,6 +792,20 @@ const basicFormItems = computed<FormItem[]>(() => [
     props: { placeholder: "请输入联系邮箱", maxlength: 128 },
   },
   {
+    label: "统一社会信用代码",
+    key: "unified_social_credit_code",
+    type: "input",
+    props: {
+      placeholder: "选填，18位统一社会信用代码",
+      maxlength: 18,
+      onBlur: () => {
+        formData.value.unified_social_credit_code = normalizeCreditCode(
+          formData.value.unified_social_credit_code
+        );
+      },
+    },
+  },
+  {
     label: "域名",
     key: "domain",
     type: "input",
@@ -879,6 +929,7 @@ function onResetSearch() {
   searchForm.value = {
     name: undefined,
     code: undefined,
+    unified_social_credit_code: undefined,
     status: undefined,
     created_time: undefined,
   };
@@ -907,6 +958,7 @@ async function handleSubmit() {
         contact_name: formData.value.contact_name,
         contact_phone: formData.value.contact_phone,
         contact_email: formData.value.contact_email,
+        unified_social_credit_code: normalizeCreditCode(formData.value.unified_social_credit_code),
         address: formData.value.address,
         domain: formData.value.domain,
         logo_url: formData.value.logo_url,
@@ -936,6 +988,7 @@ async function handleSubmit() {
         contact_name: formData.value.contact_name,
         contact_phone: formData.value.contact_phone,
         contact_email: formData.value.contact_email,
+        unified_social_credit_code: normalizeCreditCode(formData.value.unified_social_credit_code),
         address: formData.value.address,
         domain: formData.value.domain,
         logo_url: formData.value.logo_url,
