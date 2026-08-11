@@ -137,16 +137,18 @@ class UserService:
         search_dict = vars(search).copy() if search else {}
         search_dict.pop("authorization_status", None)
 
-        resolver = UserAuthorizationResolver(self.auth)
-        authorized_ids = await resolver.authorized_federated_user_ids()
+        resolver: UserAuthorizationResolver | None = None
+        authorized_ids: set[int] = set()
         include_ids: set[int] | None = None
-        if authorization_status == UserAuthorizationStatus.AUTHORIZED:
+        if authorization_status is not None:
+            resolver = UserAuthorizationResolver(self.auth)
+            authorized_ids = await resolver.authorized_federated_user_ids()
             search_dict["auth_source"] = "federated"
-            include_ids = authorized_ids
-        elif authorization_status == UserAuthorizationStatus.PENDING:
-            search_dict["auth_source"] = "federated"
-            federated_ids = await resolver.federated_user_ids()
-            include_ids = federated_ids - authorized_ids
+            if authorization_status == UserAuthorizationStatus.AUTHORIZED:
+                include_ids = authorized_ids
+            elif authorization_status == UserAuthorizationStatus.PENDING:
+                federated_ids = await resolver.federated_user_ids()
+                include_ids = federated_ids - authorized_ids
 
         result = await UserCRUD(self.auth).page_with_user_ids(
             offset=offset,
@@ -155,6 +157,12 @@ class UserService:
             search=search_dict,
             include_ids=include_ids,
         )
+        has_federated = any(
+            item["auth_source"] == "federated" for item in result.items
+        )
+        if has_federated and resolver is None:
+            resolver = UserAuthorizationResolver(self.auth)
+            authorized_ids = await resolver.authorized_federated_user_ids()
         for item in result.items:
             if item["auth_source"] == "federated":
                 item["authorization_status"] = (

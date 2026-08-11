@@ -511,6 +511,35 @@ async def test_local_user_authorization_status_is_null(
 
 
 @pytest.mark.asyncio
+async def test_local_user_page_does_not_resolve_federated_authorization(
+    federated_authorization_fixture,
+    monkeypatch,
+):
+    async def fail_if_called(*args, **kwargs):
+        pytest.fail("本地用户分页不应解析联邦授权集合")
+
+    monkeypatch.setattr(
+        UserAuthorizationResolver,
+        "authorized_federated_user_ids",
+        fail_if_called,
+    )
+    monkeypatch.setattr(
+        UserAuthorizationResolver,
+        "federated_user_ids",
+        fail_if_called,
+    )
+
+    result = await UserService(federated_authorization_fixture.auth).page(
+        page_no=1,
+        page_size=20,
+        search=UserQueryParam(auth_source="local"),
+    )
+
+    assert result.total == 1
+    assert result.items[0]["authorization_status"] is None
+
+
+@pytest.mark.asyncio
 async def test_user_page_authorization_status_is_tenant_scoped(
     db_session,
     monkeypatch,
