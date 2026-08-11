@@ -15,7 +15,7 @@ export function buildUserReplaceParams(state: UserAuthorizationSearch): Record<s
     username: state.username,
     name: state.name,
     status: state.status,
-    auth_source: state.auth_source,
+    auth_source: state.authorization_status ? "federated" : state.auth_source,
     authorization_status: state.authorization_status,
     created_id: state.created_id,
     created_time:
@@ -40,6 +40,10 @@ export function isFederatedIdentityFieldReadonly(field: string, source?: UserAut
 
 export function isPendingFederatedUser(user: UserInfo): boolean {
   return user.auth_source === "federated" && user.authorization_status === "pending";
+}
+
+export function editActionLabel(user: UserInfo): string {
+  return isPendingFederatedUser(user) ? "去授权" : "编辑";
 }
 
 export function shouldShowResetPassword(user: Pick<UserInfo, "auth_source">): boolean {

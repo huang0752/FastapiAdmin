@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   authorizationLabel,
   buildUserReplaceParams,
+  editActionLabel,
   isFederatedIdentityFieldReadonly,
   isPendingFederatedUser,
   shouldShowResetPassword,
@@ -13,6 +14,15 @@ describe("federated user authorization", () => {
     expect(
       buildUserReplaceParams({
         auth_source: "federated",
+        authorization_status: "pending",
+      })
+    ).toMatchObject({ auth_source: "federated", authorization_status: "pending" });
+  });
+
+  it("normalizes authorization status searches to federated users", () => {
+    expect(
+      buildUserReplaceParams({
+        auth_source: "local",
         authorization_status: "pending",
       })
     ).toMatchObject({ auth_source: "federated", authorization_status: "pending" });
@@ -33,6 +43,16 @@ describe("federated user authorization", () => {
         authorization_status: null,
       })
     ).toBe(false);
+  });
+
+  it("renames the existing edit action instead of adding a second grant action", () => {
+    expect(
+      editActionLabel({ auth_source: "federated", authorization_status: "pending" })
+    ).toBe("去授权");
+    expect(
+      editActionLabel({ auth_source: "federated", authorization_status: "authorized" })
+    ).toBe("编辑");
+    expect(editActionLabel({ auth_source: "local", authorization_status: null })).toBe("编辑");
   });
 
   it("keeps central fields readonly only for federated users", () => {

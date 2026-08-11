@@ -236,8 +236,8 @@ import UserAPI, {
 import {
   authorizationLabel,
   buildUserReplaceParams,
+  editActionLabel,
   isFederatedIdentityFieldReadonly,
-  isPendingFederatedUser,
   shouldShowResetPassword,
   sourceLabel,
   type UserAuthorizationSearch,
@@ -292,19 +292,6 @@ function buildUserRowActions(
 ): TableOperationAction[] {
   const sys = row.is_superuser === true;
   const all: TableOperationAction[] = [];
-  if (isPendingFederatedUser(row)) {
-    all.push({
-      key: "grant",
-      label: "去授权",
-      artType: "edit",
-      perm: "module_system:user:update",
-      disabled: sys,
-      run: () => {
-        if (sys) return;
-        ctx.onEdit(row.id!);
-      },
-    });
-  }
   if (shouldShowResetPassword(row)) {
     all.push({
       key: "resetPwd",
@@ -329,7 +316,7 @@ function buildUserRowActions(
     },
     {
       key: "edit",
-      label: "编辑",
+      label: editActionLabel(row),
       artType: "edit",
       perm: "module_system:user:update",
       disabled: sys,
@@ -859,6 +846,9 @@ const initialFormData: UserForm = {
 
 async function handleSearchBarSearch(params: UserSearchForm) {
   await searchBarRef.value?.validate?.();
+  if (params.authorization_status) {
+    searchForm.value.auth_source = "federated";
+  }
   replaceSearchParams(buildUserReplaceParams(params));
   await getData();
 }
