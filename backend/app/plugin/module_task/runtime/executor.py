@@ -161,7 +161,8 @@ class BusinessTaskExecutor:
     async def _handle_failure(self, task: BusinessTaskModel, token: str, exc: Exception, *, retryable: bool) -> ExecutionOutcome:
         summary = self._safe_error_summary(exc)
         if retryable and task.attempt <= task.max_retries:
-            countdown = settings.CELERY_RETRY_BACKOFF * (2 ** max(0, task.attempt - 1))
+            definition = self.registry.get(task.handler_code or "")
+            countdown = definition.retry_backoff_seconds * (2 ** max(0, task.attempt - 1))
             async with self.session_factory() as db:
                 await db.execute(
                     update(BusinessTaskModel)

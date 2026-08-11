@@ -33,6 +33,7 @@ class BusinessTaskDefinition:
     module: str
     default_queue: str
     max_retries: int
+    retry_backoff_seconds: int
     soft_time_limit: int
     hard_time_limit: int
     supports_cancel: bool
@@ -65,6 +66,7 @@ class BusinessTaskRegistry:
         module: str,
         default_queue: str | None = None,
         max_retries: int | None = None,
+        retry_backoff_seconds: int | None = None,
         soft_time_limit: int | None = None,
         hard_time_limit: int | None = None,
         supports_cancel: bool = False,
@@ -93,6 +95,7 @@ class BusinessTaskRegistry:
             module=module.strip(),
             default_queue=(default_queue or settings.CELERY_DEFAULT_QUEUE).strip(),
             max_retries=settings.CELERY_MAX_RETRIES if max_retries is None else max_retries,
+            retry_backoff_seconds=settings.CELERY_RETRY_BACKOFF if retry_backoff_seconds is None else retry_backoff_seconds,
             soft_time_limit=settings.CELERY_TASK_SOFT_TIME_LIMIT if soft_time_limit is None else soft_time_limit,
             hard_time_limit=settings.CELERY_TASK_TIME_LIMIT if hard_time_limit is None else hard_time_limit,
             supports_cancel=supports_cancel,
@@ -106,6 +109,8 @@ class BusinessTaskRegistry:
             raise ValueError(f"处理器 {code} 缺少 module 或 default_queue")
         if definition.max_retries < 0:
             raise ValueError(f"处理器 {code} 的 max_retries 不能小于 0")
+        if definition.retry_backoff_seconds < 1:
+            raise ValueError(f"处理器 {code} 的 retry_backoff_seconds 不能小于 1")
         self._definitions[code] = definition
         return definition
 

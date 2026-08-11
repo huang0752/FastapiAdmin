@@ -156,6 +156,41 @@ def test_business_task_registry_registers_and_validates_payload() -> None:
     assert definition.validate_payload({"value": 3}).value == 3
 
 
+def test_business_task_registry_uses_handler_retry_backoff_or_global_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.plugin.module_task.runtime import registry as registry_module
+    from app.plugin.module_task.runtime.registry import BusinessTaskRegistry
+
+    monkeypatch.setattr(registry_module.settings, "CELERY_RETRY_BACKOFF", 37)
+    registry = BusinessTaskRegistry()
+
+    custom = registry.register(
+        handler_code="sample.custom_backoff",
+        handler=_sample_handler,
+        module="sample",
+        retry_backoff_seconds=10,
+    )
+    default = registry.register(
+        handler_code="sample.default_backoff",
+        handler=_sample_handler,
+        module="sample",
+    )
+
+    assert custom.retry_backoff_seconds == 10
+    assert default.retry_backoff_seconds == 37
+
+
+def test_business_task_registry_rejects_non_positive_retry_backoff() -> None:
+    from app.plugin.module_task.runtime.registry import BusinessTaskRegistry
+
+    with pytest.raises(ValueError, match="retry_backoff_seconds"):
+        BusinessTaskRegistry().register(
+            handler_code="sample.invalid_backoff",
+            handler=_sample_handler,
+            module="sample",
+            retry_backoff_seconds=0,
+        )
+
+
 def test_business_task_registry_rejects_duplicate_handler() -> None:
     from app.plugin.module_task.runtime.registry import BusinessTaskRegistry, DuplicateBusinessTaskHandlerError
 
@@ -264,6 +299,110 @@ async def test_dispatcher_idempotency_is_scoped_to_tenant(test_client, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_prepare_rolls_back_with_callers_business_transaction(test_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sqlalchemy import select
+
+    from app.api.v1.module_system.user.model import UserModel
+    from app.core.database import async_db_session
+    from app.plugin.module_task.business.task.model import BusinessTaskModel
+    from app.plugin.module_task.runtime.dispatcher import BusinessTaskDispatcher, DispatchRequest
+    from app.plugin.module_task.runtime.registry import BusinessTaskRegistry
+
+    _ = test_client
+    registry = BusinessTaskRegistry()
+    registry.register(handler_code="sample.prepare_rollback", handler=_sample_handler, module="sample", payload_schema=_SamplePayload)
+    publisher = _RecordingPublisher()
+    dispatcher = BusinessTaskDispatcher(registry=registry, publisher=publisher)
+    monkeypatch.setattr("app.plugin.module_task.runtime.dispatcher.settings.CELERY_ENABLED", True)
+    db, auth = await _runtime_auth()
+    original_name = auth.user.name
+    try:
+        auth.user.name = "prepare rollback marker"
+        task = await dispatcher.prepare(
+            auth=auth,
+            request=DispatchRequest(
+                handler_code="sample.prepare_rollback",
+                biz_type="prepare",
+                payload={"value": 1},
+                idempotency_key="prepare-rollback",
+            ),
+        )
+        assert task.status == "pending"
+        assert publisher.messages == []
+        await db.rollback()
+    finally:
+        await db.close()
+
+    async with async_db_session() as check_db:
+        persisted_task = (
+            await check_db.execute(select(BusinessTaskModel).where(BusinessTaskModel.idempotency_key == "prepare-rollback"))
+        ).scalar_one_or_none()
+        persisted_user_name = (
+            await check_db.execute(select(UserModel.name).where(UserModel.username == "user"))
+        ).scalar_one()
+
+    assert persisted_task is None
+    assert persisted_user_name == original_name
+
+
+@pytest.mark.asyncio
+async def test_prepare_commit_can_publish_and_recovery_can_publish_pending(test_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sqlalchemy import select
+
+    from app.core.database import async_db_session
+    from app.plugin.module_task.business.task.model import BusinessTaskModel
+    from app.plugin.module_task.runtime.dispatcher import BusinessTaskDispatcher, DispatchRequest
+    from app.plugin.module_task.runtime.registry import BusinessTaskRegistry
+
+    _ = test_client
+    registry = BusinessTaskRegistry()
+    registry.register(handler_code="sample.prepare_commit", handler=_sample_handler, module="sample", payload_schema=_SamplePayload)
+    publisher = _RecordingPublisher()
+    dispatcher = BusinessTaskDispatcher(registry=registry, publisher=publisher)
+    monkeypatch.setattr("app.plugin.module_task.runtime.dispatcher.settings.CELERY_ENABLED", True)
+    db, auth = await _runtime_auth()
+    try:
+        first = await dispatcher.prepare(
+            auth=auth,
+            request=DispatchRequest(
+                handler_code="sample.prepare_commit",
+                biz_type="prepare",
+                payload={"value": 2},
+                idempotency_key="prepare-commit",
+            ),
+        )
+        recovery = await dispatcher.prepare(
+            auth=auth,
+            request=DispatchRequest(
+                handler_code="sample.prepare_commit",
+                biz_type="prepare",
+                payload={"value": 3},
+                idempotency_key="prepare-recovery",
+            ),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    published = await dispatcher.publish_existing(first.id)
+    assert published.status == "queued"
+    assert [message["business_task_id"] for message in publisher.messages] == [first.id]
+
+    recovered = await dispatcher.recover_pending()
+    assert recovered == 1
+    assert [message["business_task_id"] for message in publisher.messages] == [first.id, recovery.id]
+    async with async_db_session() as check_db:
+        statuses = dict(
+            (
+                await check_db.execute(
+                    select(BusinessTaskModel.id, BusinessTaskModel.status).where(BusinessTaskModel.id.in_((first.id, recovery.id)))
+                )
+            ).all()
+        )
+    assert statuses == {first.id: "queued", recovery.id: "queued"}
+
+
+@pytest.mark.asyncio
 async def test_broker_failure_is_recorded_as_recoverable(test_client, monkeypatch: pytest.MonkeyPatch) -> None:
     from sqlalchemy import select
 
@@ -364,6 +503,58 @@ async def test_retryable_error_retries_with_backoff_then_succeeds(test_client, m
     assert first.retry_countdown == 30
     assert second.status == "success"
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_retryable_error_uses_handler_retry_backoff_and_global_default(test_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.plugin.module_task.runtime import registry as registry_module
+    from app.plugin.module_task.runtime.dispatcher import BusinessTaskDispatcher, DispatchRequest
+    from app.plugin.module_task.runtime.exceptions import RetryableBusinessTaskError
+    from app.plugin.module_task.runtime.executor import BusinessTaskExecutor
+    from app.plugin.module_task.runtime.registry import BusinessTaskRegistry
+
+    _ = test_client
+
+    async def handler(context, payload: _SamplePayload) -> dict:
+        raise RetryableBusinessTaskError("temporary timeout")
+
+    monkeypatch.setattr(registry_module.settings, "CELERY_RETRY_BACKOFF", 41)
+    registry = BusinessTaskRegistry()
+    registry.register(
+        handler_code="sample.retry_ten_seconds",
+        handler=handler,
+        module="sample",
+        payload_schema=_SamplePayload,
+        max_retries=1,
+        retry_backoff_seconds=10,
+    )
+    registry.register(
+        handler_code="sample.retry_global_default",
+        handler=handler,
+        module="sample",
+        payload_schema=_SamplePayload,
+        max_retries=1,
+    )
+    monkeypatch.setattr("app.plugin.module_task.runtime.dispatcher.settings.CELERY_ENABLED", True)
+    db, auth = await _runtime_auth()
+    try:
+        custom = await BusinessTaskDispatcher(registry=registry, publisher=_RecordingPublisher()).dispatch(
+            auth=auth,
+            request=DispatchRequest(handler_code="sample.retry_ten_seconds", biz_type="retry", payload={"value": 1}),
+        )
+        default = await BusinessTaskDispatcher(registry=registry, publisher=_RecordingPublisher()).dispatch(
+            auth=auth,
+            request=DispatchRequest(handler_code="sample.retry_global_default", biz_type="retry", payload={"value": 2}),
+        )
+    finally:
+        await db.close()
+
+    executor = BusinessTaskExecutor(registry=registry)
+    custom_outcome = await executor.execute(custom.id)
+    default_outcome = await executor.execute(default.id)
+
+    assert custom_outcome.retry_countdown == 10
+    assert default_outcome.retry_countdown == 41
 
 
 @pytest.mark.asyncio

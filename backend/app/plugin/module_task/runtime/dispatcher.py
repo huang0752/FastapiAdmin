@@ -78,6 +78,33 @@ class BusinessTaskDispatcher:
         self.session_factory = session_factory
 
     async def dispatch(self, *, auth: AuthSchema, request: DispatchRequest) -> BusinessTaskModel:
+        definition, payload = self._validate_request(auth=auth, request=request)
+        task = await self._create_committed_task(
+            tenant_id=auth.tenant_id,
+            actor_user_id=auth.user.id,
+            definition=definition,
+            request=request,
+            payload=payload,
+        )
+        if task.status not in {"pending", "enqueue_failed"}:
+            return task
+        return await self.publish_existing(task.id)
+
+    async def prepare(self, *, auth: AuthSchema, request: DispatchRequest) -> BusinessTaskModel:
+        """在调用者事务内写入 pending outbox；只 flush，不提交或发布。"""
+        definition, payload = self._validate_request(auth=auth, request=request)
+        if auth.db is None:
+            raise PermissionError("事务内业务任务投递缺少数据库会话")
+        return await self._prepare_task(
+            db=auth.db,
+            tenant_id=auth.tenant_id,
+            actor_user_id=auth.user.id,
+            definition=definition,
+            request=request,
+            payload=payload,
+        )
+
+    def _validate_request(self, *, auth: AuthSchema, request: DispatchRequest):
         if not is_plugin_enabled("module_task") or not settings.CELERY_ENABLED:
             raise CeleryRuntimeDisabledError("module_task Celery 业务任务运行时未启用")
         if auth.tenant_id is None or auth.user is None:
@@ -93,71 +120,72 @@ class BusinessTaskDispatcher:
             raise ValueError("投递队列名称不合法")
         validated = definition.validate_payload(request.payload)
         payload = validated.model_dump(mode="json") if hasattr(validated, "model_dump") else validated
-        task = await self._create_committed_task(
-            tenant_id=auth.tenant_id,
-            actor_user_id=auth.user.id,
-            definition=definition,
-            request=request,
-            payload=payload,
-        )
-        if task.status not in {"pending", "enqueue_failed"}:
-            return task
-        return await self.publish_existing(task.id)
+        return definition, payload
 
     async def _create_committed_task(self, *, tenant_id: int, actor_user_id: int, definition, request: DispatchRequest, payload: dict) -> BusinessTaskModel:
         async with self.session_factory() as db:
-            if request.idempotency_key:
-                existing = (
-                    await db.execute(
-                        select(BusinessTaskModel).where(
-                            BusinessTaskModel.tenant_id == tenant_id,
-                            BusinessTaskModel.idempotency_key == request.idempotency_key,
-                            BusinessTaskModel.is_deleted.is_(False),
-                        )
-                    )
-                ).scalar_one_or_none()
-                if existing:
-                    return existing
-            task = BusinessTaskModel(
+            task = await self._prepare_task(
+                db=db,
                 tenant_id=tenant_id,
-                created_id=actor_user_id,
-                updated_id=actor_user_id,
-                handler_code=definition.handler_code,
-                module=definition.module,
-                biz_type=request.biz_type,
-                biz_id=request.biz_id,
-                title=request.title,
+                actor_user_id=actor_user_id,
+                definition=definition,
+                request=request,
                 payload=payload,
-                queue=(request.queue or definition.default_queue).strip(),
-                idempotency_key=request.idempotency_key,
-                status="pending",
-                progress=0,
-                attempt=0,
-                max_retries=definition.max_retries if request.max_retries is None else request.max_retries,
-                trace_id=uuid4().hex,
-                description=request.description,
             )
-            db.add(task)
-            try:
-                await db.flush()
-                task.external_task_id = f"business-task-{task.id}"
-                await db.commit()
-            except IntegrityError:
-                await db.rollback()
-                if not request.idempotency_key:
-                    raise
-                existing = (
-                    await db.execute(
-                        select(BusinessTaskModel).where(
-                            BusinessTaskModel.tenant_id == tenant_id,
-                            BusinessTaskModel.idempotency_key == request.idempotency_key,
-                            BusinessTaskModel.is_deleted.is_(False),
-                        )
-                    )
-                ).scalar_one()
-                return existing
+            await db.commit()
             await db.refresh(task)
             return task
+
+    @staticmethod
+    async def _find_idempotent_task(*, db: AsyncSession, tenant_id: int, idempotency_key: str) -> BusinessTaskModel | None:
+        return (
+            await db.execute(
+                select(BusinessTaskModel).where(
+                    BusinessTaskModel.tenant_id == tenant_id,
+                    BusinessTaskModel.idempotency_key == idempotency_key,
+                    BusinessTaskModel.is_deleted.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def _prepare_task(self, *, db: AsyncSession, tenant_id: int, actor_user_id: int, definition, request: DispatchRequest, payload: dict) -> BusinessTaskModel:
+        if request.idempotency_key:
+            existing = await self._find_idempotent_task(db=db, tenant_id=tenant_id, idempotency_key=request.idempotency_key)
+            if existing:
+                return existing
+        task = BusinessTaskModel(
+            tenant_id=tenant_id,
+            created_id=actor_user_id,
+            updated_id=actor_user_id,
+            handler_code=definition.handler_code,
+            module=definition.module,
+            biz_type=request.biz_type,
+            biz_id=request.biz_id,
+            title=request.title,
+            payload=payload,
+            queue=(request.queue or definition.default_queue).strip(),
+            idempotency_key=request.idempotency_key,
+            status="pending",
+            progress=0,
+            attempt=0,
+            max_retries=definition.max_retries if request.max_retries is None else request.max_retries,
+            trace_id=uuid4().hex,
+            description=request.description,
+        )
+        try:
+            async with db.begin_nested():
+                db.add(task)
+                await db.flush()
+                task.external_task_id = f"business-task-{task.id}"
+                await db.flush()
+        except IntegrityError:
+            if not request.idempotency_key:
+                raise
+            existing = await self._find_idempotent_task(db=db, tenant_id=tenant_id, idempotency_key=request.idempotency_key)
+            if existing is None:
+                raise
+            return existing
+        return task
 
     async def publish_existing(self, task_id: int) -> BusinessTaskModel:
         async with self.session_factory() as db:
