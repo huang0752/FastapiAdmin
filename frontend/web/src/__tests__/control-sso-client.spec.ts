@@ -100,6 +100,10 @@ describe("control SSO client", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
+  it("explicitly allows an enabled callback before the unauthenticated fallback", () => {
+    expect(resolvePublicAuthCallbackAccess(true, true)).toBe(true);
+  });
+
   it("establishes password and control sessions through the same ordered workflow", async () => {
     const events: string[] = [];
     const tokens: JWTOut = {

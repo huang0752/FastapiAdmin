@@ -221,7 +221,7 @@ function isAssemblyRouteAllowed(to: RouteLocationNormalized): boolean {
 function handleLoginStatus(
   to: RouteLocationNormalized,
   userStore: ReturnType<typeof useUserStore>
-): Record<string, unknown> | undefined {
+): true | Record<string, unknown> | undefined {
   if (userStore.isLogin) {
     if (isLoginRoute(to)) {
       return { path: "/", replace: true };
@@ -246,9 +246,9 @@ function handleLoginStatus(
 export function resolvePublicAuthCallbackAccess(
   publicAuthCallback: boolean,
   controlSsoEnabled: boolean
-): Record<string, unknown> | undefined {
+): true | Record<string, unknown> | undefined {
   if (!publicAuthCallback) return undefined;
-  return controlSsoEnabled ? undefined : { name: "404", replace: true };
+  return controlSsoEnabled ? true : { name: "404", replace: true };
 }
 
 /** 登录页（项目里同时存在 `/login` 与 `/auth/login` 等多套入口） */
