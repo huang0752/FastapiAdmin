@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   authorizationLabel,
   buildUserReplaceParams,
@@ -8,6 +10,9 @@ import {
   shouldShowResetPassword,
   sourceLabel,
 } from "@/views/module_system/user/user-authorization";
+import { buildAuthorizationRetryUrl } from "@/views/module_system/auth/control-waiting/retry";
+
+const source = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
 describe("federated user authorization", () => {
   it("forwards source and authorization filters", () => {
@@ -46,12 +51,12 @@ describe("federated user authorization", () => {
   });
 
   it("renames the existing edit action instead of adding a second grant action", () => {
-    expect(
-      editActionLabel({ auth_source: "federated", authorization_status: "pending" })
-    ).toBe("去授权");
-    expect(
-      editActionLabel({ auth_source: "federated", authorization_status: "authorized" })
-    ).toBe("编辑");
+    expect(editActionLabel({ auth_source: "federated", authorization_status: "pending" })).toBe(
+      "去授权"
+    );
+    expect(editActionLabel({ auth_source: "federated", authorization_status: "authorized" })).toBe(
+      "编辑"
+    );
     expect(editActionLabel({ auth_source: "local", authorization_status: null })).toBe("编辑");
   });
 
@@ -77,5 +82,25 @@ describe("federated user authorization", () => {
     expect(authorizationLabel("pending")).toBe("待授权");
     expect(authorizationLabel("authorized")).toBe("已授权");
     expect(authorizationLabel(null)).toBe("—");
+  });
+
+  it("builds a root hash URL for a complete authorization recheck", () => {
+    expect(
+      buildAuthorizationRetryUrl("http://127.0.0.1:15394/web#/auth/control/waiting", "/web#/")
+    ).toBe("http://127.0.0.1:15394/web#/");
+  });
+
+  it("explains local authorization and performs a top-level recheck", () => {
+    const waitingSource = source("src/views/module_system/auth/control-waiting/index.vue");
+
+    expect(waitingSource).toContain("账号已创建，目标系统尚未授予有效菜单权限");
+    expect(waitingSource).toContain("系统管理 → 用户管理 → 筛选待授权 → 去授权");
+    expect(waitingSource).toContain("displayName");
+    expect(waitingSource).toContain("account");
+    expect(waitingSource).toContain('router.resolve({ path: "/" }).href');
+    expect(waitingSource).toContain("reloadAuthorization");
+    expect(waitingSource).not.toContain("router.replace");
+    expect(waitingSource).not.toContain("setInterval");
+    expect(waitingSource).not.toMatch(/mobile|email|accessToken|refreshToken|launchCode/);
   });
 });
