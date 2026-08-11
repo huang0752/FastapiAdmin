@@ -299,6 +299,15 @@ class UserUpdateSchema(CurrentUserUpdateSchema):
 
     username: str | None = Field(default=None, max_length=32, description="用户名")
     password: str | None = Field(default=None, min_length=6, max_length=128, description="密码")
+    auth_source: str | None = Field(
+        default=None,
+        pattern=r"^(local|federated)$",
+        description="认证来源（仅兼容完整表单回传，不允许修改）",
+    )
+    password_login_enabled: bool | None = Field(
+        default=None,
+        description="是否允许密码登录（仅兼容完整表单回传，不允许修改）",
+    )
     status: int | None = Field(default=None, ge=0, le=1, description="状态(0:启动 1:停用)")
     description: str | None = Field(default=None, max_length=255, description="备注")
     dept_id: int | None = Field(default=None, description="部门ID")

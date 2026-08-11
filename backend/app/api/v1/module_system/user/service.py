@@ -47,6 +47,17 @@ PASSWORD_RESET_CODE_TTL_SECONDS = 5 * 60
 PASSWORD_RESET_SEND_INTERVAL_SECONDS = 60
 PASSWORD_RESET_HOURLY_LIMIT = 5
 PASSWORD_RESET_TEMPLATE_CODE = "reset_password_code"
+AUTH_CONTROL_FIELDS = {"auth_source", "password_login_enabled"}
+FEDERATED_CENTRAL_FIELDS = {
+    "username",
+    "name",
+    "mobile",
+    "email",
+    "avatar",
+    "status",
+    "auth_source",
+    "password_login_enabled",
+}
 
 
 class UserService:
@@ -59,6 +70,37 @@ class UserService:
     def ensure_password_login_enabled(user: UserModel) -> None:
         if not user.password_login_enabled or user.auth_source == "federated":
             raise CustomException(msg="统一登录账号不支持本地密码操作", status_code=400)
+
+    @staticmethod
+    def _reject_protected_identity_changes(
+        user: UserModel,
+        data: UserUpdateSchema,
+    ) -> None:
+        incoming = data.model_dump(exclude_unset=True)
+        changed_auth_controls = {
+            field
+            for field in AUTH_CONTROL_FIELDS & incoming.keys()
+            if incoming[field] != getattr(user, field)
+        }
+        if changed_auth_controls:
+            message = (
+                "统一登录账号的身份资料由中控维护"
+                if user.auth_source == "federated"
+                else "认证控制字段不允许通过用户管理修改"
+            )
+            raise CustomException(msg=message, status_code=400)
+        if user.auth_source != "federated":
+            return
+        changed = {
+            field
+            for field in FEDERATED_CENTRAL_FIELDS & incoming.keys()
+            if incoming[field] != getattr(user, field)
+        }
+        if changed:
+            raise CustomException(
+                msg="统一登录账号的身份资料由中控维护",
+                status_code=400,
+            )
 
     async def _get_unique_user_by_username(self, username: str):
         """认证前账号查询必须在全局范围内唯一，避免跨租户误命中。"""
@@ -206,6 +248,7 @@ class UserService:
         user = await UserCRUD(self.auth).get_or_404(id=id)
         if user.is_superuser:
             raise CustomException(msg="超级管理员不允许修改")
+        self._reject_protected_identity_changes(user, data)
 
         exist_user = await UserCRUD(self.auth).get(username=data.username)
         if exist_user and exist_user.id != id:
@@ -225,23 +268,32 @@ class UserService:
             if dept.status == 1:
                 raise CustomException(msg="部门已被禁用")
 
-        new_user = await UserCRUD(self.auth).update(id=id, data=data)
+        fields_set = data.model_fields_set
+        user_payload = data.model_dump(
+            exclude_unset=True,
+            exclude={"role_ids", "position_ids", *AUTH_CONTROL_FIELDS},
+        )
+        new_user = await UserCRUD(self.auth).update(id=id, data=user_payload)
 
-        if data.role_ids and len(data.role_ids) > 0:
-            roles = await RoleCRUD(self.auth).get_list(search={"id": ("in", data.role_ids)})
-            if len(roles) != len(data.role_ids):
-                raise CustomException(msg="更新失败，部分角色不存在")
-            if not all(role.status == 0 for role in roles):
-                raise CustomException(msg="更新失败，部分角色已被禁用")
-            await UserCRUD(self.auth).set_user_roles(user_ids=[id], role_ids=data.role_ids)
+        if "role_ids" in fields_set:
+            role_ids = data.role_ids or []
+            if role_ids:
+                roles = await RoleCRUD(self.auth).get_list(search={"id": ("in", role_ids)})
+                if len(roles) != len(role_ids):
+                    raise CustomException(msg="更新失败，部分角色不存在")
+                if not all(role.status == 0 for role in roles):
+                    raise CustomException(msg="更新失败，部分角色已被禁用")
+            await UserCRUD(self.auth).set_user_roles(user_ids=[id], role_ids=role_ids)
 
-        if data.position_ids and len(data.position_ids) > 0:
-            positions = await PositionCRUD(self.auth).get_list(search={"id": ("in", data.position_ids)})
-            if len(positions) != len(data.position_ids):
-                raise CustomException(msg="更新失败，部分岗位不存在")
-            if not all(position.status == 0 for position in positions):
-                raise CustomException(msg="更新失败，部分岗位已被禁用")
-            await UserCRUD(self.auth).set_user_positions(user_ids=[id], position_ids=data.position_ids)
+        if "position_ids" in fields_set:
+            position_ids = data.position_ids or []
+            if position_ids:
+                positions = await PositionCRUD(self.auth).get_list(search={"id": ("in", position_ids)})
+                if len(positions) != len(position_ids):
+                    raise CustomException(msg="更新失败，部分岗位不存在")
+                if not all(position.status == 0 for position in positions):
+                    raise CustomException(msg="更新失败，部分岗位已被禁用")
+            await UserCRUD(self.auth).set_user_positions(user_ids=[id], position_ids=position_ids)
 
         return UserOutSchema.model_validate(new_user)
 

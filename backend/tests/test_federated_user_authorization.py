@@ -15,10 +15,15 @@ from app.api.v1.module_system.position.model import PositionModel
 from app.api.v1.module_system.role.model import RoleMenusModel, RoleModel
 from app.api.v1.module_system.user.authorization import UserAuthorizationResolver
 from app.api.v1.module_system.user.model import UserModel, UserPositionsModel, UserRolesModel
-from app.api.v1.module_system.user.schema import UserAuthorizationStatus, UserQueryParam
+from app.api.v1.module_system.user.schema import (
+    UserAuthorizationStatus,
+    UserQueryParam,
+    UserUpdateSchema,
+)
 from app.api.v1.module_system.user.service import UserService
 from app.core.base_schema import AuthSchema
 from app.core.database import async_db_session
+from app.core.exceptions import CustomException
 
 
 @dataclass(frozen=True)
@@ -584,3 +589,155 @@ async def test_authorized_filter_with_empty_include_ids_returns_empty_page(
 
     assert result.total == 0
     assert result.items == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "changed_value"),
+    [
+        ("username", "changed_federated_user"),
+        ("name", "目标系统私改姓名"),
+        ("mobile", "13800138000"),
+        ("email", "changed@example.com"),
+        ("avatar", "https://example.com/changed.png"),
+        ("status", 1),
+        ("auth_source", "local"),
+        ("password_login_enabled", True),
+    ],
+)
+async def test_federated_user_rejects_changed_central_identity_fields(
+    db_session,
+    federated_authorization_fixture,
+    field,
+    changed_value,
+):
+    fixture = federated_authorization_fixture
+    service = UserService(fixture.auth)
+    user = await db_session.get(UserModel, fixture.no_role_user_id)
+    payload = {
+        "username": user.username,
+        "name": user.name,
+        "mobile": user.mobile,
+        "email": user.email,
+        "avatar": user.avatar,
+        "status": user.status,
+        "auth_source": user.auth_source,
+        "password_login_enabled": user.password_login_enabled,
+        "role_ids": [],
+        "position_ids": [],
+    }
+    payload[field] = changed_value
+
+    with pytest.raises(
+        CustomException,
+        match="统一登录账号的身份资料由中控维护",
+    ) as exc_info:
+        await service.update(user.id, UserUpdateSchema(**payload))
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_federated_user_accepts_unchanged_identity_in_full_form(
+    db_session,
+    federated_authorization_fixture,
+):
+    fixture = federated_authorization_fixture
+    service = UserService(fixture.auth)
+    user = await db_session.get(UserModel, fixture.no_role_user_id)
+
+    result = await service.update(
+        user.id,
+        UserUpdateSchema(
+            username=user.username,
+            name=user.name,
+            mobile=user.mobile,
+            email=user.email,
+            avatar=user.avatar,
+            status=user.status,
+            auth_source=user.auth_source,
+            password_login_enabled=user.password_login_enabled,
+            dept_id=fixture.dept_id,
+            role_ids=[fixture.role_id],
+            position_ids=[fixture.position_id],
+        ),
+    )
+
+    assert result.dept.id == fixture.dept_id
+    assert [role.id for role in result.roles] == [fixture.role_id]
+    assert [position.id for position in result.positions] == [fixture.position_id]
+
+
+@pytest.mark.asyncio
+async def test_federated_user_explicit_empty_relationship_ids_clear_relations(
+    db_session,
+    federated_authorization_fixture,
+):
+    fixture = federated_authorization_fixture
+    service = UserService(fixture.auth)
+    user = await db_session.get(UserModel, fixture.authorized_user_id)
+
+    result = await service.update(
+        user.id,
+        UserUpdateSchema(
+            username=user.username,
+            name=user.name,
+            role_ids=[],
+            position_ids=[],
+        ),
+    )
+
+    assert result.roles == []
+    assert result.positions == []
+
+
+@pytest.mark.asyncio
+async def test_local_user_can_update_name_and_clear_roles(
+    db_session,
+    federated_authorization_fixture,
+):
+    fixture = federated_authorization_fixture
+    service = UserService(fixture.auth)
+    user = fixture.auth.user
+
+    result = await service.update(
+        user.id,
+        UserUpdateSchema(
+            username=user.username,
+            name="本地管理员新姓名",
+            auth_source=user.auth_source,
+            password_login_enabled=user.password_login_enabled,
+            role_ids=[],
+        ),
+    )
+
+    assert result.name == "本地管理员新姓名"
+    assert result.roles == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "changed_value"),
+    [
+        ("auth_source", "federated"),
+        ("password_login_enabled", False),
+    ],
+)
+async def test_local_user_rejects_changed_auth_control_fields(
+    federated_authorization_fixture,
+    field,
+    changed_value,
+):
+    fixture = federated_authorization_fixture
+    user = fixture.auth.user
+
+    with pytest.raises(CustomException, match="认证控制字段不允许通过用户管理修改") as exc_info:
+        await UserService(fixture.auth).update(
+            user.id,
+            UserUpdateSchema(
+                username=user.username,
+                **{field: changed_value},
+            ),
+        )
+
+    assert exc_info.value.status_code == 400
