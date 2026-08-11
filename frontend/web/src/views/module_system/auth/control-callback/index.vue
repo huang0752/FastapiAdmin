@@ -13,12 +13,25 @@ import { onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { Loading } from "@element-plus/icons-vue";
+import type { JWTOut } from "@/api/module_system/auth";
 import { useUserStore } from "@stores";
+import { Auth } from "@utils";
 import { exchangeControlCodeOnce } from "./control-exchange";
 
+const CONTROL_SSO_EXCHANGED_CODE_KEY = "control_sso_exchanged_code";
 const route = useRoute();
 const router = useRouter();
 const userStore = useUserStore();
+
+async function completeSession(tokens: JWTOut) {
+  await userStore.establishSession(tokens);
+
+  if (userStore.routeList.length === 0 && userStore.prems.length === 0) {
+    await router.replace({ name: "ControlSsoWaiting" });
+    return;
+  }
+  await router.replace("/");
+}
 
 onMounted(async () => {
   const rawCode = route.query.code;
@@ -30,15 +43,22 @@ onMounted(async () => {
   }
 
   try {
-    const response = await exchangeControlCodeOnce(code);
-    const tokens = response.data.data;
-    await userStore.establishSession(tokens);
+    const storedAccessToken = Auth.getAccessToken();
+    const canResume =
+      sessionStorage.getItem(CONTROL_SSO_EXCHANGED_CODE_KEY) === code && !!storedAccessToken;
+    const tokens: JWTOut = canResume
+      ? {
+          access_token: storedAccessToken,
+          refresh_token: Auth.getRefreshToken(),
+          token_type: "bearer",
+          expires_in: 0,
+        }
+      : (await exchangeControlCodeOnce(code)).data.data;
 
-    if (userStore.routeList.length === 0 && userStore.prems.length === 0) {
-      await router.replace({ name: "ControlSsoWaiting" });
-      return;
+    if (!canResume) {
+      sessionStorage.setItem(CONTROL_SSO_EXCHANGED_CODE_KEY, code);
     }
-    await router.replace("/");
+    await completeSession(tokens);
   } catch (error) {
     console.error("[ControlSSO] 统一登录失败", error);
     ElMessage.error("统一登录失败，请返回中控台重试");

@@ -194,6 +194,9 @@ describe("control SSO client", () => {
     expect(callbackSource).toContain("exchangeControlCodeOnce");
     expect(exchangeHelperSource.match(/AuthAPI\.controlExchange\(/g)).toHaveLength(1);
     expect(callbackSource).not.toContain("AuthAPI.controlExchange(");
+    expect(callbackSource).toContain("CONTROL_SSO_EXCHANGED_CODE_KEY");
+    expect(callbackSource).toContain("Auth.getAccessToken()");
+    expect(callbackSource).toContain("sessionStorage.setItem");
     expect(callbackSource).toContain("userStore.establishSession");
     expect(callbackSource).toContain("userStore.routeList.length === 0");
     expect(callbackSource).toContain("userStore.prems.length === 0");
