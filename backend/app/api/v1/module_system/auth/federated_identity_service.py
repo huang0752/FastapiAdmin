@@ -162,24 +162,40 @@ class FederatedIdentityService:
         user.status = profile.status
         user.auth_source = "federated"
         user.password_login_enabled = False
-        membership = (
+        await db.flush()
+        membership = await cls._find_membership(db, user.id, tenant_id)
+        if membership:
+            return
+        has_membership = (await db.execute(select(TenantUserModel.id).where(TenantUserModel.user_id == user.id).limit(1))).scalar_one_or_none()
+        try:
+            async with db.begin_nested():
+                db.add(
+                    TenantUserModel(
+                        user_id=user.id,
+                        tenant_id=tenant_id,
+                        role=membership_role,
+                        is_default=0 if has_membership is not None else is_default,
+                    )
+                )
+                await db.flush()
+        except IntegrityError:
+            if not await cls._find_membership(db, user.id, tenant_id):
+                raise
+
+    @staticmethod
+    async def _find_membership(
+        db: AsyncSession,
+        user_id: int,
+        tenant_id: int,
+    ) -> TenantUserModel | None:
+        return (
             await db.execute(
                 select(TenantUserModel).where(
-                    TenantUserModel.user_id == user.id,
+                    TenantUserModel.user_id == user_id,
                     TenantUserModel.tenant_id == tenant_id,
                 )
             )
         ).scalar_one_or_none()
-        if not membership:
-            db.add(
-                TenantUserModel(
-                    user_id=user.id,
-                    tenant_id=tenant_id,
-                    role=membership_role,
-                    is_default=is_default,
-                )
-            )
-        await db.flush()
 
     @staticmethod
     def _synthetic_username(issuer: str, central_user_uuid: str) -> str:

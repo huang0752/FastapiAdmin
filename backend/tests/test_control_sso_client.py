@@ -153,6 +153,48 @@ async def _set_legacy_synthetic_username(subject: str) -> None:
         await db.commit()
 
 
+async def _create_federated_identity_membership(
+    subject: str,
+    *,
+    tenant_id: int,
+    role: str = "member",
+) -> None:
+    async with async_db_session() as db:
+        await FederatedIdentityService.upsert_user_and_membership(
+            db=db,
+            site_id=1,
+            issuer="https://control.example/api/v1",
+            tenant_id=tenant_id,
+            profile=FederatedUserProfile(
+                central_user_uuid=subject,
+                name="联邦多租户用户",
+                mobile=None,
+                email=None,
+                avatar=None,
+                status=0,
+            ),
+            membership_role=role,
+        )
+        await db.commit()
+
+
+async def _membership_snapshot(subject: str) -> list[tuple[int, str, int]]:
+    user, _identity, _memberships, _roles = await _identity_snapshot(subject)
+    async with async_db_session() as db:
+        rows = (
+            await db.execute(
+                select(
+                    TenantUserModel.tenant_id,
+                    TenantUserModel.role,
+                    TenantUserModel.is_default,
+                )
+                .where(TenantUserModel.user_id == user.id)
+                .order_by(TenantUserModel.tenant_id)
+            )
+        ).all()
+        return [(tenant_id, role, is_default) for tenant_id, role, is_default in rows]
+
+
 async def _rollback_new_federated_identity(subject: str) -> tuple[int, int, int]:
     async with async_db_session() as db:
         user = await FederatedIdentityService.upsert_user_and_membership(
@@ -267,6 +309,19 @@ def test_federated_identity_primitive_flushes_reuse_without_committing() -> None
     assert identity_unchanged is True
 
 
+def test_reused_federated_identity_only_keeps_first_membership_as_default(test_client) -> None:
+    _ = test_client
+    subject = f"multi-tenant-{uuid.uuid4()}"
+
+    asyncio.run(_create_federated_identity_membership(subject, tenant_id=1, role="owner"))
+    asyncio.run(_create_federated_identity_membership(subject, tenant_id=2))
+
+    assert asyncio.run(_membership_snapshot(subject)) == [
+        (1, "owner", 1),
+        (2, "member", 0),
+    ]
+
+
 def test_control_exchange_returns_404_when_disabled(test_client, monkeypatch) -> None:
     monkeypatch.setattr(settings, "CONTROL_SSO_ENABLED", False, raising=False)
 
@@ -379,3 +434,24 @@ def test_concurrent_exchange_creates_one_identity(test_client, monkeypatch) -> N
     assert asyncio.run(count_identities()) == 1
     assert memberships == 1
     assert roles == 0
+
+
+def test_concurrent_exchange_adds_one_second_membership_without_downgrading_owner(
+    test_client,
+    monkeypatch,
+) -> None:
+    subject = f"concurrent-membership-{uuid.uuid4()}"
+    asyncio.run(_create_federated_identity_membership(subject, tenant_id=1, role="owner"))
+    _enable_control_sso(monkeypatch, [_claims(subject), _claims(subject)])
+
+    def exchange(code: str):
+        return test_client.post("/system/auth/control/exchange", json={"code": code * 20})
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(exchange, ("f", "g")))
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert asyncio.run(_membership_snapshot(subject)) == [
+        (1, "owner", 1),
+        (2, "member", 0),
+    ]
