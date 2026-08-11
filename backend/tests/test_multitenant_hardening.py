@@ -428,24 +428,25 @@ def test_workflow_python_service_requires_platform_global_context(
 
 
 @pytest.mark.parametrize(
-    ("tenant_id", "expected_ids", "package_called"),
+    ("tenant_id", "expected_ids", "resolver_called"),
     [(1, None, False), (2, [10, 11], True)],
 )
 def test_superuser_current_info_respects_impersonated_tenant_menus(
     tenant_id: int,
     expected_ids: list[int] | None,
-    package_called: bool,
+    resolver_called: bool,
     monkeypatch,
 ) -> None:
-    captured: dict[str, object] = {"package_called": False}
+    captured: dict[str, object] = {"resolver_called": False}
 
     async def fake_get_user(self, **kwargs):
         return SimpleNamespace(id=1, dept=None)
 
-    async def fake_available_menu_ids(self, requested_tenant_id):
-        captured["package_called"] = True
-        assert requested_tenant_id == tenant_id
-        return [11, 10]
+    async def fake_effective_menu_ids_for_user(self, user):
+        captured["resolver_called"] = True
+        assert self.auth.tenant_id == tenant_id
+        assert user.is_superuser is True
+        return {11, 10}
 
     async def fake_tree_list(self, search=None, **kwargs):
         captured["search"] = search
@@ -460,8 +461,8 @@ def test_superuser_current_info_respects_impersonated_tenant_menus(
         lambda value: SimpleNamespace(menus=None),
     )
     monkeypatch.setattr(
-        "app.api.v1.module_system.user.service.PackageService.get_tenant_available_menu_ids",
-        fake_available_menu_ids,
+        "app.api.v1.module_system.user.service.UserAuthorizationResolver.effective_menu_ids_for_user",
+        fake_effective_menu_ids_for_user,
     )
     monkeypatch.setattr(
         "app.api.v1.module_system.user.service.MenuCRUD.tree_list",
@@ -480,7 +481,7 @@ def test_superuser_current_info_respects_impersonated_tenant_menus(
 
     asyncio.run(exercise())
 
-    assert captured["package_called"] is package_called
+    assert captured["resolver_called"] is resolver_called
     search = captured["search"]
     if expected_ids is None:
         assert "id" not in search
