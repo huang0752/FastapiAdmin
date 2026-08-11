@@ -181,6 +181,8 @@ class ControlSSOClientService:
         tenant_id: int,
         claims: ControlIdentityClaims,
     ) -> None:
+        if user.username.startswith("control_") and len(user.username) > 32:
+            user.username = ControlSSOClientService._synthetic_username(claims.issuer, claims.central_user_uuid)
         user.name = claims.name
         user.mobile = claims.mobile
         user.email = claims.email
@@ -203,4 +205,4 @@ class ControlSSOClientService:
     @staticmethod
     def _synthetic_username(issuer: str, central_user_uuid: str) -> str:
         digest = hashlib.sha256(f"{issuer}\0{central_user_uuid}".encode()).hexdigest()
-        return f"control_{digest[:48]}"
+        return f"control_{digest[:24]}"

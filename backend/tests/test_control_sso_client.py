@@ -141,6 +141,14 @@ async def _set_membership_role(subject: str, role: str) -> None:
         await db.commit()
 
 
+async def _set_legacy_synthetic_username(subject: str) -> None:
+    user, _identity, _memberships, _roles = await _identity_snapshot(subject)
+    async with async_db_session() as db:
+        local_user = (await db.execute(select(UserModel).where(UserModel.id == user.id))).scalar_one()
+        local_user.username = "control_" + "f" * 48
+        await db.commit()
+
+
 def test_control_exchange_returns_404_when_disabled(test_client, monkeypatch) -> None:
     monkeypatch.setattr(settings, "CONTROL_SSO_ENABLED", False, raising=False)
 
@@ -181,6 +189,7 @@ def test_control_exchange_creates_shadow_user_membership_without_role(test_clien
     user, identity, memberships, roles = asyncio.run(_identity_snapshot(subject))
     assert identity.site_id == 1
     assert user.username.startswith("control_")
+    assert len(user.username) <= 32
     assert user.username not in {subject, user.email, user.mobile}
     assert user.auth_source == "federated"
     assert user.password_login_enabled is False
@@ -189,6 +198,11 @@ def test_control_exchange_creates_shadow_user_membership_without_role(test_clien
     assert user.tenant_id == 2
     assert memberships == 1
     assert roles == 0
+    current_user = test_client.get(
+        "/system/user/current/info",
+        headers={"Authorization": f"Bearer {response.json()['data']['access_token']}"},
+    )
+    assert current_user.status_code == 200, current_user.text
 
 
 def test_control_exchange_reuses_identity_and_updates_profile(test_client, monkeypatch) -> None:
@@ -200,12 +214,14 @@ def test_control_exchange_reuses_identity_and_updates_profile(test_client, monke
     _enable_control_sso(monkeypatch, [first, second])
 
     first_response = test_client.post("/system/auth/control/exchange", json={"code": "a" * 20})
+    asyncio.run(_set_legacy_synthetic_username(subject))
     asyncio.run(_set_membership_role(subject, "admin"))
     second_response = test_client.post("/system/auth/control/exchange", json={"code": "b" * 20})
 
     assert first_response.status_code == second_response.status_code == 200
     user, _identity, memberships, roles = asyncio.run(_identity_snapshot(subject))
     assert user.name == "新昵称"
+    assert len(user.username) <= 32
     assert user.mobile == "13900008888"
     assert user.email == "updated@example.com"
     assert memberships == 1
