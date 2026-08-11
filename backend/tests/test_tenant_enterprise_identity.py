@@ -8,7 +8,11 @@ from sqlalchemy import UniqueConstraint, select
 
 from app.api.v1.module_platform.federated_tenant.model import FederatedTenantModel
 from app.api.v1.module_platform.site.model import SiteModel
-from app.api.v1.module_platform.tenant.credit_code import validate_unified_social_credit_code
+from app.api.v1.module_platform.tenant.credit_code import (
+    USCC_ALPHABET,
+    USCC_WEIGHTS,
+    validate_unified_social_credit_code,
+)
 from app.api.v1.module_platform.tenant.model import TenantModel
 from app.api.v1.module_platform.tenant.schema import (
     TenantCreateSchema,
@@ -28,6 +32,15 @@ UPDATE_RACE_USCC = "91350100M000102Y4E"
 
 def _unique(prefix: str) -> str:
     return f"{prefix}{time.time_ns()}"
+
+
+def _unique_uscc() -> str:
+    prefix = f"9{str(time.time_ns())[-16:]}"
+    total = sum(
+        USCC_ALPHABET.index(char) * weight
+        for char, weight in zip(prefix, USCC_WEIGHTS, strict=True)
+    )
+    return f"{prefix}{USCC_ALPHABET[(31 - total % 31) % 31]}"
 
 
 async def _create_site() -> int:
@@ -202,6 +215,7 @@ def test_platform_tenant_uscc_is_scoped_to_site_and_remains_self_service_read_on
 ) -> None:
     suffix = str(time.time_ns())
     code = f"E{suffix}"
+    uscc = _unique_uscc()
     create = test_client.post(
         "/platform/tenant/create",
         headers=auth_headers,
@@ -209,12 +223,12 @@ def test_platform_tenant_uscc_is_scoped_to_site_and_remains_self_service_read_on
             "name": f"企业租户{suffix}",
             "code": code,
             "site_id": 1,
-            "unified_social_credit_code": f" {VALID_USCC.lower()} ",
+            "unified_social_credit_code": f" {uscc.lower()} ",
         },
     )
     assert create.status_code == 200, create.text
     tenant = create.json()["data"]
-    assert tenant["unified_social_credit_code"] == VALID_USCC
+    assert tenant["unified_social_credit_code"] == uscc
     assert tenant["initial_admin"]["username"] == f"{code}_admin"
 
     duplicate = test_client.post(
@@ -224,7 +238,7 @@ def test_platform_tenant_uscc_is_scoped_to_site_and_remains_self_service_read_on
             "name": _unique("同站点企业"),
             "code": _unique("D"),
             "site_id": 1,
-            "unified_social_credit_code": VALID_USCC,
+            "unified_social_credit_code": uscc,
         },
     )
     assert duplicate.status_code == 400, duplicate.text
@@ -238,7 +252,7 @@ def test_platform_tenant_uscc_is_scoped_to_site_and_remains_self_service_read_on
             "name": _unique("跨站点企业"),
             "code": _unique("C"),
             "site_id": site_id,
-            "unified_social_credit_code": VALID_USCC,
+            "unified_social_credit_code": uscc,
         },
     )
     assert other_site.status_code == 200, other_site.text
