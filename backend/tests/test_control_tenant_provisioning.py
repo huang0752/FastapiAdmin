@@ -97,6 +97,18 @@ class RecordingTransport(httpx.AsyncBaseTransport):
         return httpx.Response(200, json={"data": payload})
 
 
+class ExchangeErrorTransport(httpx.AsyncBaseTransport):
+    def __init__(self, failure: Exception | int) -> None:
+        self.failure = failure
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if isinstance(self.failure, Exception):
+            if isinstance(self.failure, httpx.RequestError):
+                self.failure.request = request
+            raise self.failure
+        return httpx.Response(self.failure, request=request)
+
+
 def _enable_provisioning(monkeypatch, payloads: list[dict]) -> RecordingTransport:
     from app.api.v1.module_system.auth.control_tenant_provisioning_service import (
         ControlTenantProvisioningService,
@@ -111,6 +123,20 @@ def _enable_provisioning(monkeypatch, payloads: list[dict]) -> RecordingTranspor
     monkeypatch.setattr(settings, "CONTROL_SSO_TIMEOUT_SECONDS", 3.0)
     monkeypatch.setattr(ControlTenantProvisioningService, "transport", transport)
     return transport
+
+
+def _enable_provisioning_transport(monkeypatch, transport: httpx.AsyncBaseTransport) -> None:
+    from app.api.v1.module_system.auth.control_tenant_provisioning_service import (
+        ControlTenantProvisioningService,
+    )
+
+    monkeypatch.setattr(settings, "CONTROL_TENANT_PROVISIONING_ENABLED", True)
+    monkeypatch.setattr(settings, "CONTROL_SSO_ENABLED", True)
+    monkeypatch.setattr(settings, "CONTROL_SSO_ISSUER", f"{ISSUER}/")
+    monkeypatch.setattr(settings, "CONTROL_SSO_CLIENT_ID", "target-client")
+    monkeypatch.setattr(settings, "CONTROL_SSO_CLIENT_SECRET", "target-secret")
+    monkeypatch.setattr(settings, "CONTROL_SSO_TIMEOUT_SECONDS", 3.0)
+    monkeypatch.setattr(ControlTenantProvisioningService, "transport", transport)
 
 
 async def _provision_snapshot(claims: dict) -> dict:
@@ -217,6 +243,23 @@ async def _count_tenants(code: str) -> int:
         ).scalar_one()
 
 
+async def _set_tenant_package(tenant_code: str, package_code: str) -> None:
+    async with async_db_session() as db:
+        tenant = (
+            await db.execute(select(TenantModel).where(TenantModel.code == tenant_code))
+        ).scalar_one()
+        package = (
+            await db.execute(
+                select(PackageModel).where(
+                    PackageModel.site_id == tenant.site_id,
+                    PackageModel.code == package_code,
+                )
+            )
+        ).scalar_one()
+        tenant.package_id = package.id
+        await db.commit()
+
+
 async def _provisioning_totals() -> tuple[int, int]:
     async with async_db_session() as db:
         tenants = (
@@ -257,6 +300,41 @@ def test_provisioning_configuration_requires_complete_sso_configuration() -> Non
             CONTROL_TENANT_PROVISIONING_ENABLED=True,
             CONTROL_SSO_ENABLED=False,
         )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx.ConnectError("connect failed"),
+        httpx.ReadTimeout("read timed out"),
+        429,
+        502,
+        503,
+        504,
+    ],
+)
+def test_tenant_provision_maps_retryable_exchange_failures_to_503(
+    test_client, monkeypatch, failure: Exception | int
+) -> None:
+    _enable_provisioning_transport(monkeypatch, ExchangeErrorTransport(failure))
+
+    response = test_client.post(
+        "/system/auth/control/tenant/provision", json={"code": "r" * 20}
+    )
+
+    assert response.status_code == 503
+
+
+def test_tenant_provision_preserves_invalid_exchange_credentials_as_401(
+    test_client, monkeypatch
+) -> None:
+    _enable_provisioning_transport(monkeypatch, ExchangeErrorTransport(401))
+
+    response = test_client.post(
+        "/system/auth/control/tenant/provision", json={"code": "u" * 20}
+    )
+
+    assert response.status_code == 401
 
 
 def test_tenant_provision_creates_federated_owner_without_local_admin(
@@ -303,6 +381,66 @@ def test_repeated_provision_is_idempotent_and_does_not_exchange_twice_per_reques
     assert first.json()["data"]["target_tenant_id"] == second.json()["data"]["target_tenant_id"]
     assert transport.calls == 2
     assert asyncio.run(_count_tenants(claims["target_tenant_code"])) == 1
+
+
+def test_repeated_provision_rejects_actual_tenant_package_drift(
+    test_client, monkeypatch
+) -> None:
+    claims = _claims("actual-package-drift", package_code="basic")
+    _enable_provisioning(monkeypatch, [claims, claims])
+    created = test_client.post(
+        "/system/auth/control/tenant/provision", json={"code": "l" * 20}
+    )
+    assert created.status_code == 200, created.text
+    asyncio.run(_set_tenant_package(claims["target_tenant_code"], "pro"))
+
+    repeated = test_client.post(
+        "/system/auth/control/tenant/provision", json={"code": "m" * 20}
+    )
+
+    assert repeated.status_code == 409, repeated.text
+    assert "漂移" in repeated.json()["msg"]
+
+
+def test_repeated_provision_normalizes_uscc_before_idempotency_comparison(
+    test_client, monkeypatch
+) -> None:
+    normalized_uscc = _make_uscc()
+    raw_uscc = f" {normalized_uscc.lower()} "
+    claims = _claims("normalized-uscc", unified_social_credit_code=raw_uscc)
+    _enable_provisioning(monkeypatch, [claims, claims])
+
+    created = test_client.post(
+        "/system/auth/control/tenant/provision", json={"code": "n" * 20}
+    )
+    repeated = test_client.post(
+        "/system/auth/control/tenant/provision", json={"code": "o" * 20}
+    )
+
+    assert created.status_code == repeated.status_code == 200
+    assert repeated.json()["data"]["result"] == "already_exists"
+    snapshot = asyncio.run(_provision_snapshot(claims))
+    assert snapshot["tenant"].unified_social_credit_code == normalized_uscc
+
+
+def test_repeated_provision_accepts_changed_central_tenant_code_and_updates_audit_value(
+    test_client, monkeypatch
+) -> None:
+    initial = _claims("central-code")
+    changed = {**initial, "central_tenant_code": "central-renamed"}
+    _enable_provisioning(monkeypatch, [initial, changed])
+
+    created = test_client.post(
+        "/system/auth/control/tenant/provision", json={"code": "v" * 20}
+    )
+    repeated = test_client.post(
+        "/system/auth/control/tenant/provision", json={"code": "w" * 20}
+    )
+
+    assert created.status_code == repeated.status_code == 200
+    assert repeated.json()["data"]["result"] == "already_exists"
+    snapshot = asyncio.run(_provision_snapshot(initial))
+    assert snapshot["mapping"].central_tenant_code == "central-renamed"
 
 
 @pytest.mark.parametrize(

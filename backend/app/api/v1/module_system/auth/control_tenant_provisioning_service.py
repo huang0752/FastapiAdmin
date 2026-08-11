@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.module_platform.federated_tenant.model import FederatedTenantModel
 from app.api.v1.module_platform.package.model import PackageModel
 from app.api.v1.module_platform.package.service import PackageService
+from app.api.v1.module_platform.tenant.credit_code import validate_unified_social_credit_code
 from app.api.v1.module_platform.tenant.model import TenantModel
 from app.api.v1.module_platform.tenant.schema import TenantCreateSchema
 from app.api.v1.module_platform.tenant.service import TenantService
@@ -28,6 +29,7 @@ class ControlTenantProvisioningService:
 
     transport: ClassVar[httpx.AsyncBaseTransport | None] = None
     _provision_lock: ClassVar[threading.Lock] = threading.Lock()
+    _retryable_exchange_statuses: ClassVar[set[int]] = {429, 502, 503, 504}
 
     @classmethod
     async def provision(
@@ -71,7 +73,7 @@ class ControlTenantProvisioningService:
 
         existing = await cls._find_mapping(db, site.id, claims)
         if existing is not None:
-            return await cls._existing_result(db, existing, claims)
+            return await cls._existing_result(db, existing, claims, package)
 
         await cls._raise_explicit_tenant_conflict(db, site.id, claims)
         auth = AuthSchema(db=db, check_data_scope=False)
@@ -124,7 +126,7 @@ class ControlTenantProvisioningService:
         except IntegrityError:
             mapping = await cls._find_mapping(db, site.id, claims)
             if mapping is not None:
-                return await cls._existing_result(db, mapping, claims)
+                return await cls._existing_result(db, mapping, claims, package)
             await cls._raise_explicit_tenant_conflict(db, site.id, claims)
             raise CustomException(msg="目标租户开户并发冲突", status_code=409) from None
 
@@ -155,6 +157,15 @@ class ControlTenantProvisioningService:
             if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
                 payload = payload["data"]
             claims = ControlTenantProvisionClaims.model_validate(payload)
+            claims.unified_social_credit_code = validate_unified_social_credit_code(
+                claims.unified_social_credit_code
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in cls._retryable_exchange_statuses:
+                raise CustomException(msg="中控租户开户码兑换暂时不可用", status_code=503) from exc
+            raise CustomException(msg="中控租户开户码兑换失败", status_code=401) from exc
+        except (httpx.NetworkError, httpx.TimeoutException) as exc:
+            raise CustomException(msg="中控租户开户码兑换暂时不可用", status_code=503) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise CustomException(msg="中控租户开户码兑换失败", status_code=401) from exc
 
@@ -199,6 +210,7 @@ class ControlTenantProvisioningService:
         db: AsyncSession,
         mapping: FederatedTenantModel,
         claims: ControlTenantProvisionClaims,
+        package: PackageModel,
     ) -> ControlTenantProvisionOut:
         tenant = await db.get(TenantModel, mapping.local_tenant_id)
         if tenant is None:
@@ -207,15 +219,18 @@ class ControlTenantProvisioningService:
             mapping.site_id != tenant.site_id
             or mapping.issuer != claims.issuer
             or mapping.central_tenant_uuid != claims.central_tenant_uuid
-            or mapping.central_tenant_code != claims.central_tenant_code
             or mapping.provision_request_uuid != claims.provision_request_uuid
             or mapping.target_package_code != claims.target_package_code
             or mapping.owner_central_user_uuid != claims.owner.central_user_uuid
             or tenant.code != claims.target_tenant_code
+            or tenant.package_id != package.id
             or tenant.unified_social_credit_code != claims.unified_social_credit_code
         )
         if drifted:
             raise CustomException(msg="中控租户开户请求与目标数据发生漂移", status_code=409)
+        if mapping.central_tenant_code != claims.central_tenant_code:
+            mapping.central_tenant_code = claims.central_tenant_code
+            await db.flush()
         return cls._result("already_exists", tenant)
 
     @staticmethod
