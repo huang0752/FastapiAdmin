@@ -18,12 +18,22 @@ class ActionSpec:
     payload_schema: dict[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class FeatureSpec:
+    code: str
+    name: str
+    description: str
+    prompt_key: str
+    default_timeout_seconds: int = 60
+
+
 class AiRegistry:
     """Prompt/智能动作注册中心的轻量内存抽象。"""
 
     def __init__(self) -> None:
         self._prompts: dict[str, PromptSpec] = {}
         self._actions: dict[str, ActionSpec] = {}
+        self._features: dict[str, FeatureSpec] = {}
 
     def register_prompt(self, spec: PromptSpec) -> None:
         self._prompts[spec.key] = spec
@@ -42,6 +52,15 @@ class AiRegistry:
 
     def list_actions(self) -> list[ActionSpec]:
         return list(self._actions.values())
+
+    def register_feature(self, spec: FeatureSpec) -> None:
+        self._features[spec.code] = spec
+
+    def get_feature(self, code: str) -> FeatureSpec | None:
+        return self._features.get(code)
+
+    def list_features(self) -> list[FeatureSpec]:
+        return list(self._features.values())
 
 
 default_ai_registry = AiRegistry()
@@ -66,5 +85,14 @@ default_ai_registry.register_action(
                 "name": {"type": "string"},
             },
         },
+    )
+)
+default_ai_registry.register_feature(
+    FeatureSpec(
+        code="demo_data.blueprint",
+        name="演示数据蓝图增强",
+        description="只增强经过产品模块筛选后的业务语义，不直接写业务表。",
+        prompt_key="demo_data.blueprint",
+        default_timeout_seconds=60,
     )
 )

@@ -117,6 +117,22 @@
                   <span class="detail-label">Temperature</span>
                   <span class="detail-value">{{ item.temperature.toFixed(1) }}</span>
                 </div>
+                <div class="detail-row">
+                  <span class="detail-label">调用限制</span>
+                  <span class="detail-value"
+                    >{{ item.timeout_seconds }} 秒 / {{ item.max_tokens }} Token</span
+                  >
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">业务数据</span>
+                  <ElTag
+                    :type="item.allow_business_data ? 'warning' : 'info'"
+                    size="small"
+                    effect="plain"
+                  >
+                    {{ item.allow_business_data ? "允许" : "禁止" }}
+                  </ElTag>
+                </div>
                 <div v-if="item.created_time" class="detail-row">
                   <span class="detail-label">添加于</span>
                   <span class="detail-value">{{ item.created_time }}</span>
@@ -124,6 +140,74 @@
               </div>
             </div>
           </TransitionGroup>
+        </div>
+      </div>
+
+      <div v-if="features.length > 0" class="feature-section">
+        <div class="section-header">
+          <div class="header-left">
+            <span class="section-title">功能绑定</span>
+            <ElTag size="small" effect="plain" type="info">{{ features.length }} 项</ElTag>
+          </div>
+        </div>
+        <div v-for="feature in features" :key="feature.feature_code" class="feature-card">
+          <div class="feature-heading">
+            <div>
+              <div class="item-name">{{ feature.feature_name }}</div>
+              <div class="feature-desc">{{ feature.description }}</div>
+            </div>
+            <ElSwitch v-model="feature.enabled" active-text="启用" inactive-text="停用" />
+          </div>
+          <div class="feature-grid">
+            <label>
+              <span>主模型</span>
+              <ElSelect v-model="feature.model_config_id" clearable placeholder="使用当前激活模型">
+                <ElOption
+                  v-for="item in items"
+                  :key="item.id"
+                  :label="item.name"
+                  :value="item.id"
+                />
+              </ElSelect>
+            </label>
+            <label>
+              <span>备用模型</span>
+              <ElSelect v-model="feature.fallback_config_id" clearable placeholder="不使用备用模型">
+                <ElOption
+                  v-for="item in items.filter((model) => model.id !== feature.model_config_id)"
+                  :key="item.id"
+                  :label="item.name"
+                  :value="item.id"
+                />
+              </ElSelect>
+            </label>
+            <label>
+              <span>Prompt 版本</span>
+              <ElInput v-model="feature.prompt_version" />
+            </label>
+            <label>
+              <span>功能超时</span>
+              <ElInputNumber
+                v-model="feature.timeout_seconds"
+                :min="5"
+                :max="300"
+                controls-position="right"
+              />
+            </label>
+          </div>
+          <div class="feature-footer">
+            <ElCheckbox v-model="feature.allow_business_data">
+              允许该功能发送经过产品模块筛选的业务数据
+            </ElCheckbox>
+            <ElButton
+              type="primary"
+              plain
+              :loading="featureSaving === feature.feature_code"
+              @click="saveFeature(feature)"
+            >
+              保存绑定
+            </ElButton>
+          </div>
         </div>
       </div>
 
@@ -213,6 +297,29 @@
           />
           <div class="form-tip">越高越有创造性，0 更确定</div>
         </ElFormItem>
+        <ElFormItem label="调用超时" prop="timeout_seconds">
+          <ElInputNumber
+            v-model="form.timeout_seconds"
+            :min="5"
+            :max="300"
+            controls-position="right"
+          />
+          <span class="inline-unit">秒</span>
+        </ElFormItem>
+        <ElFormItem label="最大输出" prop="max_tokens">
+          <ElInputNumber
+            v-model="form.max_tokens"
+            :min="128"
+            :max="32768"
+            :step="128"
+            controls-position="right"
+          />
+          <span class="inline-unit">Token</span>
+        </ElFormItem>
+        <ElFormItem label="业务数据">
+          <ElSwitch v-model="form.allow_business_data" active-text="允许" inactive-text="禁止" />
+          <div class="form-tip">开启后仍需在具体功能绑定中再次授权</div>
+        </ElFormItem>
       </ElForm>
       <template #footer>
         <ElButton @click="dialogVisible = false">取消</ElButton>
@@ -241,6 +348,7 @@ import {
   Check,
 } from "@element-plus/icons-vue";
 import AiChatAPI, {
+  type AiFeatureBinding,
   type AiModelConfigInput,
   type AiModelConfigItem,
   type AiModelConfigList,
@@ -251,6 +359,8 @@ const emit = defineEmits<{ changed: [] }>();
 const loading = ref(false);
 const saving = ref(false);
 const items = ref<AiModelConfigItem[]>([]);
+const features = ref<AiFeatureBinding[]>([]);
+const featureSaving = ref<string | null>(null);
 const activeId = ref<string | null>(null);
 const expandedId = ref<string | null>(null);
 const flashId = ref<string | null>(null);
@@ -269,6 +379,10 @@ const form = reactive<AiModelConfigForm>({
   api_key: "",
   model_id: "",
   temperature: 0.7,
+  provider_type: "openai_compatible",
+  timeout_seconds: 60,
+  max_tokens: 4096,
+  allow_business_data: false,
   created_time: null,
 });
 
@@ -323,11 +437,17 @@ const activeModelName = computed(() => {
 const loadList = async () => {
   loading.value = true;
   try {
-    const res = await AiChatAPI.getModelConfig();
+    const [res, featureRes] = await Promise.all([
+      AiChatAPI.getModelConfig(),
+      AiChatAPI.getFeatureBindings(),
+    ]);
     if (res.data?.code === 0 && res.data.data) {
       const data: AiModelConfigList = res.data.data;
       items.value = data.items || [];
       activeId.value = data.active_id;
+    }
+    if (featureRes.data?.code === 0 && featureRes.data.data) {
+      features.value = featureRes.data.data;
     }
   } catch {
     ElMessage.error("加载模型配置失败");
@@ -343,6 +463,10 @@ const resetForm = () => {
   form.api_key = "";
   form.model_id = "";
   form.temperature = 0.7;
+  form.provider_type = "openai_compatible";
+  form.timeout_seconds = 60;
+  form.max_tokens = 4096;
+  form.allow_business_data = false;
   form.created_time = null;
   formRef.value?.clearValidate();
 };
@@ -359,6 +483,10 @@ const openEdit = (item: AiModelConfigItem) => {
   form.api_key = "";
   form.model_id = item.model_id;
   form.temperature = item.temperature;
+  form.provider_type = item.provider_type;
+  form.timeout_seconds = item.timeout_seconds;
+  form.max_tokens = item.max_tokens;
+  form.allow_business_data = item.allow_business_data;
   form.created_time = item.created_time;
   formRef.value?.clearValidate();
   dialogVisible.value = true;
@@ -379,6 +507,10 @@ const handleSave = async () => {
       api_key: form.api_key || null,
       model_id: form.model_id,
       temperature: form.temperature,
+      provider_type: form.provider_type,
+      timeout_seconds: form.timeout_seconds,
+      max_tokens: form.max_tokens,
+      allow_business_data: form.allow_business_data,
     };
     let res;
     if (form.id) {
@@ -474,6 +606,31 @@ const toggleExpand = (id: string) => {
   expandedId.value = expandedId.value === id ? null : id;
 };
 
+const saveFeature = async (feature: AiFeatureBinding) => {
+  if (featureSaving.value) return;
+  featureSaving.value = feature.feature_code;
+  try {
+    const res = await AiChatAPI.updateFeatureBinding(feature.feature_code, {
+      model_config_id: feature.model_config_id,
+      fallback_config_id: feature.fallback_config_id,
+      prompt_version: feature.prompt_version,
+      timeout_seconds: feature.timeout_seconds,
+      allow_business_data: feature.allow_business_data,
+      enabled: feature.enabled,
+    });
+    if (res.data?.code === 0 && res.data.data) {
+      Object.assign(feature, res.data.data);
+      ElMessage.success("AI 功能绑定已保存");
+    } else {
+      ElMessage.error(res.data?.msg || "保存功能绑定失败");
+    }
+  } catch {
+    ElMessage.error("保存功能绑定失败");
+  } finally {
+    featureSaving.value = null;
+  }
+};
+
 defineExpose({ refresh: loadList });
 onMounted(loadList);
 </script>
@@ -525,6 +682,73 @@ onMounted(loadList);
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.feature-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.feature-card {
+  padding: 14px;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+}
+
+.feature-heading,
+.feature-footer {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.feature-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+}
+
+.feature-footer {
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px dashed var(--el-border-color-light);
+}
+
+.inline-unit {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+@media (width <= 640px) {
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .feature-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 .section-header {

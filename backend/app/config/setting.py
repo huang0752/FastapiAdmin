@@ -274,6 +274,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = ""
     OPENAI_BASE_URL: str = ""  # API Base URL，如 https://api.minimax.chat/v1
+    AI_AUDIT_HASH_KEY: str = ""  # AI 提示词审计 HMAC 密钥；为空时复用应用 SECRET_KEY
 
     # ================================================= #
     # ******************* 请求限制配置 ****************** #

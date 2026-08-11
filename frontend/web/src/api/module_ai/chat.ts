@@ -94,6 +94,21 @@ export const AiChatAPI = {
       method: "post",
     });
   },
+
+  getFeatureBindings() {
+    return request<ApiResponse<AiFeatureBinding[]>>({
+      url: `${API_PATH}/feature`,
+      method: "get",
+    });
+  },
+
+  updateFeatureBinding(featureCode: string, body: AiFeatureBindingInput) {
+    return request<ApiResponse<AiFeatureBinding>>({
+      url: `${API_PATH}/feature/${featureCode}`,
+      method: "put",
+      data: body,
+    });
+  },
 };
 
 export interface AiModelConfigInput {
@@ -102,6 +117,10 @@ export interface AiModelConfigInput {
   api_key?: string | null;
   model_id: string;
   temperature: number;
+  provider_type: "openai_compatible";
+  timeout_seconds: number;
+  max_tokens: number;
+  allow_business_data: boolean;
 }
 
 export interface AiModelConfigItem {
@@ -110,6 +129,10 @@ export interface AiModelConfigItem {
   base_url: string;
   model_id: string;
   temperature: number;
+  provider_type: "openai_compatible";
+  timeout_seconds: number;
+  max_tokens: number;
+  allow_business_data: boolean;
   created_time: string | null;
   has_api_key: boolean;
   api_key_masked: string | null;
@@ -118,6 +141,22 @@ export interface AiModelConfigItem {
 export interface AiModelConfigList {
   items: AiModelConfigItem[];
   active_id: string | null;
+}
+
+export interface AiFeatureBindingInput {
+  model_config_id: string | null;
+  fallback_config_id: string | null;
+  prompt_version: string;
+  timeout_seconds: number;
+  allow_business_data: boolean;
+  enabled: boolean;
+}
+
+export interface AiFeatureBinding extends AiFeatureBindingInput {
+  feature_code: string;
+  feature_name: string;
+  description: string;
+  prompt_key: string;
 }
 
 export default AiChatAPI;

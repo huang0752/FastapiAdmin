@@ -1,13 +1,15 @@
 from types import SimpleNamespace
 
 import pytest
+from pydantic import BaseModel
 
 from app.core.base_schema import AuthSchema
+from app.core.exceptions import CustomException
 from app.plugin.module_ai.chat import service as chat_service_module
 from app.plugin.module_ai.chat.audit import AiCallAuditRecord
 from app.plugin.module_ai.chat.registry import default_ai_registry
-from app.plugin.module_ai.chat.schema import AiModelConfigSchema, AiModelConfigUpdateSchema
-from app.plugin.module_ai.chat.service import AiModelConfigService, ChatService, get_user_model_config, resolve_effective_model_config
+from app.plugin.module_ai.chat.schema import AiFeatureBindingUpdateSchema, AiModelConfigSchema, AiModelConfigUpdateSchema
+from app.plugin.module_ai.chat.service import AiFeatureBindingService, AiModelConfigService, AiRuntimeService, ChatService, get_user_model_config, resolve_effective_model_config
 
 
 class MemoryRedis:
@@ -124,6 +126,10 @@ async def test_rest_chat_uses_active_runtime_model_config(monkeypatch: pytest.Mo
         "api_key": "sk-active",
         "model_id": "active-model",
         "temperature": 0.1,
+        "provider_type": "openai_compatible",
+        "timeout_seconds": 60,
+        "max_tokens": 4096,
+        "allow_business_data": False,
         "config_id": created["id"],
         "source": "user_active",
         "tenant_id": 42,
@@ -166,3 +172,161 @@ def test_ai_call_audit_record_redacts_api_key() -> None:
     dumped = record.to_safe_dict()
     assert dumped["model_config"]["model_id"] == "active-model"
     assert "api_key" not in dumped["model_config"]
+
+
+def test_demo_data_feature_and_model_safety_defaults_are_registered() -> None:
+    feature = default_ai_registry.get_feature("demo_data.blueprint")
+    config = AiModelConfigSchema(
+        name="Safe default",
+        base_url="https://example.com/v1",
+        api_key="sk-secret",
+        model_id="demo-model",
+    )
+
+    assert feature is not None
+    assert feature.prompt_key == "demo_data.blueprint"
+    assert config.timeout_seconds == 60
+    assert config.max_tokens == 4096
+    assert config.allow_business_data is False
+
+
+@pytest.mark.asyncio
+async def test_feature_binding_is_scoped_and_rejects_unknown_model() -> None:
+    redis = MemoryRedis()
+    auth = make_auth()
+    model_service = AiModelConfigService(auth, redis)  # type: ignore[arg-type]
+    created = await model_service.create(
+        AiModelConfigSchema(
+            name="Business model",
+            base_url="https://example.com/v1",
+            api_key="sk-secret",
+            model_id="demo-model",
+            allow_business_data=True,
+        )
+    )
+    service = AiFeatureBindingService(auth, redis)  # type: ignore[arg-type]
+
+    saved = await service.upsert(
+        "demo_data.blueprint",
+        AiFeatureBindingUpdateSchema(
+            model_config_id=created["id"],
+            prompt_version="v2",
+            timeout_seconds=30,
+            allow_business_data=True,
+            enabled=True,
+        ),
+    )
+
+    assert saved["feature_code"] == "demo_data.blueprint"
+    assert saved["model_config_id"] == created["id"]
+    assert saved["prompt_key"] == "demo_data.blueprint"
+    assert saved["prompt_version"] == "v2"
+    assert "api_key" not in saved
+
+    other_auth = AuthSchema(user=SimpleNamespace(id=9002, username="bob", dept_id=8), tenant_id=99)
+    assert (await AiFeatureBindingService(other_auth, redis).list())[0]["model_config_id"] is None  # type: ignore[arg-type]
+
+    with pytest.raises(CustomException, match="模型配置不存在"):
+        await service.upsert(
+            "demo_data.blueprint",
+            AiFeatureBindingUpdateSchema(model_config_id="missing", enabled=True),
+        )
+
+
+class DemoBlueprintResult(BaseModel):
+    title: str
+    count: int
+
+
+@pytest.mark.asyncio
+async def test_structured_runtime_validates_output_and_uses_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    redis = MemoryRedis()
+    auth = make_auth()
+    model_service = AiModelConfigService(auth, redis)  # type: ignore[arg-type]
+    primary = await model_service.create(
+        AiModelConfigSchema(
+            name="Primary",
+            base_url="https://primary.example/v1",
+            api_key="sk-primary",
+            model_id="primary-model",
+            allow_business_data=True,
+        )
+    )
+    fallback = await model_service.create(
+        AiModelConfigSchema(
+            name="Fallback",
+            base_url="https://fallback.example/v1",
+            api_key="sk-fallback",
+            model_id="fallback-model",
+            allow_business_data=True,
+        )
+    )
+    await AiFeatureBindingService(auth, redis).upsert(  # type: ignore[arg-type]
+        "demo_data.blueprint",
+        AiFeatureBindingUpdateSchema(
+            model_config_id=primary["id"],
+            fallback_config_id=fallback["id"],
+            allow_business_data=True,
+            enabled=True,
+        ),
+    )
+    calls: list[str] = []
+    audits: list[AiCallAuditRecord] = []
+
+    async def runner(*, model_config: dict[str, object], **kwargs: object) -> dict[str, object]:
+        calls.append(str(model_config["model_id"]))
+        if model_config["model_id"] == "primary-model":
+            raise RuntimeError("provider unavailable")
+        return {"title": "电气设备演示", "count": 12}
+
+    async def capture_audit(redis_arg: object, record: AiCallAuditRecord) -> None:
+        audits.append(record)
+
+    monkeypatch.setattr(chat_service_module, "record_ai_call_audit", capture_audit)
+    result = await AiRuntimeService(auth, redis, runner=runner).structured_generate(  # type: ignore[arg-type]
+        feature_code="demo_data.blueprint",
+        prompt="客户名称与产品规格",
+        response_model=DemoBlueprintResult,
+        contains_business_data=True,
+        business_id="batch-1",
+    )
+
+    assert result == DemoBlueprintResult(title="电气设备演示", count=12)
+    assert calls == ["primary-model", "fallback-model"]
+    safe_audit = audits[-1].to_safe_dict()
+    assert safe_audit["feature_code"] == "demo_data.blueprint"
+    assert safe_audit["business_id"] == "batch-1"
+    assert "客户名称" not in str(safe_audit)
+    assert safe_audit["prompt_fingerprint"]
+
+
+@pytest.mark.asyncio
+async def test_structured_runtime_denies_business_data_without_two_level_consent() -> None:
+    redis = MemoryRedis()
+    auth = make_auth()
+    model_service = AiModelConfigService(auth, redis)  # type: ignore[arg-type]
+    created = await model_service.create(
+        AiModelConfigSchema(
+            name="No business data",
+            base_url="https://example.com/v1",
+            api_key="sk-secret",
+            model_id="demo-model",
+            allow_business_data=False,
+        )
+    )
+    await AiFeatureBindingService(auth, redis).upsert(  # type: ignore[arg-type]
+        "demo_data.blueprint",
+        AiFeatureBindingUpdateSchema(
+            model_config_id=created["id"],
+            allow_business_data=True,
+            enabled=True,
+        ),
+    )
+
+    with pytest.raises(CustomException, match="业务数据"):
+        await AiRuntimeService(auth, redis, runner=lambda **kwargs: None).structured_generate(  # type: ignore[arg-type]
+            feature_code="demo_data.blueprint",
+            prompt="sensitive",
+            response_model=DemoBlueprintResult,
+            contains_business_data=True,
+        )

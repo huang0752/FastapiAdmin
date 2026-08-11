@@ -1,13 +1,16 @@
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import datetime
+from time import perf_counter
 from typing import Any
 
 from agno.run.team import TeamRunOutput
 from agno.session.team import TeamSession
 from agno.team.team import Team
+from openai import AsyncOpenAI
+from pydantic import BaseModel
 from redis.asyncio import Redis
 
 from app.api.v1.module_system.dept.service import DeptService
@@ -21,7 +24,9 @@ from app.core.redis_crud import RedisCURD
 
 from .audit import AiCallAuditRecord, record_ai_call_audit
 from .crud import ChatSessionCRUD
+from .registry import default_ai_registry
 from .schema import (
+    AiFeatureBindingUpdateSchema,
     AiModelConfigSchema,
     AiModelConfigUpdateSchema,
     ChatQuerySchema,
@@ -421,6 +426,10 @@ def _public_model_config(item: dict[str, Any]) -> dict[str, Any]:
         "base_url": item.get("base_url"),
         "model_id": item.get("model_id"),
         "temperature": item.get("temperature"),
+        "provider_type": item.get("provider_type", "openai_compatible"),
+        "timeout_seconds": item.get("timeout_seconds", 60),
+        "max_tokens": item.get("max_tokens", 4096),
+        "allow_business_data": bool(item.get("allow_business_data", False)),
         "created_time": item.get("created_time"),
         "has_api_key": bool(item.get("api_key")),
         "api_key_masked": _mask_api_key(item.get("api_key")),
@@ -433,6 +442,10 @@ def _runtime_model_config(item: dict[str, Any], *, auth: AuthSchema | None = Non
         "api_key": item.get("api_key"),
         "model_id": item.get("model_id"),
         "temperature": item.get("temperature"),
+        "provider_type": item.get("provider_type", "openai_compatible"),
+        "timeout_seconds": item.get("timeout_seconds", 60),
+        "max_tokens": item.get("max_tokens", 4096),
+        "allow_business_data": bool(item.get("allow_business_data", False)),
         "config_id": item.get("id"),
         "source": source,
         "tenant_id": auth.tenant_id if auth else None,
@@ -484,6 +497,10 @@ async def resolve_effective_model_config(redis: Redis, auth: AuthSchema) -> dict
         "api_key": settings.OPENAI_API_KEY,
         "model_id": settings.OPENAI_MODEL,
         "temperature": AgnoFactory.AGENT_TEMPERATURE,
+        "provider_type": "openai_compatible",
+        "timeout_seconds": AgnoFactory.REQUEST_TIMEOUT,
+        "max_tokens": 4096,
+        "allow_business_data": False,
         "config_id": None,
         "source": "system_default",
         "tenant_id": auth.tenant_id if auth else None,
@@ -612,3 +629,247 @@ class AiModelConfigService:
         ok = await set_active_model_config(self.redis, self._user_id, config_id)
         if not ok:
             raise CustomException(msg="模型配置不存在", code=10404, status_code=404)
+
+
+# ================================================= #
+# *************** AI 功能绑定与运行时 ************** #
+# ================================================= #
+
+
+def _ai_feature_bindings_key(tenant_id: int | None, user_id: int) -> str:
+    return f"ai_feature_binding:{tenant_id or 0}:{user_id}"
+
+
+async def _get_user_model_config_by_id(redis: Redis, user_id: int, config_id: str) -> dict[str, Any] | None:
+    return next((item for item in await list_user_model_configs(redis, user_id) if item.get("id") == config_id), None)
+
+
+class AiFeatureBindingService:
+    """管理当前租户、当前用户可用的 AI 功能绑定。"""
+
+    def __init__(self, auth: AuthSchema, redis: Redis) -> None:
+        self.auth = auth
+        self.redis = redis
+
+    @property
+    def _user_id(self) -> int:
+        if not self.auth or not self.auth.user:
+            raise CustomException(msg="未登录", code=10401, status_code=401)
+        return self.auth.user.id
+
+    @property
+    def _key(self) -> str:
+        return _ai_feature_bindings_key(self.auth.tenant_id, self._user_id)
+
+    async def _saved(self) -> dict[str, dict[str, Any]]:
+        raw = _decode_redis_value(await RedisCURD(self.redis).get(self._key))
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("AI 功能绑定 JSON 解析失败: tenant_id={} user_id={}", self.auth.tenant_id, self._user_id)
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _default_item(feature: Any) -> dict[str, Any]:
+        return {
+            "feature_code": feature.code,
+            "feature_name": feature.name,
+            "description": feature.description,
+            "prompt_key": feature.prompt_key,
+            "prompt_version": "v1",
+            "model_config_id": None,
+            "fallback_config_id": None,
+            "timeout_seconds": feature.default_timeout_seconds,
+            "allow_business_data": False,
+            "enabled": False,
+        }
+
+    async def list(self) -> list[dict[str, Any]]:
+        saved = await self._saved()
+        return [{**self._default_item(feature), **saved.get(feature.code, {})} for feature in default_ai_registry.list_features()]
+
+    async def get(self, feature_code: str) -> dict[str, Any]:
+        feature = default_ai_registry.get_feature(feature_code)
+        if feature is None:
+            raise CustomException(msg="AI 功能不存在", code=10404, status_code=404)
+        saved = await self._saved()
+        return {**self._default_item(feature), **saved.get(feature_code, {})}
+
+    async def upsert(self, feature_code: str, data: AiFeatureBindingUpdateSchema) -> dict[str, Any]:
+        feature = default_ai_registry.get_feature(feature_code)
+        if feature is None:
+            raise CustomException(msg="AI 功能不存在", code=10404, status_code=404)
+        if data.model_config_id:
+            primary = await _get_user_model_config_by_id(self.redis, self._user_id, data.model_config_id)
+            if primary is None:
+                raise CustomException(msg="主模型配置不存在", code=10404, status_code=404)
+        if data.fallback_config_id:
+            fallback = await _get_user_model_config_by_id(self.redis, self._user_id, data.fallback_config_id)
+            if fallback is None:
+                raise CustomException(msg="备用模型配置不存在", code=10404, status_code=404)
+        if data.model_config_id and data.model_config_id == data.fallback_config_id:
+            raise CustomException(msg="主模型与备用模型不能相同", code=10400, status_code=400)
+        saved = await self._saved()
+        item = {
+            **self._default_item(feature),
+            **data.model_dump(),
+            "feature_code": feature.code,
+            "feature_name": feature.name,
+            "description": feature.description,
+            "prompt_key": feature.prompt_key,
+        }
+        saved[feature_code] = item
+        await RedisCURD(self.redis).set(self._key, json.dumps(saved, ensure_ascii=False))
+        logger.info("AI 功能绑定已更新: tenant_id={} user_id={} feature_code={}", self.auth.tenant_id, self._user_id, feature_code)
+        return item
+
+
+StructuredRunner = Callable[..., Awaitable[Any]]
+
+
+def _validate_structured_result[ResultT: BaseModel](response_model: type[ResultT], raw: Any) -> ResultT:
+    if isinstance(raw, response_model):
+        return raw
+    if isinstance(raw, BaseModel):
+        return response_model.model_validate(raw.model_dump())
+    if isinstance(raw, dict):
+        return response_model.model_validate(raw)
+    content = str(raw or "").strip()
+    if content.startswith("```"):
+        lines = content.splitlines()
+        content = "\n".join(lines[1:-1]).strip()
+    return response_model.model_validate_json(content)
+
+
+async def _openai_structured_runner(
+    *,
+    model_config: dict[str, Any],
+    prompt: str,
+    system_prompt: str,
+    response_model: type[BaseModel],
+) -> Any:
+    client = AsyncOpenAI(
+        api_key=str(model_config.get("api_key") or ""),
+        base_url=str(model_config.get("base_url") or ""),
+        timeout=float(model_config.get("timeout_seconds") or 60),
+    )
+    schema = json.dumps(response_model.model_json_schema(), ensure_ascii=False)
+    response = await client.chat.completions.create(
+        model=str(model_config.get("model_id") or ""),
+        messages=[
+            {"role": "system", "content": f"{system_prompt}\n只返回符合以下 JSON Schema 的 JSON，不要使用 Markdown：{schema}"},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=float(model_config.get("temperature") or 0),
+        max_tokens=int(model_config.get("max_tokens") or 4096),
+        response_format={"type": "json_object"},
+    )
+    return response.choices[0].message.content
+
+
+class AiRuntimeService:
+    """面向产品功能的有界、可审计、结构化 AI 调用入口。"""
+
+    def __init__(self, auth: AuthSchema, redis: Redis, *, runner: StructuredRunner | None = None) -> None:
+        self.auth = auth
+        self.redis = redis
+        self.runner = runner or _openai_structured_runner
+
+    @property
+    def _user_id(self) -> int:
+        if not self.auth or not self.auth.user:
+            raise CustomException(msg="未登录", code=10401, status_code=401)
+        return self.auth.user.id
+
+    async def _runtime_config(self, config_id: str | None, *, source: str) -> dict[str, Any]:
+        if config_id:
+            item = await _get_user_model_config_by_id(self.redis, self._user_id, config_id)
+            if item is None:
+                raise CustomException(msg="模型配置不存在", code=10404, status_code=404)
+            return _runtime_model_config(item, auth=self.auth, source=source)
+        return await resolve_effective_model_config(self.redis, self.auth)
+
+    @staticmethod
+    def _assert_business_data_policy(binding: dict[str, Any], model_config: dict[str, Any], contains_business_data: bool) -> None:
+        if contains_business_data and not (binding.get("allow_business_data") and model_config.get("allow_business_data")):
+            raise CustomException(msg="AI 安全策略未允许处理业务数据", code=10403, status_code=403)
+
+    async def structured_generate[ResultT: BaseModel](
+        self,
+        *,
+        feature_code: str,
+        prompt: str,
+        response_model: type[ResultT],
+        system_prompt: str = "你是业务数据规划助手，只生成业务语义，不生成数据库事实。",
+        contains_business_data: bool = False,
+        business_id: str | None = None,
+    ) -> ResultT:
+        binding = await AiFeatureBindingService(self.auth, self.redis).get(feature_code)
+        if not binding.get("enabled"):
+            raise CustomException(msg="该 AI 功能尚未启用", code=10403, status_code=403)
+        primary = await self._runtime_config(binding.get("model_config_id"), source="feature_primary")
+        candidates = [primary]
+        if binding.get("fallback_config_id"):
+            candidates.append(await self._runtime_config(binding["fallback_config_id"], source="feature_fallback"))
+
+        started_at = perf_counter()
+        last_error: Exception | None = None
+        used_config = primary
+        for model_config in candidates:
+            used_config = model_config
+            try:
+                self._assert_business_data_policy(binding, model_config, contains_business_data)
+                timeout_seconds = min(float(binding["timeout_seconds"]), float(model_config.get("timeout_seconds") or 60))
+                raw = await asyncio.wait_for(
+                    self.runner(
+                        model_config={**model_config, "timeout_seconds": timeout_seconds},
+                        prompt=prompt,
+                        system_prompt=system_prompt,
+                        response_model=response_model,
+                    ),
+                    timeout=timeout_seconds,
+                )
+                result = _validate_structured_result(response_model, raw)
+                await record_ai_call_audit(
+                    self.redis,
+                    AiCallAuditRecord(
+                        user_id=self._user_id,
+                        tenant_id=self.auth.tenant_id,
+                        message=prompt,
+                        model_config=model_config,
+                        feature_code=feature_code,
+                        business_id=business_id,
+                        prompt_key=binding["prompt_key"],
+                        prompt_version=binding["prompt_version"],
+                        duration_ms=int((perf_counter() - started_at) * 1000),
+                        status="success",
+                    ),
+                )
+                return result
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                last_error = exc
+
+        await record_ai_call_audit(
+            self.redis,
+            AiCallAuditRecord(
+                user_id=self._user_id,
+                tenant_id=self.auth.tenant_id,
+                message=prompt,
+                model_config=used_config,
+                feature_code=feature_code,
+                business_id=business_id,
+                prompt_key=binding["prompt_key"],
+                prompt_version=binding["prompt_version"],
+                duration_ms=int((perf_counter() - started_at) * 1000),
+                status="failed",
+                error=type(last_error).__name__ if last_error else "UnknownError",
+            ),
+        )
+        if isinstance(last_error, CustomException):
+            raise last_error
+        raise CustomException(msg="AI 结构化生成失败，产品应降级使用规则结果", code=10503, status_code=503)

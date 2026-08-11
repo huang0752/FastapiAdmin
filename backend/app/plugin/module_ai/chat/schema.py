@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -93,6 +93,10 @@ class AiModelConfigBaseSchema(BaseModel):
     base_url: str = Field(..., min_length=1, max_length=500, description="API Base URL，如 https://api.openai.com/v1")
     model_id: str = Field(..., min_length=1, max_length=100, description="模型 ID")
     temperature: float = Field(0.7, ge=0.0, le=2.0, description="温度参数")
+    provider_type: Literal["openai_compatible"] = Field(default="openai_compatible", description="模型服务协议")
+    timeout_seconds: int = Field(default=60, ge=5, le=300, description="单次模型调用超时秒数")
+    max_tokens: int = Field(default=4096, ge=128, le=32768, description="单次调用最大输出 Token")
+    allow_business_data: bool = Field(default=False, description="该模型配置是否允许处理业务数据")
 
     @field_validator("base_url")
     @classmethod
@@ -153,3 +157,23 @@ class AiModelConfigListResponse(BaseModel):
 
     items: list[AiModelConfigItemSchema] = Field(default_factory=list, description="配置项列表")
     active_id: str | None = Field(None, description="当前激活的配置项 ID；为空表示使用系统默认")
+
+
+class AiFeatureBindingUpdateSchema(BaseModel):
+    """AI 功能绑定更新参数；模型密钥始终由服务端解析。"""
+
+    model_config_id: str | None = Field(default=None, max_length=64, description="主模型配置 ID；为空使用当前激活模型")
+    fallback_config_id: str | None = Field(default=None, max_length=64, description="备用模型配置 ID")
+    prompt_version: str = Field(default="v1", min_length=1, max_length=32, pattern=r"^[A-Za-z0-9._-]+$", description="提示词版本")
+    timeout_seconds: int = Field(default=60, ge=5, le=300, description="功能总超时秒数")
+    allow_business_data: bool = Field(default=False, description="该功能是否允许发送经过筛选的业务数据")
+    enabled: bool = Field(default=False, description="是否启用该 AI 功能")
+
+
+class AiFeatureBindingItemSchema(AiFeatureBindingUpdateSchema):
+    """AI 功能绑定公开信息。"""
+
+    feature_code: str = Field(..., description="稳定的功能代码")
+    feature_name: str = Field(..., description="功能名称")
+    description: str = Field(default="", description="功能说明")
+    prompt_key: str = Field(..., description="服务端提示词键")

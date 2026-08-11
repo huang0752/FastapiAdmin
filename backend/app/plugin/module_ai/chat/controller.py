@@ -13,6 +13,8 @@ from app.core.router_class import OperationLogRoute
 from .schema import (
     AiChatRequestSchema,
     AiChatResponseSchema,
+    AiFeatureBindingItemSchema,
+    AiFeatureBindingUpdateSchema,
     AiModelConfigListResponse,
     AiModelConfigSchema,
     AiModelConfigUpdateSchema,
@@ -20,7 +22,7 @@ from .schema import (
     ChatSessionQueryParam,
     ChatSessionUpdateSchema,
 )
-from .service import AiModelConfigService, ChatService
+from .service import AiFeatureBindingService, AiModelConfigService, ChatService
 
 ChatRouter = APIRouter(route_class=OperationLogRoute, prefix="/chat", tags=["AI管理", "AI对话"])
 
@@ -205,3 +207,31 @@ async def activate_model_config_controller(
     service = AiModelConfigService(auth, redis)
     await service.set_active(config_id)
     return SuccessResponse(data=None, msg="已切换模型")
+
+
+@ChatRouter.get(
+    "/feature",
+    summary="获取当前租户用户的 AI 功能绑定",
+    response_model=ResponseSchema[list[AiFeatureBindingItemSchema]],
+)
+async def list_feature_binding_controller(
+    redis: Annotated[Redis, Depends(redis_getter)],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_ai:chat:query"]))],
+) -> JSONResponse:
+    result = await AiFeatureBindingService(auth, redis).list()
+    return SuccessResponse(data=result, msg="获取 AI 功能绑定成功")
+
+
+@ChatRouter.put(
+    "/feature/{feature_code}",
+    summary="更新当前租户用户的 AI 功能绑定",
+    response_model=ResponseSchema[AiFeatureBindingItemSchema],
+)
+async def update_feature_binding_controller(
+    feature_code: Annotated[str, Path(description="AI 功能代码")],
+    data: AiFeatureBindingUpdateSchema,
+    redis: Annotated[Redis, Depends(redis_getter)],
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_ai:chat:update"]))],
+) -> JSONResponse:
+    result = await AiFeatureBindingService(auth, redis).upsert(feature_code, data)
+    return SuccessResponse(data=result, msg="AI 功能绑定已更新")
