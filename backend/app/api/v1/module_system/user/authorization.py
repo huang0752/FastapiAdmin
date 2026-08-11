@@ -56,7 +56,9 @@ class UserAuthorizationResolver:
         return {
             menu.id
             for role in user.roles or []
-            if role.status == 0 and not role.is_deleted
+            if role.tenant_id == self.auth.tenant_id
+            and role.status == 0
+            and not role.is_deleted
             for menu in role.menus or []
             if menu.id in allowed_ids
             and menu.status == 0

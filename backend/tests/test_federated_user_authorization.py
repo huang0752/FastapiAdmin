@@ -377,6 +377,67 @@ async def test_soft_deleted_menu_does_not_authorize_federated_user(db_session):
 
 
 @pytest.mark.asyncio
+async def test_effective_user_menu_ignores_roles_from_other_tenants(db_session):
+    fixture = await seed_federated_authorization_fixture(db_session)
+    resolver = UserAuthorizationResolver(fixture.authorized_auth)
+    current_user = fixture.authorized_auth.user
+
+    assert await resolver.effective_menu_ids_for_user(current_user)
+
+    current_role = current_user.roles[0]
+    allowed_menu = current_role.menus[0]
+    current_tenant = await db_session.get(TenantModel, fixture.auth.tenant_id)
+    suffix = uuid4().hex[:8]
+    other_tenant = TenantModel(
+        site_id=current_tenant.site_id,
+        package_id=current_tenant.package_id,
+        name=f"跨租户角色测试{suffix}",
+        code=f"cross{suffix}",
+        status=0,
+    )
+    db_session.add(other_tenant)
+    await db_session.flush()
+    other_role = RoleModel(
+        tenant_id=other_tenant.id,
+        name=f"跨租户角色{suffix}",
+        code=f"crossrole{suffix}",
+        order=1,
+        status=0,
+        data_scope=4,
+    )
+    db_session.add(other_role)
+    await db_session.flush()
+    current_role.status = 1
+    db_session.add_all(
+        [
+            RoleMenusModel(role_id=other_role.id, menu_id=allowed_menu.id),
+            UserRolesModel(user_id=current_user.id, role_id=other_role.id),
+        ]
+    )
+    await db_session.flush()
+    loaded_user = (
+        await db_session.scalars(
+            select(UserModel)
+            .where(UserModel.id == current_user.id)
+            .options(selectinload(UserModel.roles).selectinload(RoleModel.menus))
+            .execution_options(populate_existing=True)
+        )
+    ).one()
+
+    effective = await UserAuthorizationResolver(
+        AuthSchema(
+            db=db_session,
+            user=loaded_user,
+            tenant_id=fixture.auth.tenant_id,
+            site_id=fixture.auth.site_id,
+            check_data_scope=False,
+        )
+    ).effective_menu_ids_for_user(loaded_user)
+
+    assert effective == set()
+
+
+@pytest.mark.asyncio
 async def test_user_page_exposes_federated_authorization_status(
     federated_authorization_fixture,
     monkeypatch,
