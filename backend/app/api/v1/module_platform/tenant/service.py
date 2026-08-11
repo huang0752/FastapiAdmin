@@ -198,6 +198,36 @@ class TenantService:
                 status_code=400,
             )
 
+    @staticmethod
+    def _is_uscc_unique_conflict(exc: BaseException) -> bool:
+        """识别数据库约束兜底产生的本站点企业标识冲突。"""
+        pending: list[BaseException] = [exc]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            detail = str(current)
+            if "uq_platform_tenant_site_uscc" in detail or (
+                "platform_tenant.site_id" in detail
+                and "platform_tenant.unified_social_credit_code" in detail
+            ):
+                return True
+            for nested in (current.__cause__, current.__context__, getattr(current, "orig", None)):
+                if isinstance(nested, BaseException):
+                    pending.append(nested)
+        return False
+
+    @classmethod
+    def _raise_stable_uscc_conflict(cls, exc: CustomException) -> None:
+        if cls._is_uscc_unique_conflict(exc):
+            raise CustomException(
+                msg="统一社会信用代码在当前站点已存在",
+                status_code=409,
+            ) from exc
+        raise exc
+
     async def _replace_tenant_member_rbac(self, tenant_id: int, user_id: int, role_code: str) -> None:
         """让成员身份成为租户内 RBAC 绑定的唯一事实来源。"""
         from app.api.v1.module_platform.package.service import PackageService
@@ -527,7 +557,10 @@ class TenantService:
             unified_social_credit_code=data.unified_social_credit_code,
         )
 
-        tenant_obj = await TenantCRUD(self.auth).create(data=data)
+        try:
+            tenant_obj = await TenantCRUD(self.auth).create(data=data)
+        except CustomException as exc:
+            self._raise_stable_uscc_conflict(exc)
         if not tenant_obj:
             raise CustomException(msg="创建租户失败")
 
@@ -646,7 +679,10 @@ class TenantService:
         )
 
         update_data = data.model_dump(exclude_unset=True, exclude={"package_id"})
-        updated = await TenantCRUD(self.auth).update(id=id, data=update_data)
+        try:
+            updated = await TenantCRUD(self.auth).update(id=id, data=update_data)
+        except CustomException as exc:
+            self._raise_stable_uscc_conflict(exc)
         if not updated:
             raise CustomException(msg="更新失败")
 

@@ -4,6 +4,8 @@ USCC_WEIGHTS = (1, 3, 9, 27, 19, 26, 16, 17, 20, 29, 25, 13, 8, 24, 10, 30, 28)
 
 def normalize_unified_social_credit_code(value: str | None) -> str | None:
     """去除空白并统一社会信用代码大小写；空字符串按未填写处理。"""
+    if value is not None and not isinstance(value, str):
+        raise ValueError("统一社会信用代码必须是字符串")
     normalized = value.strip().upper() if value else ""
     return normalized or None
 

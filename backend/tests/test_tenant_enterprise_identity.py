@@ -3,6 +3,7 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import UniqueConstraint, select
 
 from app.api.v1.module_platform.federated_tenant.model import FederatedTenantModel
@@ -15,11 +16,14 @@ from app.api.v1.module_platform.tenant.schema import (
     TenantQueryParam,
     TenantUpdateSchema,
 )
+from app.api.v1.module_platform.tenant.service import TenantService
 from app.common.enums import QueueEnum
 from app.core.database import async_db_session
 
 VALID_USCC = "91350100M000100Y43"
 UPDATED_USCC = "91350100M000100Y56"
+RACE_USCC = "91350100M000101Y4Q"
+UPDATE_RACE_USCC = "91350100M000102Y4E"
 
 
 def _unique(prefix: str) -> str:
@@ -50,6 +54,28 @@ def test_uscc_normalizes_and_validates_checksum() -> None:
     assert validate_unified_social_credit_code("   ") is None
     with pytest.raises(ValueError, match="统一社会信用代码"):
         validate_unified_social_credit_code("91350100M000100Y44")
+
+
+def test_non_string_uscc_is_a_stable_validation_error(
+    test_client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    with pytest.raises(ValidationError, match="统一社会信用代码必须是字符串"):
+        TenantUpdateSchema(unified_social_credit_code=123)  # type: ignore[arg-type]
+
+    response = test_client.post(
+        "/platform/tenant/create",
+        headers=auth_headers,
+        json={
+            "name": _unique("非法企业标识"),
+            "code": _unique("I"),
+            "site_id": 1,
+            "unified_social_credit_code": 123,
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["msg"] == "统一社会信用代码必须是字符串"
 
 
 def test_tenant_schemas_normalize_uscc_and_query_uses_exact_match() -> None:
@@ -83,6 +109,91 @@ def test_federated_tenant_has_stable_unique_keys() -> None:
     assert ("central_tenant_uuid", "issuer", "site_id") in keys
     assert ("issuer", "local_tenant_id", "site_id") in keys
     assert ("provision_request_uuid",) in keys
+
+
+def test_database_uscc_create_race_returns_stable_conflict_without_sql_details(
+    test_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def skip_preflight_check(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(TenantService, "_ensure_uscc_available", skip_preflight_check)
+
+    first = test_client.post(
+        "/platform/tenant/create",
+        headers=auth_headers,
+        json={
+            "name": _unique("并发企业甲"),
+            "code": _unique("RA"),
+            "site_id": 1,
+            "unified_social_credit_code": RACE_USCC,
+        },
+    )
+    assert first.status_code == 200, first.text
+
+    conflict = test_client.post(
+        "/platform/tenant/create",
+        headers=auth_headers,
+        json={
+            "name": _unique("并发企业乙"),
+            "code": _unique("RB"),
+            "site_id": 1,
+            "unified_social_credit_code": RACE_USCC,
+        },
+    )
+
+    assert conflict.status_code == 409, conflict.text
+    assert conflict.json()["msg"] == "统一社会信用代码在当前站点已存在"
+    assert conflict.json().get("data") is None
+    assert "platform_tenant" not in conflict.text
+    assert "UNIQUE constraint" not in conflict.text
+
+
+def test_database_uscc_update_race_returns_stable_conflict_without_sql_details(
+    test_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = test_client.post(
+        "/platform/tenant/create",
+        headers=auth_headers,
+        json={
+            "name": _unique("更新并发企业甲"),
+            "code": _unique("UA"),
+            "site_id": 1,
+            "unified_social_credit_code": UPDATE_RACE_USCC,
+        },
+    )
+    assert first.status_code == 200, first.text
+
+    second = test_client.post(
+        "/platform/tenant/create",
+        headers=auth_headers,
+        json={
+            "name": _unique("更新并发企业乙"),
+            "code": _unique("UB"),
+            "site_id": 1,
+        },
+    )
+    assert second.status_code == 200, second.text
+
+    async def skip_preflight_check(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(TenantService, "_ensure_uscc_available", skip_preflight_check)
+    conflict = test_client.put(
+        f"/platform/tenant/update/{second.json()['data']['id']}",
+        headers=auth_headers,
+        json={"unified_social_credit_code": UPDATE_RACE_USCC},
+    )
+
+    assert conflict.status_code == 409, conflict.text
+    assert conflict.json()["msg"] == "统一社会信用代码在当前站点已存在"
+    assert conflict.json().get("data") is None
+    assert "platform_tenant" not in conflict.text
+    assert "UNIQUE constraint" not in conflict.text
 
 
 def test_platform_tenant_uscc_is_scoped_to_site_and_remains_self_service_read_only(
