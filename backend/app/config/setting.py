@@ -51,6 +51,8 @@ class Settings(BaseSettings):
                 raise ValueError("启用中控 SSO 时必须配置 client secret")
             if self.CONTROL_SSO_TIMEOUT_SECONDS <= 0:
                 raise ValueError("中控 SSO 超时必须大于 0")
+        if self.CONTROL_TENANT_PROVISIONING_ENABLED and not self.CONTROL_SSO_ENABLED:
+            raise ValueError("启用中控租户自动开户时必须同时启用中控 SSO")
 
     # ================================================= #
     # ******************* 项目环境 ****************** #
@@ -111,6 +113,7 @@ class Settings(BaseSettings):
     CONTROL_SSO_CLIENT_ID: str = ""  # 当前应用在中控登记的客户端 ID
     CONTROL_SSO_CLIENT_SECRET: str = ""  # 当前应用在中控登记的客户端密钥
     CONTROL_SSO_TIMEOUT_SECONDS: float = 5.0  # 启动码兑换 HTTP 超时
+    CONTROL_TENANT_PROVISIONING_ENABLED: bool = False  # 是否接受中控租户自动开户
 
     # 多租户中间件白名单路径（不需要租户上下文的公开接口）
     TENANT_WHITELIST_PATHS: list[str] = [

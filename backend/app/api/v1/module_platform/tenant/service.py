@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import sqlalchemy as sa
 from redis.asyncio.client import Redis
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import RedisInitKeyConfig
@@ -536,33 +537,7 @@ class TenantService:
 
     @require_platform_admin
     async def create(self, data: TenantCreateSchema) -> TenantOutSchema:
-        from app.api.v1.module_platform.package.model import PackageModel
-        from app.api.v1.module_platform.site.model import SiteModel
-
-        site = await self.auth.db.get(SiteModel, data.site_id)
-        if site is None or site.is_deleted or site.status != 0:
-            raise CustomException(msg="所属站点不存在或已停用")
-        if data.package_id is not None:
-            package = await self.auth.db.get(PackageModel, data.package_id)
-            if package is None or package.is_deleted or package.status != 0:
-                raise CustomException(msg="关联套餐不存在或已停用")
-            if package.site_id != data.site_id:
-                raise CustomException(msg="禁止为租户配置其他站点的套餐")
-        if await TenantCRUD(self.auth).get(name=data.name):
-            raise CustomException(msg="创建失败，名称已存在")
-        if await TenantCRUD(self.auth).get(code=data.code):
-            raise CustomException(msg="创建失败，编码已存在")
-        await self._ensure_uscc_available(
-            site_id=data.site_id,
-            unified_social_credit_code=data.unified_social_credit_code,
-        )
-
-        try:
-            tenant_obj = await TenantCRUD(self.auth).create(data=data)
-        except CustomException as exc:
-            self._raise_stable_uscc_conflict(exc)
-        if not tenant_obj:
-            raise CustomException(msg="创建租户失败")
+        tenant_obj = await self.create_tenant_record(data)
 
         # 创建租户初始管理员
         # 1. 生成初始管理员用户名
@@ -615,6 +590,53 @@ class TenantService:
         result.initial_admin = TenantInitialAdminSchema(username=username, password=password)
 
         return result
+
+    async def create_tenant_record(
+        self,
+        data: TenantCreateSchema,
+        *,
+        preserve_integrity_error: bool = False,
+    ) -> TenantModel:
+        """只创建租户记录；调用方负责在同一外层事务中装配身份和权限。"""
+        from app.api.v1.module_platform.package.model import PackageModel
+        from app.api.v1.module_platform.site.model import SiteModel
+
+        site = await self.auth.db.get(SiteModel, data.site_id)
+        if site is None or site.is_deleted or site.status != 0:
+            raise CustomException(msg="所属站点不存在或已停用")
+        if data.package_id is not None:
+            package = await self.auth.db.get(PackageModel, data.package_id)
+            if package is None or package.is_deleted or package.status != 0:
+                raise CustomException(msg="关联套餐不存在或已停用")
+            if package.site_id != data.site_id:
+                raise CustomException(msg="禁止为租户配置其他站点的套餐")
+        if await TenantCRUD(self.auth).get(name=data.name):
+            raise CustomException(msg="创建失败，名称已存在")
+        if await TenantCRUD(self.auth).get(code=data.code):
+            raise CustomException(msg="创建失败，编码已存在")
+        await self._ensure_uscc_available(
+            site_id=data.site_id,
+            unified_social_credit_code=data.unified_social_credit_code,
+        )
+
+        if not preserve_integrity_error:
+            try:
+                return await TenantCRUD(self.auth).create(data=data)
+            except CustomException as exc:
+                self._raise_stable_uscc_conflict(exc)
+
+        tenant_obj = TenantModel(**data.model_dump())
+        self.auth.db.add(tenant_obj)
+        try:
+            await self.auth.db.flush()
+        except IntegrityError as exc:
+            if self._is_uscc_unique_conflict(exc):
+                raise CustomException(
+                    msg="统一社会信用代码在当前站点已存在",
+                    status_code=409,
+                ) from exc
+            raise
+        return tenant_obj
 
     @require_platform_admin
     async def update(self, id: int, data: TenantUpdateSchema) -> TenantOutSchema:
@@ -670,7 +692,7 @@ class TenantService:
         target_uscc = (
             data.unified_social_credit_code
             if "unified_social_credit_code" in data.model_fields_set
-            else obj.unified_social_credit_code
+            else getattr(obj, "unified_social_credit_code", None)
         )
         await self._ensure_uscc_available(
             site_id=target_site_id,

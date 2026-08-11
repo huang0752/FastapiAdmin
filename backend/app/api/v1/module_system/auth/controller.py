@@ -24,8 +24,9 @@ from app.core.redis_crud import RedisCURD
 from app.core.router_class import OperationLogRoute
 from app.core.security import CustomOAuth2PasswordRequestForm, OAuth2Schema
 
-from .control_sso_schema import ControlExchangeIn
+from .control_sso_schema import ControlExchangeIn, ControlTenantProvisionIn, ControlTenantProvisionOut
 from .control_sso_service import ControlSSOClientService
+from .control_tenant_provisioning_service import ControlTenantProvisioningService
 from .oauth_service import (
     STATE_PREFIX,
     _callback_url,
@@ -75,6 +76,26 @@ async def control_sso_exchange_controller(
         raise HTTPException(status_code=404, detail="中控 SSO 未启用")
     token = await ControlSSOClientService.exchange_and_login(request, db, redis, data.code)
     return SuccessResponse(data=token, msg="统一登录成功")
+
+
+@AuthRouter.post(
+    "/control/tenant/provision",
+    summary="中控自动创建目标租户",
+    response_model=ResponseSchema[ControlTenantProvisionOut],
+)
+async def control_tenant_provision_controller(
+    request: Request,
+    data: ControlTenantProvisionIn,
+    db: Annotated[AsyncSession, Depends(db_getter)],
+) -> JSONResponse:
+    if not settings.CONTROL_TENANT_PROVISIONING_ENABLED:
+        raise HTTPException(status_code=404, detail="中控租户自动开户未启用")
+    result = await ControlTenantProvisioningService.provision(
+        request=request,
+        db=db,
+        code=data.code,
+    )
+    return SuccessResponse(data=result, msg="目标租户开户完成")
 
 
 @AuthRouter.post(
