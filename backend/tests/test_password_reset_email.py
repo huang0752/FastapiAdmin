@@ -1,8 +1,20 @@
+import asyncio
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from app.api.v1.module_system.user.model import UserModel
 from app.config.setting import settings
+from app.core.database import async_db_session
+
+
+async def _mark_user_federated(username: str) -> None:
+    async with async_db_session() as db:
+        user = (await db.execute(select(UserModel).where(UserModel.username == username))).scalar_one()
+        user.auth_source = "federated"
+        user.password_login_enabled = False
+        await db.commit()
 
 
 def test_password_reset_email_code_sends_generic_response(
@@ -95,6 +107,95 @@ def test_password_reset_email_rate_limited(test_client: TestClient, monkeypatch)
     assert first.status_code == 200, first.text
     assert second.status_code == 400
     assert "60 秒" in second.json()["msg"]
+
+
+def test_federated_user_email_reset_keeps_generic_response_but_does_not_send(
+    test_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch,
+) -> None:
+    username = "federated_email_send"
+    email = "federated-email-send@example.com"
+    create_resp = test_client.post(
+        "/system/user/create",
+        headers=auth_headers,
+        json={
+            "username": username,
+            "password": "localPass123",
+            "name": "联邦邮箱发送测试",
+            "email": email,
+        },
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    asyncio.run(_mark_user_federated(username))
+    sent: list[dict[str, Any]] = []
+
+    async def fake_send_by_template(self, **kwargs):
+        sent.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        "app.api.v1.module_platform.email.service.EmailSendService.send_by_template",
+        fake_send_by_template,
+    )
+
+    response = test_client.post(
+        "/system/user/password/forget/email-code",
+        json={"username": username, "email": email},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["msg"] == "如账号邮箱匹配，验证码已发送"
+    assert sent == []
+
+
+def test_federated_user_cannot_complete_legacy_password_reset(
+    test_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch,
+) -> None:
+    username = "federated_email_reset"
+    email = "federated-email-reset@example.com"
+    create_resp = test_client.post(
+        "/system/user/create",
+        headers=auth_headers,
+        json={
+            "username": username,
+            "password": "localPass123",
+            "name": "联邦邮箱重置测试",
+            "email": email,
+        },
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    captured_code: dict[str, str] = {}
+
+    async def fake_send_by_template(self, **kwargs):
+        captured_code["code"] = kwargs["variables"]["code"]
+        return True
+
+    monkeypatch.setattr(
+        "app.api.v1.module_platform.email.service.EmailSendService.send_by_template",
+        fake_send_by_template,
+    )
+    send_resp = test_client.post(
+        "/system/user/password/forget/email-code",
+        json={"username": username, "email": email},
+    )
+    assert send_resp.status_code == 200, send_resp.text
+    asyncio.run(_mark_user_federated(username))
+
+    response = test_client.post(
+        "/system/user/password/forget/email-reset",
+        json={
+            "username": username,
+            "email": email,
+            "code": captured_code["code"],
+            "new_password": "newLocalPass123",
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["msg"] == "统一登录账号不支持本地密码操作"
 
 
 def test_oauth_login_route_is_disabled_by_default(test_client: TestClient) -> None:

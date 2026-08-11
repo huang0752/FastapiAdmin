@@ -27,6 +27,7 @@ function normalizeAuthFeatures(features?: Partial<AuthFeatures> | null): AuthFea
     ...defaultAuthFeatures,
     ...features,
     oauthProviders: features?.oauthProviders ?? defaultAuthFeatures.oauthProviders,
+    controlSso: Boolean(features?.controlSso ?? false),
   };
 }
 

@@ -79,7 +79,13 @@ async def test_superuser_can_update_own_whitelisted_profile_without_clearing_omi
 async def test_wrong_current_password_is_a_bad_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = SimpleNamespace(id=7, tenant_id=1, password="$2b$12$secret")
+    user = SimpleNamespace(
+        id=7,
+        tenant_id=1,
+        password="$2b$12$secret",
+        auth_source="local",
+        password_login_enabled=True,
+    )
     captured: dict[str, object] = {}
 
     class FakeUserCRUD:

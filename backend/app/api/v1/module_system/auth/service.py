@@ -208,6 +208,9 @@ class LoginService:
             )
             raise CustomException(msg="账号或密码错误", status_code=400)
 
+        if not user.password_login_enabled or user.auth_source == "federated":
+            raise CustomException(msg="账号或密码错误", status_code=400)
+
         if not PwdUtil.verify_password(plain_password=login_form.password, password_hash=user.password):
             await _write_login_log(
                 username=_login_username,

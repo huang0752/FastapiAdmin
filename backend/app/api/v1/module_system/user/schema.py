@@ -343,6 +343,8 @@ class UserOutSchema(UserUpdateSchema, BaseSchema, UserBySchema, TenantBySchema):
 
     username: str | None = Field(default=None, max_length=32, description="用户名")
     password: str | None = Field(default=None, exclude=True, description="密码哈希（不对外返回）")
+    auth_source: str = Field(default="local", description="认证来源")
+    password_login_enabled: bool = Field(default=True, description="是否允许密码登录")
 
     tenant_id: int | None = Field(
         default=None,
