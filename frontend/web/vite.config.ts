@@ -12,6 +12,7 @@ import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
 import tailwindcss from "@tailwindcss/vite";
 import vitePluginStart from "./build/vitePluginStart";
 import { scanElementPlusStyleIncludes } from "./build/elementPlusStyleIncludes";
+import { foodLogiViewBoundaryPlugin } from "./build/foodLogiViewBoundary";
 import { name, version, engines, dependencies, devDependencies } from "./package.json";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -157,6 +158,7 @@ export default ({ mode }: { mode: string }) => {
       },
     },
     plugins: [
+      foodLogiViewBoundaryPlugin(env.VITE_APP_ASSEMBLY || ""),
       vue(),
       vitePluginStart(),
       tailwindcss(),
