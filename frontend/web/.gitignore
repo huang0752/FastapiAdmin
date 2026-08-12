@@ -2,6 +2,9 @@ node_modules
 .DS_Store
 dist
 dist-ssr
+dist-trace
+dist-agri
+dist-logistic
 *.local
 .cursorrules
 .history

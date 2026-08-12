@@ -165,8 +165,16 @@ def test_screen_contract_has_one_aggregate_route_and_two_brand_variants(product_
 
 def test_frontend_and_deployment_have_independent_product_entrypoints() -> None:
     package = (REPOSITORY_DIR / "frontend" / "web" / "package.json").read_text()
+    expected_titles = {
+        "trace": "食品安全质量追溯系统",
+        "agri": "农产品配送管理系统",
+        "logistic": "冷链物流配送车辆管理系统",
+    }
     for product_code in ("trace", "agri", "logistic"):
         assert f'"build:{product_code}"' in package
         assert (REPOSITORY_DIR / "frontend" / "web" / "src" / "api" / f"module_{product_code}").is_dir()
         assert (REPOSITORY_DIR / "frontend" / "web" / "src" / "views" / f"module_{product_code}").is_dir()
+        mode_env = REPOSITORY_DIR / "frontend" / "web" / f".env.{product_code}"
+        assert mode_env.is_file()
+        assert f"VITE_APP_TITLE = {expected_titles[product_code]}" in mode_env.read_text()
     assert (REPOSITORY_DIR / "deploy" / "nginx" / "products.conf.example").is_file()
