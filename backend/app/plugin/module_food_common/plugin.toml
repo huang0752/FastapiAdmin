@@ -1,0 +1,6 @@
+name = "food_common"
+title = "食品物流公共契约"
+version = "0.1.0"
+description = "Site/Tenant/Package 上下文与大屏响应契约。"
+optional = false
+tags = ["food-logi", "contract"]

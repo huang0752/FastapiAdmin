@@ -1,0 +1,6 @@
+name = "agricultural_delivery"
+title = "农产品配送管理"
+version = "0.1.0"
+description = "农配产品路由与业务模块入口。"
+optional = true
+tags = ["food-logi", "agri"]

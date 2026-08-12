@@ -1,0 +1,21 @@
+[assembly]
+name = "food-traceability"
+title = "食品安全质量追溯系统"
+description = "只装配追溯产品，不挂载农配或冷链车辆业务。"
+
+[core]
+required = ["auth", "tenant", "user", "role", "permission", "menu", "settings", "audit"]
+
+[backend]
+enabled_plugins = ["module_food_common", "module_food_traceability"]
+disabled_plugins = ["module_agricultural_delivery", "module_cold_chain_vehicle", "module_example", "module_ai", "module_generator", "module_task"]
+
+[frontend]
+enabled_route_groups = ["auth", "home", "dashboard", "system", "platform", "user-profile", "food-traceability", "exception"]
+disabled_route_groups = ["agricultural-delivery", "cold-chain-vehicle", "pricing", "article", "tutorial", "ai-chat", "changelog"]
+
+[seed]
+packs = ["food-common", "food-traceability"]
+
+[features]
+flags = { ai_assistant = false, plugin_market = false, demo_content = false, food_screen = true }

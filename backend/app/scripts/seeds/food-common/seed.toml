@@ -1,0 +1,6 @@
+name = "food-common"
+depends = []
+
+[[tables]]
+table = "platform_site"
+file = "platform_site.json"

@@ -62,14 +62,17 @@ async def resolve_request_site(db: AsyncSession, request: Request):
 
 def validate_session_site(
     *,
+    jwt_site_id: int | None = None,
     session_site_id: int | None,
     request_site_id: int | None,
     tenant_site_id: int | None,
 ) -> None:
     """确保会话、Host 与租户始终处于同一 Site 边界。"""
-    if not session_site_id or not request_site_id or not tenant_site_id:
+    if jwt_site_id is None:
+        jwt_site_id = session_site_id
+    if not jwt_site_id or not session_site_id or not request_site_id or not tenant_site_id:
         raise CustomException(msg="站点上下文缺失", code=10401, status_code=401)
-    if len({int(session_site_id), int(request_site_id), int(tenant_site_id)}) != 1:
+    if len({int(jwt_site_id), int(session_site_id), int(request_site_id), int(tenant_site_id)}) != 1:
         raise CustomException(msg="站点上下文不匹配，禁止跨站点访问", code=10403, status_code=403)
 
 
@@ -366,6 +369,7 @@ class LoginService:
         access_token = create_access_token(
             payload=JWTPayloadSchema(
                 sub=session_id,
+                site_id=site_id,
                 is_refresh=False,
                 exp=now + access_expires,
             )
@@ -373,6 +377,7 @@ class LoginService:
         refresh_token = create_access_token(
             payload=JWTPayloadSchema(
                 sub=session_id,
+                site_id=site_id,
                 is_refresh=True,
                 exp=now + refresh_expires,
             )
@@ -454,7 +459,11 @@ class LoginService:
             raise CustomException(msg="租户不存在或已被禁用", code=10401, status_code=401)
 
         request_site = await resolve_request_site(db, request)
+        jwt_site_id = getattr(token_payload, "site_id", None)
+        if not jwt_site_id:
+            raise CustomException(msg="JWT 站点上下文不匹配", code=10403, status_code=403)
         validate_session_site(
+            jwt_site_id=jwt_site_id,
             session_site_id=site_id,
             request_site_id=request_site.id,
             tenant_site_id=tenant.site_id,
@@ -483,6 +492,7 @@ class LoginService:
         access_token = create_access_token(
             payload=JWTPayloadSchema(
                 sub=session_id,
+                site_id=site_id,
                 is_refresh=False,
                 exp=now + access_expires,
             )
@@ -491,6 +501,7 @@ class LoginService:
         refresh_token_new = create_access_token(
             payload=JWTPayloadSchema(
                 sub=session_id,
+                site_id=site_id,
                 is_refresh=True,
                 exp=now + refresh_expires,
             )
@@ -644,6 +655,7 @@ class LoginService:
         new_access_token = create_access_token(
             payload=JWTPayloadSchema(
                 sub=session_id,
+                site_id=session_info.get("site_id"),
                 is_refresh=False,
                 exp=now + access_expires,
             )

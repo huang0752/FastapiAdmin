@@ -1,0 +1,6 @@
+name = "cold_chain_vehicle"
+title = "冷链物流配送车辆管理"
+version = "0.1.0"
+description = "冷链车辆产品路由与业务模块入口。"
+optional = true
+tags = ["food-logi", "logistic"]

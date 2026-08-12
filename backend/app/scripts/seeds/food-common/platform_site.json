@@ -1,0 +1,30 @@
+[
+  {
+    "id": 101,
+    "code": "data360",
+    "name": "华夏电投",
+    "logo_url": null,
+    "favicon": null,
+    "login_bg": null,
+    "copyright": null,
+    "keep_record": null,
+    "help_doc": null,
+    "privacy": null,
+    "clause": null,
+    "status": 0
+  },
+  {
+    "id": 102,
+    "code": "znceedi",
+    "name": "中能电投",
+    "logo_url": null,
+    "favicon": null,
+    "login_bg": null,
+    "copyright": null,
+    "keep_record": null,
+    "help_doc": null,
+    "privacy": null,
+    "clause": null,
+    "status": 0
+  }
+]

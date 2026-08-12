@@ -1,0 +1,27 @@
+# Food Logi 六个产品 Host 的反向代理骨架。TLS 证书路径由部署环境注入。
+map $host $food_logi_upstream {
+    hostnames;
+    trace.data360.org.cn 127.0.0.1:8101;
+    trace.znceedi.org.cn 127.0.0.1:8101;
+    agri.data360.org.cn 127.0.0.1:8102;
+    agri.znceedi.org.cn 127.0.0.1:8102;
+    logistic.data360.org.cn 127.0.0.1:8103;
+    logistic.znceedi.org.cn 127.0.0.1:8103;
+    default "";
+}
+
+server {
+    listen 80;
+    server_name trace.data360.org.cn trace.znceedi.org.cn
+                agri.data360.org.cn agri.znceedi.org.cn
+                logistic.data360.org.cn logistic.znceedi.org.cn;
+
+    location /api/ {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://$food_logi_upstream;
+    }
+
+    # 前端 root 应在各产品独立 server 模板中指向各自 dist-* 产物。
+}

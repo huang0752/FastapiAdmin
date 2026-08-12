@@ -1,0 +1,6 @@
+name = "food_traceability"
+title = "食品安全质量追溯"
+version = "0.1.0"
+description = "追溯产品路由与业务模块入口。"
+optional = true
+tags = ["food-logi", "trace"]

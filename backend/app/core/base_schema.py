@@ -169,6 +169,7 @@ class JWTPayloadSchema(BaseModel):
     """JWT载荷模型"""
 
     sub: str = Field(..., description="用户登录信息")
+    site_id: int | None = Field(default=None, gt=0, description="签名站点边界")
     is_refresh: bool = Field(default=False, description="是否刷新token")
     exp: datetime | int = Field(..., description="过期时间")
     iat: datetime | int | None = Field(default=None, description="签发时间")

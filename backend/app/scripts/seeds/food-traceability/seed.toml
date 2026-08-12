@@ -1,0 +1,6 @@
+name = "food-traceability"
+depends = ["food-common"]
+
+[[tables]]
+table = "platform_site_domain"
+file = "platform_site_domain.json"

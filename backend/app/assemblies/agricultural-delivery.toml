@@ -1,0 +1,21 @@
+[assembly]
+name = "agricultural-delivery"
+title = "农产品配送管理系统"
+description = "只装配农产品配送产品，不挂载追溯或冷链车辆业务。"
+
+[core]
+required = ["auth", "tenant", "user", "role", "permission", "menu", "settings", "audit"]
+
+[backend]
+enabled_plugins = ["module_food_common", "module_agricultural_delivery"]
+disabled_plugins = ["module_food_traceability", "module_cold_chain_vehicle", "module_example", "module_ai", "module_generator", "module_task"]
+
+[frontend]
+enabled_route_groups = ["auth", "home", "dashboard", "system", "platform", "user-profile", "agricultural-delivery", "exception"]
+disabled_route_groups = ["food-traceability", "cold-chain-vehicle", "pricing", "article", "tutorial", "ai-chat", "changelog"]
+
+[seed]
+packs = ["food-common", "agricultural-delivery"]
+
+[features]
+flags = { ai_assistant = false, plugin_market = false, demo_content = false, food_screen = true }

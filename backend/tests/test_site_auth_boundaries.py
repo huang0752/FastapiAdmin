@@ -121,6 +121,12 @@ def test_create_token_persists_selected_tenant_and_site(
     session = json.loads(session_value)
     assert session["tenant_id"] == 20
     assert session["site_id"] == 30
+    from app.core.security import decode_access_token
+
+    access_token = next(value for key, value in writes.items() if "access_token" in key)
+    refresh_token = next(value for key, value in writes.items() if "refresh_token" in key)
+    assert decode_access_token(access_token).site_id == 30
+    assert decode_access_token(refresh_token).site_id == 30
 
 
 def test_superuser_tenant_options_are_scoped_to_site() -> None:

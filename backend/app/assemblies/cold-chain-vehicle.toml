@@ -1,0 +1,21 @@
+[assembly]
+name = "cold-chain-vehicle"
+title = "冷链物流配送车辆管理系统"
+description = "只装配冷链车辆产品，不挂载追溯或农产品配送业务。"
+
+[core]
+required = ["auth", "tenant", "user", "role", "permission", "menu", "settings", "audit"]
+
+[backend]
+enabled_plugins = ["module_food_common", "module_cold_chain_vehicle"]
+disabled_plugins = ["module_food_traceability", "module_agricultural_delivery", "module_example", "module_ai", "module_generator", "module_task"]
+
+[frontend]
+enabled_route_groups = ["auth", "home", "dashboard", "system", "platform", "user-profile", "cold-chain-vehicle", "exception"]
+disabled_route_groups = ["food-traceability", "agricultural-delivery", "pricing", "article", "tutorial", "ai-chat", "changelog"]
+
+[seed]
+packs = ["food-common", "cold-chain-vehicle"]
+
+[features]
+flags = { ai_assistant = false, plugin_market = false, demo_content = false, food_screen = true }

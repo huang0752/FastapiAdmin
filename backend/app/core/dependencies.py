@@ -208,6 +208,7 @@ async def _validate_session_tenant(
     *,
     session_site_id: int | None,
     request_site_id: int | None,
+    jwt_site_id: int | None = None,
 ) -> None:
     """校验当前会话租户有效，且普通用户仍属于该租户。"""
     from app.api.v1.module_platform.tenant.model import TenantModel, TenantUserModel
@@ -225,6 +226,7 @@ async def _validate_session_tenant(
     from app.api.v1.module_system.auth.service import validate_session_site
 
     validate_session_site(
+        jwt_site_id=jwt_site_id,
         session_site_id=session_site_id,
         request_site_id=request_site_id,
         tenant_site_id=tenant.site_id,
@@ -307,6 +309,10 @@ async def _authenticate(
     if token.startswith("Bearer"):
         token = token.split(" ")[1]
 
+    jwt_payload = decode_access_token(token)
+    if not getattr(jwt_payload, "site_id", None):
+        raise CustomException(msg="JWT 站点上下文不匹配", code=10403, status_code=403)
+
     # 优先使用 TenantMiddleware 缓存在 request.state.ctx 中的会话信息（避免重复 Redis 读取）
     user_info = None
     if request:
@@ -351,6 +357,7 @@ async def _authenticate(
             int(tenant_id),
             session_site_id=int(site_id),
             request_site_id=int(request_site_id),
+            jwt_site_id=getattr(jwt_payload, "site_id", None),
         )
 
     # 设置请求上下文（仅在当前 request 对象上，业务方通过 request.state.ctx 读取）
