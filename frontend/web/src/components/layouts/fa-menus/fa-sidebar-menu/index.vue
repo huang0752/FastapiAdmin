@@ -138,6 +138,8 @@ import { isIframe, handleMenuJump } from "@utils";
 import SidebarSubmenu from "./widgets/FaSidebarSubmenu.vue";
 import { useCommon } from "@/hooks/core/useCommon";
 import { useWindowSize, useTimeoutFn } from "@vueuse/core";
+import { defaultAssemblySummary } from "@/config/assembly/default";
+import { resolveFoodLogiBrand } from "@/config/assembly/foodLogiBrand";
 
 defineOptions({ name: "FaSidebarMenu" });
 
@@ -149,15 +151,23 @@ const route = useRoute();
 const router = useRouter();
 const settingStore = useSettingsStore();
 const configStore = useConfigStore();
+const productBrand = computed(() =>
+  resolveFoodLogiBrand(
+    defaultAssemblySummary.name,
+    configStore.siteConfigData.site_code?.config_value || window.location.hostname
+  )
+);
 
-/** 租户配置：tenant_logo / tenant_name */
 const sidebarLogoSrc = computed(() => {
   const raw = configStore.configData.tenant_logo?.config_value;
-  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+  return (
+    productBrand.value?.logo || (typeof raw === "string" && raw.trim() ? raw.trim() : undefined)
+  );
 });
 
 const sidebarTitle = computed(() => {
   const raw = configStore.configData.tenant_name?.config_value;
+  if (productBrand.value?.title) return productBrand.value.title;
   if (typeof raw === "string" && raw.trim()) return raw.trim();
   return AppConfig.systemInfo.name;
 });

@@ -13,6 +13,9 @@ const products = [
 ] as const;
 
 describe("food logi product branding", () => {
+  const readSource = (relativePath: string) =>
+    fs.readFileSync(path.join(webRoot, "src", relativePath), "utf8");
+
   it("declares the exact official product titles in each build mode", () => {
     for (const [, mode, title] of products) {
       const env = fs.readFileSync(path.join(webRoot, `.env.${mode}`), "utf8");
@@ -62,5 +65,45 @@ describe("food logi product branding", () => {
       "utf8"
     );
     expect(verifier).toContain("findFoodLogiBrandingViolations");
+  });
+
+  it("keeps captcha hidden until the API explicitly enables it", () => {
+    const login = readSource("views/module_system/auth/login/index.vue");
+
+    expect(login).toContain("const captchaState = reactive<CaptchaInfo>({\n  enable: false,");
+    expect(login).toContain("captchaState.enable = data.enable === true;");
+    expect(login).toContain('captchaState.img_base = "";');
+    expect(login).toContain('loginForm.captcha_key = "";');
+  });
+
+  it("uses the build-time product brand in every real shell branding component", () => {
+    const components = [
+      "components/views/fa-login/backdrops/FaLoginLeftView.vue",
+      "components/views/fa-login/widgets/FaAuthTopBar.vue",
+      "components/layouts/fa-menus/fa-sidebar-menu/index.vue",
+      "components/layouts/fa-header-bar/index.vue",
+    ];
+
+    for (const component of components) {
+      const source = readSource(component);
+      expect(source, component).toContain("resolveFoodLogiBrand");
+      expect(source, component).toContain("defaultAssemblySummary.name");
+      expect(source, component).toContain("window.location.hostname");
+      expect(source, component).toContain("productBrand.value?.logo");
+      expect(source, component).toContain("productBrand.value?.title");
+    }
+  });
+
+  it("uses the official product title for the login panel on first paint", () => {
+    const login = readSource("views/module_system/auth/login/index.vue");
+    const panelTitle = login.slice(
+      login.indexOf("const panelTitle = computed(() =>"),
+      login.indexOf("const panelSubTitle = computed(() =>")
+    );
+
+    expect(panelTitle).toContain("productBrand.value?.title");
+    expect(panelTitle.indexOf("productBrand.value?.title")).toBeLessThan(
+      panelTitle.indexOf('t("login.title")')
+    );
   });
 });

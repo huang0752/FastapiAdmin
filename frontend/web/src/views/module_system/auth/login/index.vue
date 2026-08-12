@@ -215,6 +215,8 @@ import FaLoginRegisterPanel from "@/components/views/fa-login/panels/FaLoginRegi
 import FaAuthTopBar from "@/components/views/fa-login/widgets/FaAuthTopBar.vue";
 import { useLoginPanelAlign } from "@/components/views/fa-login/composables/useLoginPanelAlign";
 import { startOAuthLogin as startOAuthLoginRedirect } from "@/utils/oauth";
+import { defaultAssemblySummary } from "@/config/assembly/default";
+import { resolveFoodLogiBrand } from "@/config/assembly/foodLogiBrand";
 
 defineOptions({ name: "Login" });
 
@@ -248,10 +250,17 @@ const oauthProviders = computed<OAuthProvider[]>(() => authFeatures.value.oauthP
 const oauthEnabled = computed(
   () => authFeatures.value.oauth && authFeatures.value.oauthProviders.length > 0
 );
+const productBrand = computed(() =>
+  resolveFoodLogiBrand(
+    defaultAssemblySummary.name,
+    configStore.siteConfigData.site_code?.config_value || window.location.hostname
+  )
+);
 
 const panelTitle = computed(() => {
   if (authPanel.value === "register") return t("login.reg");
   if (authPanel.value === "forget") return t("login.resetPassword");
+  if (productBrand.value?.title) return productBrand.value.title;
   if (
     authPanel.value === "login" &&
     (loginFlowMode.value === "mobile" || loginFlowMode.value === "qr")
@@ -562,11 +571,15 @@ async function getCaptcha() {
     codeLoading.value = true;
     const response = await AuthAPI.getCaptcha();
     const data = response.data.data;
-    loginForm.captcha_key = data.key;
-    captchaState.img_base = data.img_base;
-    captchaState.enable = data.enable;
+    captchaState.enable = data.enable === true;
+    captchaState.key = captchaState.enable ? data.key : "";
+    captchaState.img_base = captchaState.enable ? data.img_base : "";
+    loginForm.captcha_key = captchaState.key;
+    if (!captchaState.enable) loginForm.captcha = "";
   } catch {
     captchaState.enable = false;
+    captchaState.key = "";
+    captchaState.img_base = "";
     loginForm.captcha = "";
     loginForm.captcha_key = "";
   } finally {

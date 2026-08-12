@@ -201,6 +201,8 @@ import { useCommon } from "@/hooks/core/useCommon";
 import { useHeaderBar } from "@/hooks/core/useHeaderBar";
 import FaUserMenu from "./widgets/FaUserMenu.vue";
 import FaTenantSwitcher from "./widgets/FaTenantSwitcher.vue";
+import { defaultAssemblySummary } from "@/config/assembly/default";
+import { resolveFoodLogiBrand } from "@/config/assembly/foodLogiBrand";
 
 defineOptions({ name: "FaHeaderBar" });
 
@@ -215,15 +217,23 @@ const settingStore = useSettingsStore();
 const userStore = useUserStore();
 const menuStore = useMenuStore();
 const configStore = useConfigStore();
+const productBrand = computed(() =>
+  resolveFoodLogiBrand(
+    defaultAssemblySummary.name,
+    configStore.siteConfigData.site_code?.config_value || window.location.hostname
+  )
+);
 
-/** 租户配置：tenant_logo / tenant_name */
 const headerLogoSrc = computed(() => {
   const raw = configStore.configData.tenant_logo?.config_value;
-  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+  return (
+    productBrand.value?.logo || (typeof raw === "string" && raw.trim() ? raw.trim() : undefined)
+  );
 });
 
 const headerSystemName = computed(() => {
   const raw = configStore.configData.tenant_name?.config_value;
+  if (productBrand.value?.title) return productBrand.value.title;
   if (typeof raw === "string" && raw.trim()) return raw.trim();
   return AppConfig.systemInfo.name;
 });

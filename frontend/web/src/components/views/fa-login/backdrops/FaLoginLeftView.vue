@@ -93,6 +93,8 @@ import AppConfig from "@/config";
 import loginIcon from "@fa_imgs/background.svg";
 import { useConfigStore } from "@stores";
 import { themeAnimation } from "@utils";
+import { defaultAssemblySummary } from "@/config/assembly/default";
+import { resolveFoodLogiBrand } from "@/config/assembly/foodLogiBrand";
 
 defineOptions({ name: "FaLoginLeftView" });
 
@@ -108,14 +110,22 @@ withDefaults(defineProps<Props>(), {
 });
 
 const configStore = useConfigStore();
+const productBrand = computed(() =>
+  resolveFoodLogiBrand(
+    defaultAssemblySummary.name,
+    configStore.siteConfigData.site_code?.config_value || window.location.hostname
+  )
+);
 
-/** 接口 tenant_logo，空则 FaLogo 内置默认图 */
 const webLogoSrc = computed(
-  () => configStore.configData.tenant_logo?.config_value?.trim() || undefined
+  () => productBrand.value?.logo || configStore.configData.tenant_logo?.config_value?.trim()
 );
 
 const siteTitle = computed(
-  () => configStore.configData.tenant_name?.config_value?.trim() || AppConfig.systemInfo.name
+  () =>
+    productBrand.value?.title ||
+    configStore.configData.tenant_name?.config_value?.trim() ||
+    AppConfig.systemInfo.name
 );
 
 const DEFAULT_APP_VERSION = "3.0.0";

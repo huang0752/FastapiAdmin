@@ -120,6 +120,8 @@ import { languageOptions } from "@/locales";
 import { LanguageEnum } from "@/enums/appEnum";
 import AppConfig from "@/config";
 import { LoginPanelAlign } from "@/components/views/fa-login/composables/useLoginPanelAlign";
+import { defaultAssemblySummary } from "@/config/assembly/default";
+import { resolveFoodLogiBrand } from "@/config/assembly/foodLogiBrand";
 
 defineOptions({ name: "AuthTopBar" });
 
@@ -170,13 +172,22 @@ const { locale } = useI18n();
 const mainColors = AppConfig.systemMainColor;
 /** 与 Element 主题主色同步，供调色盘图标与展开态使用 */
 const themeColorForCss = computed(() => systemThemeColor.value);
+const productBrand = computed(() =>
+  resolveFoodLogiBrand(
+    defaultAssemblySummary.name,
+    configStore.siteConfigData.site_code?.config_value || window.location.hostname
+  )
+);
 
 const webLogoSrc = computed(
-  () => configStore.configData.tenant_logo?.config_value?.trim() || undefined
+  () => productBrand.value?.logo || configStore.configData.tenant_logo?.config_value?.trim()
 );
 
 const siteTitle = computed(
-  () => configStore.configData.tenant_name?.config_value?.trim() || AppConfig.systemInfo.name
+  () =>
+    productBrand.value?.title ||
+    configStore.configData.tenant_name?.config_value?.trim() ||
+    AppConfig.systemInfo.name
 );
 
 const displayVersion = computed(() => {
