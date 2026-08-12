@@ -85,6 +85,18 @@ def test_each_assembly_enables_only_its_business_module(
     }
     assert enabled_business == {business_plugin}
     assert assembly.seed_packs == ["food-common", seed_pack]
+    assert "workspace" in assembly.enabled_route_groups
+    assert "dashboard" not in assembly.enabled_route_groups
+    assert {"module_ai", "module_generator", "module_example"}.issubset(
+        assembly.disabled_plugins
+    )
+    assert {"ai-chat", "generator"}.isdisjoint(assembly.enabled_route_groups)
+    assert assembly.is_feature_enabled("tenant_workspace") is True
+    assert assembly.is_feature_enabled("usage_certificate") is True
+    assert assembly.is_feature_enabled("ai_model_foundation") is True
+    assert assembly.is_feature_enabled("demo_data_blueprint") is True
+    assert assembly.is_feature_enabled("ai_assistant") is False
+    assert assembly.is_feature_enabled("demo_content") is False
 
 
 def test_food_common_seed_extends_framework_minimal_seed() -> None:
