@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { PluginOption } from "vite";
+import {
+  FOOD_LOGI_PRODUCT_BRANDS,
+  isFoodLogiProductAssembly,
+} from "../src/config/assembly/foodLogiBrand";
 
 const FOOD_PRODUCT_VIEWS = {
   "food-traceability": "module_trace",
@@ -132,4 +136,26 @@ export function findForbiddenBuildArtifacts(outputDirectory: string, assembly: s
     const content = fs.readFileSync(file, "utf8");
     return markers.some((marker) => content.includes(marker));
   });
+}
+
+export function findFoodLogiBrandingViolations(
+  outputDirectory: string,
+  assembly: string
+): string[] {
+  if (!isFoodLogiProductAssembly(assembly)) return [];
+  if (!fs.existsSync(outputDirectory)) return [`构建产物目录不存在: ${outputDirectory}`];
+
+  const product = FOOD_LOGI_PRODUCT_BRANDS[assembly];
+  const violations: string[] = [];
+  const indexPath = path.join(outputDirectory, "index.html");
+  const indexHtml = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, "utf8") : "";
+  if (!indexHtml.includes(`<title>${product.title}</title>`)) {
+    violations.push(`index.html 未使用正式产品标题: ${product.title}`);
+  }
+  for (const site of ["data360", "znceedi"] as const) {
+    const logo = path.join(outputDirectory, "brand", "logos", `${site}-${product.product}.png`);
+    if (!fs.existsSync(logo))
+      violations.push(`缺少产品 Logo: ${path.relative(outputDirectory, logo)}`);
+  }
+  return violations;
 }

@@ -33,6 +33,11 @@ import SiteAPI, { type PublicSiteConfig } from "@/api/module_platform/site";
 import TenantAPI from "@/api/module_platform/tenant";
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { defaultAssemblySummary } from "@/config/assembly/default";
+import {
+  allowsFoodLogiTenantBrandField,
+  resolveFoodLogiBrand,
+} from "@/config/assembly/foodLogiBrand";
 
 const SITE_CONFIG_ALIASES: Record<string, string> = {
   name: "tenant_name",
@@ -89,12 +94,15 @@ export const useConfigStore = defineStore(
       }
     }
 
-    function upsertTenantConfigItem(item: {
-      config_key?: string;
-      config_value?: string | null;
-    }) {
+    function upsertTenantConfigItem(item: { config_key?: string; config_value?: string | null }) {
       const value = item.config_value;
       if (typeof value !== "string") return;
+      if (
+        item.config_key &&
+        !allowsFoodLogiTenantBrandField(defaultAssemblySummary.name, item.config_key)
+      ) {
+        return;
+      }
       const normalizedItem: Partial<ConfigTable> = {
         config_key: item.config_key,
         config_value: value,
@@ -119,11 +127,22 @@ export const useConfigStore = defineStore(
 
     function replaceSiteConfig(site: PublicSiteConfig | null | undefined) {
       siteConfigData.value = {};
-      if (!site) return;
-      for (const field of PUBLIC_SITE_BRAND_FIELDS) {
-        const value = site[field];
-        if (typeof value !== "string") continue;
-        upsertSiteConfigItem({ config_key: field, config_value: value });
+      if (site) {
+        for (const field of PUBLIC_SITE_BRAND_FIELDS) {
+          const value = site[field];
+          if (typeof value !== "string") continue;
+          upsertSiteConfigItem({ config_key: field, config_value: value });
+        }
+      }
+
+      const productBrand = resolveFoodLogiBrand(
+        defaultAssemblySummary.name,
+        site?.site_code || window.location.hostname
+      );
+      if (productBrand) {
+        upsertSiteConfigItem({ config_key: "name", config_value: productBrand.title });
+        upsertSiteConfigItem({ config_key: "logo_url", config_value: productBrand.logo });
+        upsertSiteConfigItem({ config_key: "favicon", config_value: productBrand.logo });
       }
     }
 

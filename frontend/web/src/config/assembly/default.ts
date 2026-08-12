@@ -78,7 +78,7 @@ function buildTimeAssemblySummary(): AssemblySummary | null {
 
 export const defaultAssemblySummary: AssemblySummary = buildTimeAssemblySummary() ?? {
   name: "default",
-  title: "默认完整装配",
+  title: String(import.meta.env.VITE_APP_TITLE || "FastapiAdmin"),
   enabledRouteGroups: [],
   disabledRouteGroups: [],
   featureFlags: {

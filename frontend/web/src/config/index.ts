@@ -31,6 +31,7 @@
 
 import { MenuThemeEnum, MenuTypeEnum, SystemThemeEnum } from "@/enums/appEnum";
 import { SystemConfig } from "@/types/config";
+import { defaultAssemblySummary } from "./assembly/default";
 import { configImages } from "./assets/images";
 import fastEnterConfig from "./modules/fastEnter";
 import { headerBarConfig } from "./modules/headerBar";
@@ -38,7 +39,7 @@ import { headerBarConfig } from "./modules/headerBar";
 const appConfig: SystemConfig = {
   // 系统信息
   systemInfo: {
-    name: "FastapiAdmin", // 系统名称
+    name: defaultAssemblySummary.title, // 产品装配标题
   },
   // 系统主题
   systemThemeStyles: {
