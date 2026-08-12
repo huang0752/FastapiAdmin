@@ -46,6 +46,7 @@ const global = {
     FaLoginAuthLinkRow: {
       template: '<button data-test="auth-link" @click="$emit(\'link\')"><slot /></button>',
     },
+    FaDragVerify: { template: '<div data-test="drag-verify" />' },
     User: true,
     Lock: true,
     Message: true,
@@ -97,6 +98,22 @@ describe("login password reset", () => {
     expect(wrapper.text()).not.toContain("login.qrLogin");
     expect(wrapper.find('[data-test="auth-link"]').exists()).toBe(false);
     expect(wrapper.text()).not.toContain("login.quickSelectAccount");
+  });
+
+  it("hides captcha input and drag verification when captcha is disabled", () => {
+    const wrapper = mountAccountForm();
+    const loginViewSource = readFileSync(
+      resolve(process.cwd(), "src/views/module_system/auth/login/index.vue"),
+      "utf8"
+    );
+    const handleSubmitSource = loginViewSource.slice(
+      loginViewSource.indexOf("const handleSubmit = async () =>"),
+      loginViewSource.indexOf("async function submitRegister()")
+    );
+
+    expect(wrapper.text()).not.toContain("login.captchaCode");
+    expect(wrapper.find('[data-test="drag-verify"]').exists()).toBe(false);
+    expect(handleSubmitSource).toContain("if (captchaState.enable && !isPassing.value)");
   });
 
   it("renders configured OAuth providers only", () => {

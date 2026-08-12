@@ -687,7 +687,7 @@ class CaptchaService:
     async def get_captcha(redis: Redis) -> CaptchaOutSchema:
         """获取验证码"""
         if not settings.CAPTCHA_ENABLE:
-            raise CustomException(msg="未开启验证码服务")
+            return CaptchaOutSchema(enable=False, key="", img_base="")
 
         captcha_base64, captcha_value = CaptchaUtil.captcha_arithmetic()
         captcha_key = get_random_character()

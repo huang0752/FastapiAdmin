@@ -11,7 +11,10 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from app.api.v1.module_system.auth.schema import CaptchaOutSchema
+from app.config.setting import Settings
 from app.core.assembly import load_assembly_from_file
 from app.core.base_schema import JWTPayloadSchema
 from app.core.exceptions import CustomException
@@ -214,6 +217,41 @@ def test_frontend_and_deployment_have_independent_product_entrypoints() -> None:
         assert mode_env.is_file()
         assert f"VITE_APP_TITLE = {expected_titles[product_code]}" in mode_env.read_text()
     assert (REPOSITORY_DIR / "deploy" / "nginx" / "products.conf.example").is_file()
+
+
+def test_food_logi_product_environment_disables_captcha_without_changing_framework_default() -> None:
+    assert Settings.model_fields["CAPTCHA_ENABLE"].default is True
+
+    deployment_env = (
+        REPOSITORY_DIR / "deploy" / "env" / "products.env.example"
+    ).read_text()
+    assert "CAPTCHA_ENABLE=false" in deployment_env
+
+
+def test_disabled_captcha_endpoint_returns_empty_payload(test_client) -> None:
+    response = test_client.get("/system/auth/captcha/get")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "enable": False,
+        "key": "",
+        "img_base": "",
+    }
+
+
+def test_enabled_captcha_response_still_requires_key_and_image() -> None:
+    with pytest.raises(ValidationError):
+        CaptchaOutSchema(enable=True, key="", img_base="")
+
+
+def test_login_without_captcha_reaches_account_authentication(test_client) -> None:
+    response = test_client.post(
+        "/system/auth/login",
+        data={"username": "food-logi-missing-user", "password": "not-a-real-password"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["msg"] == "账号或密码错误"
 
 
 def test_workspace_and_usage_certificate_permissions_remain_in_package_menu_contract() -> None:

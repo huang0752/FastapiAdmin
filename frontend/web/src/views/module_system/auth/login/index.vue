@@ -657,7 +657,7 @@ const handleSubmit = async () => {
   if (!valid) return;
 
   try {
-    if (!isPassing.value) {
+    if (captchaState.enable && !isPassing.value) {
       isClickPass.value = true;
       return;
     }

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.base_schema import JWTOutSchema
 
@@ -9,8 +9,14 @@ class CaptchaOutSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     enable: bool = Field(default=True, description="是否启用验证码")
-    key: str = Field(..., min_length=1, description="验证码唯一标识")
-    img_base: str = Field(..., min_length=1, description="Base64编码的验证码图片")
+    key: str = Field(default="", description="验证码唯一标识")
+    img_base: str = Field(default="", description="Base64编码的验证码图片")
+
+    @model_validator(mode="after")
+    def validate_enabled_payload(self) -> "CaptchaOutSchema":
+        if self.enable and (not self.key or not self.img_base):
+            raise ValueError("启用验证码时必须返回唯一标识和图片")
+        return self
 
 
 class AutoLoginUserSchema(BaseModel):
