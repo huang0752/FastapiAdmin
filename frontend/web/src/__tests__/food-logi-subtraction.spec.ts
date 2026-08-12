@@ -73,7 +73,7 @@ describe("food logi subtraction boundary", () => {
     const workspace = source("frontend/web/src/views/module_platform/self_service/index.vue");
     const workspaceApi = source("frontend/web/src/api/module_platform/self_service.ts");
     const certificateApi = source("frontend/web/src/api/module_platform/usage_certificate.ts");
-    expect(workspaceApi).toContain('const API_PATH = "/platform/self-service"');
+    expect(workspaceApi).toContain('const API_PATH = "/platform/tenant"');
     expect(workspaceApi).toContain('url: `${API_PATH}/workspace`');
     expect(certificateApi).toContain("/platform/tenant/usage-certificate/preview");
     for (const fakeDomain of ["追溯批次", "车辆数", "轨迹数", "温控数"]) {

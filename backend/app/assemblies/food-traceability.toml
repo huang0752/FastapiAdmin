@@ -11,11 +11,11 @@ enabled_plugins = ["module_food_common", "module_food_traceability"]
 disabled_plugins = ["module_agricultural_delivery", "module_cold_chain_vehicle", "module_example", "module_ai", "module_generator", "module_task"]
 
 [frontend]
-enabled_route_groups = ["auth", "home", "dashboard", "system", "platform", "user-profile", "food-traceability", "exception"]
-disabled_route_groups = ["agricultural-delivery", "cold-chain-vehicle", "pricing", "article", "tutorial", "ai-chat", "changelog"]
+enabled_route_groups = ["auth", "home", "system", "platform", "user-profile", "workspace", "food-traceability", "exception"]
+disabled_route_groups = ["dashboard", "agricultural-delivery", "cold-chain-vehicle", "pricing", "article", "tutorial", "ai-chat", "generator", "module-generator", "changelog"]
 
 [seed]
 packs = ["food-common", "food-traceability"]
 
 [features]
-flags = { ai_assistant = false, plugin_market = false, demo_content = false, food_screen = true }
+flags = { ai_assistant = false, plugin_market = false, demo_content = false, food_screen = true, tenant_workspace = true, usage_certificate = true, ai_model_foundation = true, demo_data_blueprint = true }
