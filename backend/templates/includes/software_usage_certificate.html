@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><style>
+@page { size: A4; margin: 0; } * { box-sizing: border-box; }
+body { margin: 0; color: #18222b; font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; background: #eef2f5; }
+.sheet { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 22mm 20mm 18mm; background: #fff; border-top: 4mm solid #245f8f; }
+.top { display: flex; justify-content: space-between; padding-bottom: 5mm; border-bottom: 1px solid #cbd5dd; color: #607080; font-size: 9pt; letter-spacing: .12em; }
+.system { margin-top: 24mm; color: #245f8f; font-size: 12pt; letter-spacing: .08em; } h1 { margin: 3mm 0 10mm; font-size: 27pt; }
+.statement { padding: 7mm; background: #f4f7fa; border-left: 1.2mm solid #245f8f; line-height: 2; } .statement strong { font-size: 15pt; }
+.status { display: inline-block; margin-top: 7mm; padding: 2mm 4mm; color: #fff; background: #23745f; font-weight: 700; } .status.invalid { background: #a23a32; }
+dl { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm 12mm; margin: 12mm 0 0; } dt { margin-bottom: 1.5mm; color: #6e7c86; font-size: 9pt; } dd { margin: 0; font-size: 11pt; font-weight: 600; overflow-wrap: anywhere; }
+.footer { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 22mm; padding-top: 7mm; border-top: 1px solid #d7dfe5; color: #667680; font-size: 8.5pt; line-height: 1.8; }
+.qr { width: 30mm; height: 30mm; } .qr-empty { width: 38mm; padding: 5mm 2mm; border: 1px dashed #aab5bd; text-align: center; }
+</style></head>
+<body><main class="sheet">
+<div class="top"><span>FASTAPIADMIN</span><span>SOFTWARE USAGE CERTIFICATE</span></div>
+<div class="system">{{ certificate.system_name }} · {{ certificate.system_version }}</div><h1>企业软件使用证明</h1>
+<section class="statement">兹证明：<br><strong>{{ certificate.enterprise_name }}</strong><br>当前获得本软件的使用授权。</section>
+<div class="status{% if not certificate.currently_valid %} invalid{% endif %}">{{ certificate.status_label }}</div>
+<dl><div><dt>证明编号</dt><dd>{{ certificate.certificate_no }}</dd></div><div><dt>统一社会信用代码</dt><dd>{{ certificate.social_credit_code }}</dd></div><div><dt>授权开始时间</dt><dd>{{ certificate.start_time }}</dd></div><div><dt>授权截止时间</dt><dd>{{ certificate.end_time }}</dd></div><div><dt>证明身份建立时间</dt><dd>{{ certificate.certificate_created_at }}</dd></div>{% if certificate.request_ip %}<div><dt>当前访问 IP</dt><dd>{{ certificate.request_ip }}</dd></div>{% endif %}</dl>
+<footer class="footer"><div>证明内容以系统当前租户及授权信息为准。<br>{% if certificate.verify_url %}扫描二维码进行公开查验。{% else %}公开查验地址未配置。{% endif %}</div>{% if certificate.qr_data_url %}<img class="qr" src="{{ certificate.qr_data_url }}" alt="公开查验二维码">{% else %}<div class="qr-empty">公开查验地址未配置</div>{% endif %}</footer>
+</main></body></html>

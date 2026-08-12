@@ -45,6 +45,7 @@ dependencies = [
     "fastapi-mail==1.5.1",                # 邮件发送（简化 EmailSendService 底层）
     "tinycss2==1.5.1",
     "weasyprint==69.0",
+    "qrcode[pil]==8.2",
     "fastapi-cache2[redis]>=0.1.8",
 ]
 

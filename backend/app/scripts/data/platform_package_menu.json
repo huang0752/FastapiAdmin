@@ -3,6 +3,7 @@
     "package_code": "basic",
     "menus": [
       {"permission": "module_platform:workspace:query"},
+      {"permission": "module_platform:usage-certificate:tenant-query"},
       {"permission": "module_system:dept:query"},
       {"permission": "module_system:dept:create"},
       {"permission": "module_system:dept:update"},
@@ -28,6 +29,7 @@
     "package_code": "standard",
     "menus": [
       {"permission": "module_platform:workspace:query"},
+      {"permission": "module_platform:usage-certificate:tenant-query"},
       {"permission": "module_system:dept:query"},
       {"permission": "module_system:dept:create"},
       {"permission": "module_system:dept:update"},
@@ -53,6 +55,7 @@
     "package_code": "pro",
     "menus": [
       {"permission": "module_platform:workspace:query"},
+      {"permission": "module_platform:usage-certificate:tenant-query"},
       {"permission": "module_system:dept:query"},
       {"permission": "module_system:dept:create"},
       {"permission": "module_system:dept:update"},
@@ -78,6 +81,7 @@
     "package_code": "enterprise",
     "menus": [
       {"permission": "module_platform:workspace:query"},
+      {"permission": "module_platform:usage-certificate:tenant-query"},
       {"permission": "module_system:dept:query"},
       {"permission": "module_system:dept:create"},
       {"permission": "module_system:dept:update"},

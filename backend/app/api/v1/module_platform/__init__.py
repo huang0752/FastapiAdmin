@@ -14,6 +14,7 @@ from app.api.v1.module_platform.plugin.controller import PluginRouter
 from app.api.v1.module_platform.self_service.controller import TenantSelfServiceRouter
 from app.api.v1.module_platform.site.controller import SiteRouter
 from app.api.v1.module_platform.tenant.controller import TenantRouter
+from app.api.v1.module_platform.usage_certificate.controller import PlatformUsageCertificateRouter, PublicUsageCertificateRouter, TenantUsageCertificateRouter
 
 platform_router = APIRouter(prefix="/platform")
 
@@ -30,3 +31,6 @@ platform_router.include_router(TenantInvoiceRouter)
 platform_router.include_router(TenantOrderRouter)
 platform_router.include_router(TenantSelfServiceRouter)
 platform_router.include_router(MenuRouter)
+platform_router.include_router(TenantUsageCertificateRouter)
+platform_router.include_router(PlatformUsageCertificateRouter)
+platform_router.include_router(PublicUsageCertificateRouter)

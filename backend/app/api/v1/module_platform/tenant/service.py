@@ -3,6 +3,7 @@ import json
 import secrets
 import string
 from dataclasses import dataclass
+from datetime import datetime
 
 import sqlalchemy as sa
 from redis.asyncio.client import Redis
@@ -619,13 +620,23 @@ class TenantService:
             unified_social_credit_code=data.unified_social_credit_code,
         )
 
+        from app.api.v1.module_platform.usage_certificate.identity import build_usage_certificate_identity
+
+        identity = build_usage_certificate_identity(data.code)
+        tenant_values = data.model_dump()
+        tenant_values.update(
+            usage_certificate_no=identity.number,
+            usage_certificate_token=identity.token,
+            usage_certificate_created_at=datetime.now(),
+        )
+
         if not preserve_integrity_error:
             try:
-                return await TenantCRUD(self.auth).create(data=data)
+                return await TenantCRUD(self.auth).create(data=tenant_values)
             except CustomException as exc:
                 self._raise_stable_uscc_conflict(exc)
 
-        tenant_obj = TenantModel(**data.model_dump())
+        tenant_obj = TenantModel(**tenant_values)
         self.auth.db.add(tenant_obj)
         try:
             await self.auth.db.flush()

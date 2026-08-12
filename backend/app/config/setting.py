@@ -121,6 +121,7 @@ class Settings(BaseSettings):
         "/api/v1/health",
         "/api/v1/common/health",
         "/api/v1/system/config/info",
+        "/api/v1/platform/public/usage-certificate/*",
     ]
 
     # ================================================= #
@@ -139,6 +140,7 @@ class Settings(BaseSettings):
     PAYMENT_ALIPAY_SANDBOX: bool = True
     # 站点 URL（用于生成支付通知 URL）
     SITE_URL: str = "http://localhost:8001"
+    USAGE_CERTIFICATE_PUBLIC_ORIGIN: str = ""  # 软件使用证明公开查验前端可信地址
 
     # ================================================= #
     # ******************** 数据库配置 ******************* #

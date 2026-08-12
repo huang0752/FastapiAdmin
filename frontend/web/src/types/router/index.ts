@@ -45,6 +45,7 @@ declare module "vue-router" {
      * @default false
      */
     hidden?: boolean;
+    anonymousPublic?: boolean;
 
     /**
      * 始终显示父级菜单，即使只有一个子菜单

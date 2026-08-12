@@ -348,6 +348,12 @@ export const staticRoutes: AppRouteRecordRaw[] = [
     component: () => import("@views/module_system/auth/login/index.vue"),
   },
   {
+    path: "/certificate/verify/:token",
+    name: "PublicUsageCertificateVerify",
+    meta: { hidden: true, isHideTab: true, title: "软件使用证明查验", routeGroup: "auth", anonymousPublic: true },
+    component: () => import("@views/public/usage_certificate/index.vue"),
+  },
+  {
     path: "/auth/control/callback",
     name: "ControlSsoCallback",
     component: () => import("@/views/module_system/auth/control-callback/index.vue"),

@@ -29,6 +29,7 @@ OWNER_REQUIRED_MENU_PERMISSIONS = frozenset(
     {
         "module_platform:workspace:query",
         "module_platform:workspace:update",
+        "module_platform:usage-certificate:tenant-query",
         "module_system:dept:create",
         "module_system:dept:delete",
         "module_system:dept:detail",

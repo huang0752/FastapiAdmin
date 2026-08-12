@@ -5,6 +5,8 @@ pdf_generator.py — PDF 生成工具
 当前用于电子发票 PDF 本地生成（对接百望云/票通后可平滑替换）。
 """
 
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +47,14 @@ def html_to_pdf(html_str: str, css_str: str | None = None) -> bytes:
     返回:
     - bytes: PDF 字节流
     """
+    if sys.platform == "darwin":
+        homebrew_lib = Path("/opt/homebrew/lib")
+        if homebrew_lib.is_dir():
+            current = os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", "")
+            paths = [item for item in current.split(":") if item]
+            if str(homebrew_lib) not in paths:
+                os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = ":".join([str(homebrew_lib), *paths])
+
     from weasyprint import CSS, HTML
 
     html = HTML(string=html_str, base_url=".")

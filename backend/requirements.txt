@@ -40,3 +40,4 @@ ua-parser==1.0.2                       # 获取用户UA
 uvicorn==0.49.0                        # uvicorn web 框架
 websockets>=16.0,<17.0                 # websocket 通信
 weasyprint==69.0                       # HTML/CSS → PDF 渲染（电子发票 PDF 生成）
+qrcode[pil]==8.2                       # 软件使用证明二维码

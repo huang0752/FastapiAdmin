@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Integer, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Integer, SmallInteger, String, Text, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.common.enums import PermissionFilterStrategy
@@ -66,6 +66,9 @@ class TenantModel(ModelMixin):
     package_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("platform_package.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, default=None, index=True, comment="关联套餐ID")
     start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="开始时间")
     end_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="结束时间")
+    usage_certificate_no: Mapped[str | None] = mapped_column(String(160), nullable=True, unique=True, default=None, comment="软件使用证明编号")
+    usage_certificate_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, default=None, comment="软件使用证明公开查验令牌")
+    usage_certificate_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="软件使用证明身份建立时间")
     version: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None, comment="版本号")
     favicon: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None, comment="favicon地址")
     login_bg: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None, comment="登录背景地址")
@@ -101,6 +104,18 @@ class TenantModel(ModelMixin):
         if not code.isalnum():
             raise ValueError("编码只能包含字母和数字")
         return code
+
+
+@event.listens_for(TenantModel, "before_insert")
+def ensure_usage_certificate_identity(mapper, connection, target: TenantModel) -> None:
+    if target.usage_certificate_no and target.usage_certificate_token and target.usage_certificate_created_at:
+        return
+    from app.api.v1.module_platform.usage_certificate.identity import build_usage_certificate_identity
+
+    identity = build_usage_certificate_identity(target.code)
+    target.usage_certificate_no = target.usage_certificate_no or identity.number
+    target.usage_certificate_token = target.usage_certificate_token or identity.token
+    target.usage_certificate_created_at = target.usage_certificate_created_at or datetime.now()
 
 
 class TenantUserModel(MappedBase):

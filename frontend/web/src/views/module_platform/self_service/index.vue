@@ -128,6 +128,23 @@
         </div>
       </ElTabPane>
 
+      <ElTabPane v-if="canViewUsageCertificate" label="使用证明" name="usageCertificate">
+        <ElCard shadow="hover" class="certificate-card">
+          <template #header>
+            <div class="certificate-header">
+              <div><strong>企业软件使用证明</strong><div v-if="usageCertificate">{{ usageCertificate.certificate_no }}</div></div>
+              <div>
+                <ElButton :loading="certificateLoading" @click="loadUsageCertificate">刷新预览</ElButton>
+                <ElButton type="primary" :loading="certificateDownloading" :disabled="!usageCertificate" @click="downloadUsageCertificate">下载 PDF</ElButton>
+              </div>
+            </div>
+          </template>
+          <ElSkeleton v-if="certificateLoading && !usageCertificate" :rows="10" animated />
+          <iframe v-else-if="usageCertificate" class="certificate-frame" sandbox="allow-same-origin" title="企业软件使用证明预览" :srcdoc="usageCertificate.html" />
+          <ElEmpty v-else description="暂无证明预览" />
+        </ElCard>
+      </ElTabPane>
+
       <!-- ─── 品牌配置 ─── -->
       <ElTabPane label="品牌配置" name="brand">
         <ElCard shadow="hover" class="brand-card">
@@ -385,12 +402,39 @@ import type {
 import { resolveStatusColumns } from "@utils";
 import type { DescriptionsItem } from "@/components/others/fa-descriptions/index.vue";
 import { useConfigStore } from "@stores";
+import { useAuth } from "@/hooks/core/useAuth";
+import UsageCertificateAPI, { saveCertificateBlob, type UsageCertificatePreview } from "@/api/module_platform/usage_certificate";
 
 defineOptions({ name: "SelfService" });
 
 const router = useRouter();
 const configStore = useConfigStore();
 const activeTab = ref("workspace");
+const { hasAuth } = useAuth();
+const canViewUsageCertificate = computed(() => hasAuth("module_platform:usage-certificate:tenant-query"));
+const usageCertificate = ref<UsageCertificatePreview | null>(null);
+const certificateLoading = ref(false);
+const certificateDownloading = ref(false);
+
+async function loadUsageCertificate() {
+  certificateLoading.value = true;
+  try {
+    const { data: res } = await UsageCertificateAPI.tenantPreview();
+    usageCertificate.value = res?.data || null;
+  } finally {
+    certificateLoading.value = false;
+  }
+}
+
+async function downloadUsageCertificate() {
+  certificateDownloading.value = true;
+  try {
+    const { data } = await UsageCertificateAPI.tenantDownload();
+    saveCertificateBlob(data, usageCertificate.value?.filename || "企业软件使用证明.pdf");
+  } finally {
+    certificateDownloading.value = false;
+  }
+}
 
 // ─── 工作台 ───
 const workspace = ref<WorkspaceData | null>(null);
@@ -602,6 +646,7 @@ function onTabChange(tab: TabPaneName) {
   else if (tab === "brand") loadBrandConfig();
   else if (tab === "packages") loadPackages();
   else if (tab === "orders") getOrderData();
+  else if (tab === "usageCertificate") loadUsageCertificate();
 }
 
 // ─── 动作处理 ───
@@ -695,6 +740,9 @@ onMounted(() => {
 .workspace-loading {
   padding: 20px 0;
 }
+
+.certificate-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.certificate-frame { width: 100%; min-height: 720px; border: 1px solid var(--el-border-color); background: #eef2f5; }
 
 /* ─── 品牌配置 ─── */
 .brand-card {

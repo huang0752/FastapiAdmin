@@ -238,6 +238,7 @@ function handleLoginStatus(
   if (isLoginRoute(to) || isAnonymousPublicPath(to.path)) {
     return undefined;
   }
+  if (to.meta.anonymousPublic) return undefined;
 
   userStore.resetAllState();
   return { name: "Login", query: { redirect: to.fullPath }, replace: true };
