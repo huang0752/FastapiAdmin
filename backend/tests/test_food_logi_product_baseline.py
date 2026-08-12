@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -213,3 +214,52 @@ def test_frontend_and_deployment_have_independent_product_entrypoints() -> None:
         assert mode_env.is_file()
         assert f"VITE_APP_TITLE = {expected_titles[product_code]}" in mode_env.read_text()
     assert (REPOSITORY_DIR / "deploy" / "nginx" / "products.conf.example").is_file()
+
+
+def test_workspace_and_usage_certificate_permissions_remain_in_package_menu_contract() -> None:
+    rows = json.loads(
+        (BACKEND_DIR / "app" / "scripts" / "data" / "platform_package_menu.json").read_text()
+    )
+    assert rows
+    for package in rows:
+        permissions = {item.get("permission") for item in package["menus"]}
+        assert "module_platform:workspace:query" in permissions
+        assert "module_platform:usage-certificate:tenant-query" in permissions
+
+
+def test_demo_data_blueprint_is_bindable_without_mounting_ai_chat() -> None:
+    from app.plugin.module_ai.chat.registry import default_ai_registry
+    from app.plugin.module_ai.chat.service import AiFeatureBindingService
+
+    feature = default_ai_registry.get_feature("demo_data.blueprint")
+    assert feature is not None
+    assert feature.prompt_key == "demo_data.blueprint"
+    assert AiFeatureBindingService._default_item(feature)["feature_code"] == "demo_data.blueprint"
+
+
+@pytest.mark.parametrize(
+    "assembly_name",
+    ["food-traceability", "agricultural-delivery", "cold-chain-vehicle"],
+)
+def test_product_dynamic_router_does_not_mount_generic_ai_chat(assembly_name: str) -> None:
+    import app.core.discover as discover
+    from app.config.setting import settings
+    from app.core.assembly import reset_assembly_cache
+
+    old_file = settings.APP_ASSEMBLY_FILE
+    old_name = settings.APP_ASSEMBLY
+    old_router = discover._dynamic_router_cache
+    settings.APP_ASSEMBLY_FILE = str(
+        BACKEND_DIR / "app" / "assemblies" / f"{assembly_name}.toml"
+    )
+    settings.APP_ASSEMBLY = assembly_name
+    reset_assembly_cache()
+    discover._dynamic_router_cache = None
+    try:
+        paths = {getattr(route, "path", "") for route in discover.get_dynamic_router().routes}
+        assert not any(path.startswith("/ai/chat") or path.startswith("/ai") for path in paths)
+    finally:
+        discover._dynamic_router_cache = old_router
+        settings.APP_ASSEMBLY_FILE = old_file
+        settings.APP_ASSEMBLY = old_name
+        reset_assembly_cache()
