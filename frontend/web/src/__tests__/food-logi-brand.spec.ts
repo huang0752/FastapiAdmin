@@ -34,20 +34,27 @@ describe("food logi product branding", () => {
 
     const brand = await import(/* @vite-ignore */ brandImport);
     for (const [assembly, mode, title] of products) {
-      expect(brand.resolveFoodLogiBrand(assembly, "data360.org.cn")).toEqual({
+      expect(brand.resolveFoodLogiBrand(assembly, "data360.org.cn", "/web")).toEqual({
         title,
-        logo: `/brand/logos/data360-${mode}.png`,
+        logo: `/web/brand/logos/data360-${mode}.png`,
       });
-      expect(brand.resolveFoodLogiBrand(assembly, `x.znceedi.org.cn`)).toEqual({
+      expect(brand.resolveFoodLogiBrand(assembly, `x.znceedi.org.cn`, "/web/")).toEqual({
         title,
-        logo: `/brand/logos/znceedi-${mode}.png`,
+        logo: `/web/brand/logos/znceedi-${mode}.png`,
       });
-      expect(brand.resolveFoodLogiBrand(assembly, "unknown.example")).toEqual({
+      expect(brand.resolveFoodLogiBrand(assembly, "unknown.example", "/web")).toEqual({
         title,
-        logo: `/brand/logos/data360-${mode}.png`,
+        logo: `/web/brand/logos/data360-${mode}.png`,
       });
     }
     expect(brand.resolveFoodLogiBrand("default", "trace.data360.org.cn")).toBeNull();
+  });
+
+  it("builds product logo URLs from Vite BASE_URL", () => {
+    const source = fs.readFileSync(brandModule, "utf8");
+
+    expect(source).toContain("import.meta.env.BASE_URL");
+    expect(source).not.toContain("logo: `/brand/logos/");
   });
 
   it("keeps product title and Host/Site logo authoritative over tenant brand fields", async () => {

@@ -32,14 +32,24 @@ export function isFoodLogiProductAssembly(assembly: string): assembly is FoodLog
   return assembly in FOOD_LOGI_PRODUCT_BRANDS;
 }
 
-export function resolveFoodLogiBrand(assembly: string, siteOrHost: string): FoodLogiBrand | null {
+function normalizeBaseUrl(baseUrl: string): string {
+  const value = baseUrl.trim() || "/";
+  const rooted = value.startsWith("/") ? value : `/${value}`;
+  return rooted.endsWith("/") ? rooted : `${rooted}/`;
+}
+
+export function resolveFoodLogiBrand(
+  assembly: string,
+  siteOrHost: string,
+  baseUrl: string = import.meta.env.BASE_URL
+): FoodLogiBrand | null {
   if (!isFoodLogiProductAssembly(assembly)) return null;
   const product = FOOD_LOGI_PRODUCT_BRANDS[assembly];
   const normalized = siteOrHost.trim().toLowerCase();
   const site = normalized === "znceedi" || normalized.includes(".znceedi.") ? "znceedi" : "data360";
   return {
     title: product.title,
-    logo: `/brand/logos/${site}-${product.product}.png`,
+    logo: `${normalizeBaseUrl(baseUrl)}brand/logos/${site}-${product.product}.png`,
   };
 }
 
