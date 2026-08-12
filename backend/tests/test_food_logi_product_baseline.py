@@ -36,7 +36,24 @@ def test_product_registry_contains_exactly_three_independent_products() -> None:
     }
     assert len({item.backend_module for item in registry.PRODUCT_MODULES.values()}) == 3
     assert len({item.permission_prefix for item in registry.PRODUCT_MODULES.values()}) == 3
+    assert {item.permission_prefix for item in registry.PRODUCT_MODULES.values()} == {
+        "module_food_traceability",
+        "module_agricultural_delivery",
+        "module_cold_chain_vehicle",
+    }
     assert "food-logi-suite" not in {item.assembly for item in registry.PRODUCT_MODULES.values()}
+
+
+def test_each_product_brand_has_an_icon_only_logo() -> None:
+    logo_root = REPOSITORY_DIR / "frontend" / "web" / "public" / "brand" / "logos"
+    assert {path.name for path in logo_root.glob("*.png")} == {
+        "data360-trace.png",
+        "data360-agri.png",
+        "data360-logistic.png",
+        "znceedi-trace.png",
+        "znceedi-agri.png",
+        "znceedi-logistic.png",
+    }
 
 
 @pytest.mark.parametrize(
