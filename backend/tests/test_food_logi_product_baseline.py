@@ -87,6 +87,29 @@ def test_each_assembly_enables_only_its_business_module(
     assert assembly.seed_packs == ["food-common", seed_pack]
 
 
+def test_food_common_seed_extends_framework_minimal_seed() -> None:
+    manifest = (
+        BACKEND_DIR / "app" / "scripts" / "seeds" / "food-common" / "seed.toml"
+    ).read_text()
+
+    assert 'depends = ["minimal"]' in manifest
+
+    sites = __import__("json").loads(
+        (
+            BACKEND_DIR
+            / "app"
+            / "scripts"
+            / "seeds"
+            / "food-common"
+            / "platform_site.json"
+        ).read_text()
+    )
+    assert {site["code"]: site["id"] for site in sites} == {
+        "data360": 1,
+        "znceedi": 2,
+    }
+
+
 def test_brand_contract_maps_six_production_hosts_and_six_local_hosts() -> None:
     brands = _required_module("app.core.food_brand_contract")
 

@@ -1,6 +1,6 @@
 [
-  {"site_id": 101, "host": "trace.data360.org.cn", "is_primary": true},
-  {"site_id": 101, "host": "trace.data360.localhost", "is_primary": false},
-  {"site_id": 102, "host": "trace.znceedi.org.cn", "is_primary": true},
-  {"site_id": 102, "host": "trace.znceedi.localhost", "is_primary": false}
+  {"site_id": 1, "host": "trace.data360.org.cn", "is_primary": true},
+  {"site_id": 1, "host": "trace.data360.localhost", "is_primary": false},
+  {"site_id": 2, "host": "trace.znceedi.org.cn", "is_primary": true},
+  {"site_id": 2, "host": "trace.znceedi.localhost", "is_primary": false}
 ]

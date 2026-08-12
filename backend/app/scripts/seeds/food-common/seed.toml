@@ -1,5 +1,5 @@
 name = "food-common"
-depends = []
+depends = ["minimal"]
 
 [[tables]]
 table = "platform_site"

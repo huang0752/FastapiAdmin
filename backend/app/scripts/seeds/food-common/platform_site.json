@@ -1,6 +1,6 @@
 [
   {
-    "id": 101,
+    "id": 1,
     "code": "data360",
     "name": "华夏电投",
     "logo_url": null,
@@ -14,7 +14,7 @@
     "status": 0
   },
   {
-    "id": 102,
+    "id": 2,
     "code": "znceedi",
     "name": "中能电投",
     "logo_url": null,

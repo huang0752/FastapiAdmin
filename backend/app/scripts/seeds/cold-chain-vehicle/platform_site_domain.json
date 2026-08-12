@@ -1,6 +1,6 @@
 [
-  {"site_id": 101, "host": "logistic.data360.org.cn", "is_primary": true},
-  {"site_id": 101, "host": "logistic.data360.localhost", "is_primary": false},
-  {"site_id": 102, "host": "logistic.znceedi.org.cn", "is_primary": true},
-  {"site_id": 102, "host": "logistic.znceedi.localhost", "is_primary": false}
+  {"site_id": 1, "host": "logistic.data360.org.cn", "is_primary": true},
+  {"site_id": 1, "host": "logistic.data360.localhost", "is_primary": false},
+  {"site_id": 2, "host": "logistic.znceedi.org.cn", "is_primary": true},
+  {"site_id": 2, "host": "logistic.znceedi.localhost", "is_primary": false}
 ]
