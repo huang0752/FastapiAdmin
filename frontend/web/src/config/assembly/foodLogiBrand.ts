@@ -20,6 +20,8 @@ export interface FoodLogiBrand {
   logo: string;
 }
 
+import { resolveSiteBrandTheme } from "@/config/brand/siteBrandTheme";
+
 const PRODUCT_AUTHORITATIVE_BRAND_FIELDS = new Set([
   "name",
   "tenant_name",
@@ -32,25 +34,13 @@ export function isFoodLogiProductAssembly(assembly: string): assembly is FoodLog
   return assembly in FOOD_LOGI_PRODUCT_BRANDS;
 }
 
-function normalizeBaseUrl(baseUrl: string): string {
-  const value = baseUrl.trim() || "/";
-  const rooted = value.startsWith("/") ? value : `/${value}`;
-  return rooted.endsWith("/") ? rooted : `${rooted}/`;
-}
-
 export function resolveFoodLogiBrand(
   assembly: string,
   siteOrHost: string,
   baseUrl: string = import.meta.env.BASE_URL
 ): FoodLogiBrand | null {
-  if (!isFoodLogiProductAssembly(assembly)) return null;
-  const product = FOOD_LOGI_PRODUCT_BRANDS[assembly];
-  const normalized = siteOrHost.trim().toLowerCase();
-  const site = normalized === "znceedi" || normalized.includes(".znceedi.") ? "znceedi" : "data360";
-  return {
-    title: product.title,
-    logo: `${normalizeBaseUrl(baseUrl)}brand/logos/${site}-${product.product}.png`,
-  };
+  const brand = resolveSiteBrandTheme(assembly, siteOrHost, baseUrl);
+  return brand ? { title: brand.title, logo: brand.logo } : null;
 }
 
 export function allowsFoodLogiTenantBrandField(assembly: string, key: string): boolean {
