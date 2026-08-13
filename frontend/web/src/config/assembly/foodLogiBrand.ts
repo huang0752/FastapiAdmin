@@ -20,7 +20,7 @@ export interface FoodLogiBrand {
   logo: string;
 }
 
-import { resolveSiteBrandTheme } from "@/config/brand/siteBrandTheme";
+import { resolveSiteBrandTheme } from "../brand/siteBrandTheme";
 
 const PRODUCT_AUTHORITATIVE_BRAND_FIELDS = new Set([
   "name",

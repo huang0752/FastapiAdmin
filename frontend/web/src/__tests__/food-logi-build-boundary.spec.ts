@@ -44,6 +44,37 @@ describe("food logi build-time view boundary", () => {
     ]);
   });
 
+  it("requires the current system Site assets and rejects legacy branding", async () => {
+    const boundary = await import(/* @vite-ignore */ boundaryImport);
+    const output = fs.mkdtempSync(path.join(os.tmpdir(), "food-logi-brand-build-"));
+    fs.mkdirSync(path.join(output, "brand/logos"), { recursive: true });
+    fs.mkdirSync(path.join(output, "brand/favicons"), { recursive: true });
+    fs.mkdirSync(path.join(output, "brand/motion"), { recursive: true });
+    for (const site of ["data360", "znceedi"]) {
+      for (const folder of ["logos", "favicons"]) {
+        fs.writeFileSync(path.join(output, `brand/${folder}/${site}-trace.png`), "png");
+      }
+      fs.writeFileSync(path.join(output, `brand/motion/${site}-trace.svg`), "<svg />");
+    }
+    fs.writeFileSync(
+      path.join(output, "index.html"),
+      '<title>食品安全质量追溯系统</title><link href="/web/brand/favicons/data360-trace.png">'
+    );
+    fs.writeFileSync(
+      path.join(output, "app.css"),
+      "@media (prefers-reduced-motion: reduce){} #x{color:#2563EB;color:#078C72}"
+    );
+    fs.writeFileSync(
+      path.join(output, "app.js"),
+      "@imgs/user/avatar.webp https://service.fastapiadmin.com/logo.png"
+    );
+
+    expect(boundary.findFoodLogiBrandingViolations(output, "food-traceability")).toEqual([
+      expect.stringContaining("旧品牌标记"),
+      expect.stringContaining("旧品牌标记"),
+    ]);
+  });
+
   it("classifies direct imports outside ComponentLoader as excluded", async () => {
     const boundary = await import(/* @vite-ignore */ boundaryImport);
     const root = "/workspace/src";

@@ -93,7 +93,7 @@ describe("food logi product branding", () => {
 
     for (const component of components) {
       const source = readSource(component);
-      expect(source, component).toContain("resolveFoodLogiBrand");
+      expect(source, component).toMatch(/resolve(?:FoodLogiBrand|SiteBrandTheme)/);
       expect(source, component).toContain("defaultAssemblySummary.name");
       expect(source, component).toContain("window.location.hostname");
       expect(source, component).toContain("productBrand.value?.logo");

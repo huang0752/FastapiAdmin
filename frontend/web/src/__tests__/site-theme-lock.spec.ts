@@ -7,9 +7,7 @@ const webRoot = path.resolve(__dirname, "../..");
 
 describe("food logistics Site theme lock", () => {
   it("maps the two Sites to dedicated light and dark tokens", () => {
-    expect(getLockedFoodLogiThemePreset("food-traceability", "trace.data360.org.cn")).toBe(
-      "ocean"
-    );
+    expect(getLockedFoodLogiThemePreset("food-traceability", "trace.data360.org.cn")).toBe("ocean");
     expect(getLockedFoodLogiThemePreset("food-traceability", "trace.znceedi.org.cn")).toBe(
       "energy"
     );
@@ -39,7 +37,7 @@ describe("food logistics Site theme lock", () => {
     );
 
     expect(topBar).toContain('v-if="!isFoodProduct"');
-    expect(topBar).toContain("@click=\"themeAnimation\"");
+    expect(topBar).toContain('@click="themeAnimation"');
     expect(settings).toContain('v-if="!isFoodProduct"');
     expect(settings).toContain("<FaThemeSettings />");
   });

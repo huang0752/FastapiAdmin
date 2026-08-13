@@ -156,6 +156,30 @@ export function findFoodLogiBrandingViolations(
     const logo = path.join(outputDirectory, "brand", "logos", `${site}-${product.product}.png`);
     if (!fs.existsSync(logo))
       violations.push(`缺少产品 Logo: ${path.relative(outputDirectory, logo)}`);
+    for (const [folder, extension, label] of [
+      ["favicons", "png", "favicon"],
+      ["motion", "svg", "动效"],
+    ] as const) {
+      const asset = path.join(
+        outputDirectory,
+        "brand",
+        folder,
+        `${site}-${product.product}.${extension}`
+      );
+      if (!fs.existsSync(asset)) {
+        violations.push(`缺少产品 ${label}: ${path.relative(outputDirectory, asset)}`);
+      }
+    }
+  }
+  const textFiles = walkFiles(outputDirectory).filter((file) => /\.(?:html|js|css)$/i.test(file));
+  const text = textFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
+  if (!text.includes("brand/favicons/")) violations.push("index.html 未引用产品 favicon");
+  if (!text.includes("prefers-reduced-motion")) violations.push("产物缺少 reduced-motion 降级");
+  if (!text.toLowerCase().includes("#2563eb") || !text.toLowerCase().includes("#078c72")) {
+    violations.push("产物缺少双 Site 主题 token");
+  }
+  for (const marker of ["@imgs/user/avatar.webp", "service.fastapiadmin.com/logo"]) {
+    if (text.includes(marker)) violations.push(`产物包含旧品牌标记: ${marker}`);
   }
   return violations;
 }

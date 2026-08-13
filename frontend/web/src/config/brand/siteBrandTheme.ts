@@ -2,7 +2,7 @@ import {
   FOOD_LOGI_PRODUCT_BRANDS,
   isFoodLogiProductAssembly,
   type FoodLogiAssembly,
-} from "@/config/assembly/foodLogiBrand";
+} from "../assembly/foodLogiBrand";
 
 export type SiteCode = "data360" | "znceedi";
 export type FoodSystem = "trace" | "agri" | "logistic";
@@ -33,9 +33,7 @@ export function normalizeBrandBaseUrl(baseUrl: string): string {
 
 export function resolveFoodLogiSite(siteOrHost: string): SiteCode {
   const normalized = siteOrHost.trim().toLowerCase();
-  return normalized === "znceedi" || normalized.includes(".znceedi.")
-    ? "znceedi"
-    : "data360";
+  return normalized === "znceedi" || normalized.includes(".znceedi.") ? "znceedi" : "data360";
 }
 
 export function resolveSiteBrandTheme(

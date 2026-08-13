@@ -29,9 +29,7 @@ describe("food logistics Site brand themes", () => {
   });
 
   it("defaults unknown and local hosts to data360", () => {
-    expect(resolveSiteBrandTheme("food-traceability", "localhost", "/web")?.site).toBe(
-      "data360"
-    );
+    expect(resolveSiteBrandTheme("food-traceability", "localhost", "/web")?.site).toBe("data360");
   });
 
   it("does not brand the default framework assembly", () => {

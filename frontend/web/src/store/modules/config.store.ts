@@ -34,11 +34,8 @@ import TenantAPI from "@/api/module_platform/tenant";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { defaultAssemblySummary } from "@/config/assembly/default";
-import {
-  allowsFoodLogiTenantBrandField,
-} from "@/config/assembly/foodLogiBrand";
+import { allowsFoodLogiTenantBrandField } from "@/config/assembly/foodLogiBrand";
 import { resolveSiteBrandTheme } from "@/config/brand/siteBrandTheme";
-import { useSettingsStore } from "@/store/modules/setting.store";
 
 const SITE_CONFIG_ALIASES: Record<string, string> = {
   name: "tenant_name",
@@ -144,7 +141,9 @@ export const useConfigStore = defineStore(
         upsertSiteConfigItem({ config_key: "name", config_value: productBrand.title });
         upsertSiteConfigItem({ config_key: "logo_url", config_value: productBrand.logo });
         upsertSiteConfigItem({ config_key: "favicon", config_value: productBrand.favicon });
-        useSettingsStore().syncSiteThemePreset(site?.site_code || window.location.hostname);
+        void import("@/store/modules/setting.store").then(({ useSettingsStore }) => {
+          useSettingsStore().syncSiteThemePreset(site?.site_code || window.location.hostname);
+        });
       }
     }
 
