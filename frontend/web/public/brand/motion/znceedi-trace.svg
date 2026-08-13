@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="znceedi-trace brand motion">
+  <defs><linearGradient id="brand-gradient" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#078C72"/><stop offset="1" stop-color="#2DD4BF"/></linearGradient></defs>
+  <path d="M256 72c102 0 184 82 184 184s-82 184-184 184S72 358 72 256 154 72 256 72Z" fill="#052E2B" opacity=".98"/>
+  <g fill="url(#brand-gradient)" stroke-linecap="round" stroke-linejoin="round"><path class="mark" d="M256 112 374 154l-20 165-98 88-98-88-20-165Z"/><path class="signal" d="m194 252 45 45 86-91"/></g>
+  <circle cx="116" cy="256" r="10" fill="#99F6E4"/><circle cx="396" cy="256" r="10" fill="#2DD4BF"/>
+  <style>.mark,.accent{fill:url(#brand-gradient)}.signal{fill:none;stroke:#99F6E4;stroke-width:18}.wheel{fill:#99F6E4;stroke:#078C72;stroke-width:13}</style>
+</svg>
