@@ -156,7 +156,7 @@
         <FaCardBanner
           :image="bannerIcon4"
           title="版本更新提醒"
-          description="FastapiAdmin v3.0.0 已发布，包含优化和新功能。"
+          description="食品物流系统持续更新，包含稳定性优化和业务能力改进。"
           :button="{
             show: true,
             text: '立即更新',

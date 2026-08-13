@@ -3,7 +3,7 @@
     <section v-if="loading" class="state">正在核验软件使用证明…</section>
     <section v-else-if="!certificate" class="state danger"><h1>无法核验此证明</h1><p>二维码或查验地址无效，请重新获取。</p></section>
     <article v-else class="document">
-      <header><span>FASTAPIADMIN</span><strong>SOFTWARE USAGE CERTIFICATE</strong></header>
+      <header><span>食品物流数字化平台</span><strong>软件使用证明</strong></header>
       <p class="system">{{ certificate.system_name }} · {{ certificate.system_version }}</p>
       <h1>企业软件使用证明</h1>
       <div class="status" :class="{ invalid: !certificate.currently_valid }">{{ certificate.status_label }}</div>
