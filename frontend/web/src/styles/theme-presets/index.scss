@@ -20,6 +20,28 @@
   --fa-chart-8: #94a3b8;
 }
 
+:root[data-theme-preset="energy"] {
+  --fa-chart-1: #078c72;
+  --fa-chart-2: #0891b2;
+  --fa-chart-3: #65a30d;
+  --fa-chart-4: #2563eb;
+  --fa-chart-5: #d97706;
+  --fa-chart-6: #7c3aed;
+  --fa-chart-7: #db2777;
+  --fa-chart-8: #64748b;
+}
+
+:root[data-theme-preset="energy"].dark {
+  --fa-chart-1: #2dd4bf;
+  --fa-chart-2: #22d3ee;
+  --fa-chart-3: #a3e635;
+  --fa-chart-4: #60a5fa;
+  --fa-chart-5: #fbbf24;
+  --fa-chart-6: #a78bfa;
+  --fa-chart-7: #f472b6;
+  --fa-chart-8: #94a3b8;
+}
+
 :root[data-theme-preset="forest"] {
   --fa-chart-1: #15803d;
   --fa-chart-2: #65a30d;

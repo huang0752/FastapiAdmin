@@ -18,7 +18,10 @@
     <div
       class="auth-top-bar-actions-panel pointer-events-auto flex shrink-0 flex items-center justify-center gap-1.5 px-2 py-1.5 max-sm:mr-1"
     >
-      <div class="color-picker-expandable relative flex items-center max-sm:hidden!">
+      <div
+        v-if="!isFoodProduct"
+        class="color-picker-expandable relative flex items-center max-sm:hidden!"
+      >
         <div
           class="color-dots absolute right-0 rounded-full flex items-center gap-2 rounded-5 px-2.5 py-2 pr-9 pl-2.5 opacity-0"
         >
@@ -122,6 +125,7 @@ import AppConfig from "@/config";
 import { LoginPanelAlign } from "@/components/views/fa-login/composables/useLoginPanelAlign";
 import { defaultAssemblySummary } from "@/config/assembly/default";
 import { resolveFoodLogiBrand } from "@/config/assembly/foodLogiBrand";
+import { isFoodLogiProductAssembly } from "@/config/assembly/foodLogiBrand";
 
 defineOptions({ name: "AuthTopBar" });
 
@@ -170,6 +174,7 @@ const { shouldShowThemeToggle, shouldShowLanguage } = useHeaderBar();
 const { locale } = useI18n();
 
 const mainColors = AppConfig.systemMainColor;
+const isFoodProduct = isFoodLogiProductAssembly(defaultAssemblySummary.name);
 /** 与 Element 主题主色同步，供调色盘图标与展开态使用 */
 const themeColorForCss = computed(() => systemThemeColor.value);
 const productBrand = computed(() =>

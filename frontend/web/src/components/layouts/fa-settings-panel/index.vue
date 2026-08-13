@@ -7,13 +7,17 @@
       <!-- 主题风格 -->
       <FaThemeSettings />
       <!-- 通用主题预设 -->
-      <FaThemePresetSettings />
+      <template v-if="!isFoodProduct">
+        <FaThemePresetSettings />
+      </template>
       <!-- 菜单布局 -->
       <FaMenuLayoutSettings />
       <!-- 菜单风格 -->
       <FaMenuStyleSettings />
       <!-- 系统主题色 -->
-      <FaColorSettings />
+      <template v-if="!isFoodProduct">
+        <FaColorSettings />
+      </template>
       <!-- 盒子样式 -->
       <FaBoxStyleSettings />
       <!-- 容器宽度 -->
@@ -28,8 +32,12 @@
 
 <script setup lang="ts">
 import { useSettingsPanel } from "./composables/useSettingsPanel";
+import { defaultAssemblySummary } from "@/config/assembly/default";
+import { isFoodLogiProductAssembly } from "@/config/assembly/foodLogiBrand";
 
 defineOptions({ name: "FaSettingsPanel" });
+
+const isFoodProduct = isFoodLogiProductAssembly(defaultAssemblySummary.name);
 
 interface Props {
   /** 是否打开 */

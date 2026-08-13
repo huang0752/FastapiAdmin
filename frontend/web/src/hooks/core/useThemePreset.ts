@@ -127,7 +127,8 @@ export function applyPreset(
   options: ApplyThemePresetOptions = {}
 ): void {
   const store = useSettingsStore();
-  const preset = getThemePreset(code);
+  const effectiveCode = store.lockedSiteThemePreset ?? code;
+  const preset = getThemePreset(effectiveCode);
   if (!preset) {
     store.setThemePreset("default");
     document.documentElement.removeAttribute("data-theme-preset");
@@ -173,6 +174,8 @@ export function applyPreset(
 }
 
 export function selectPreset(code: ThemePresetCode | string): boolean {
+  const store = useSettingsStore();
+  if (store.lockedSiteThemePreset && code !== store.lockedSiteThemePreset) return false;
   const normalized: ThemePresetCode = isThemePresetCode(code) ? code : "default";
   applyPreset(normalized, { select: true });
   const context = getThemePresetContext();
@@ -182,6 +185,11 @@ export function selectPreset(code: ThemePresetCode | string): boolean {
 }
 
 export function resolveAndApplyPreset(): ThemePresetCode {
+  const store = useSettingsStore();
+  if (store.lockedSiteThemePreset) {
+    applyPreset(store.lockedSiteThemePreset, { select: true });
+    return store.lockedSiteThemePreset;
+  }
   const key = getThemePresetStorageKey(getThemePresetContext());
   if (!key) ensurePendingContextWatcher();
   const saved = key ? localStorage.getItem(key) : null;
@@ -192,6 +200,11 @@ export function resolveAndApplyPreset(): ThemePresetCode {
 }
 
 export function resetToDefaultPreset(): ThemePresetCode {
+  const store = useSettingsStore();
+  if (store.lockedSiteThemePreset) {
+    applyPreset(store.lockedSiteThemePreset, { select: true });
+    return store.lockedSiteThemePreset;
+  }
   const key = getThemePresetStorageKey(getThemePresetContext());
   if (key) localStorage.removeItem(key);
   applyPreset("default");

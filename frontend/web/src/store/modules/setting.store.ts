@@ -15,7 +15,13 @@ import { defaultSettings } from "@/config/setting";
 import { SidebarColor, ThemeMode } from "@/enums/settings/theme.enum";
 import type { LayoutMode } from "@/enums/settings/layout.enum";
 import type { Ref } from "vue";
-import { getThemePreset, type ThemePresetCode } from "@/config/themePresets";
+import {
+  getLockedFoodLogiThemePreset,
+  getThemePreset,
+  type ActiveThemePresetCode,
+  type ThemePresetCode,
+} from "@/config/themePresets";
+import { defaultAssemblySummary } from "@/config/assembly/default";
 
 export const useSettingsStore = defineStore(
   "settingStore",
@@ -31,7 +37,13 @@ export const useSettingsStore = defineStore(
     const systemThemeMode = ref(SETTING_DEFAULT_CONFIG.systemThemeMode);
     const menuThemeType = ref(SETTING_DEFAULT_CONFIG.menuThemeType);
     const systemThemeColor = ref(SETTING_DEFAULT_CONFIG.systemThemeColor);
-    const themePreset = ref<ThemePresetCode>("default");
+    const lockedSiteThemePreset = ref<ActiveThemePresetCode | null>(
+      getLockedFoodLogiThemePreset(
+        defaultAssemblySummary.name,
+        typeof window === "undefined" ? "localhost" : window.location.hostname
+      )
+    );
+    const themePreset = ref<ThemePresetCode>(lockedSiteThemePreset.value ?? "default");
     const presetAppliedPrimary = ref<string | null>(null);
     const presetAppliedMenuTheme = ref<MenuThemeEnum | null>(null);
 
@@ -233,7 +245,17 @@ export const useSettingsStore = defineStore(
     };
 
     const setThemePreset = (preset: ThemePresetCode) => {
-      themePreset.value = preset;
+      if (!lockedSiteThemePreset.value || preset === lockedSiteThemePreset.value) {
+        themePreset.value = preset;
+      }
+    };
+
+    const syncSiteThemePreset = (siteOrHost: string) => {
+      lockedSiteThemePreset.value = getLockedFoodLogiThemePreset(
+        defaultAssemblySummary.name,
+        siteOrHost
+      );
+      if (lockedSiteThemePreset.value) themePreset.value = lockedSiteThemePreset.value;
     };
 
     const setBorderMode = () => {
@@ -429,6 +451,7 @@ export const useSettingsStore = defineStore(
       menuThemeType,
       systemThemeColor,
       themePreset,
+      lockedSiteThemePreset,
       presetAppliedPrimary,
       presetAppliedMenuTheme,
       showMenuButton,
@@ -487,6 +510,7 @@ export const useSettingsStore = defineStore(
       switchMenuStyles,
       setElementTheme,
       setThemePreset,
+      syncSiteThemePreset,
       setBorderMode,
       setContainerWidth,
       setUniqueOpened,

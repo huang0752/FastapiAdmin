@@ -137,6 +137,7 @@
       "presets": {
         "default": "Default",
         "ocean": "Ocean",
+        "energy": "Energy",
         "forest": "Forest",
         "violet": "Violet",
         "sunset": "Sunset",

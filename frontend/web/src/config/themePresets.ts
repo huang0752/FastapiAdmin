@@ -1,8 +1,11 @@
 import { MenuThemeEnum } from "@/enums/appEnum";
+import { isFoodLogiProductAssembly } from "@/config/assembly/foodLogiBrand";
+import { resolveFoodLogiSite } from "@/config/brand/siteBrandTheme";
 
 export type ThemePresetCode =
   | "default"
   | "ocean"
+  | "energy"
   | "forest"
   | "violet"
   | "sunset"
@@ -68,7 +71,7 @@ export const THEME_PRESETS: readonly ThemePreset[] = [
         ],
       },
       dark: {
-        sidebarBackground: "#0E1729",
+        sidebarBackground: "#07172E",
         sidebarText: "#B7C6DA",
         sidebarIcon: "#93A8C2",
         sidebarTitle: "#E5EDF7",
@@ -82,6 +85,51 @@ export const THEME_PRESETS: readonly ThemePreset[] = [
           "#FBBF24",
           "#F472B6",
           "#A3E635",
+          "#94A3B8",
+        ],
+      },
+    },
+  },
+  {
+    code: "energy",
+    nameKey: "energy",
+    primary: { light: "#078C72", dark: "#2DD4BF" },
+    semantics: { ...COMMON_SEMANTICS },
+    recommendedMenuTheme: MenuThemeEnum.DESIGN,
+    modes: {
+      light: {
+        sidebarBackground: "#F7FFFC",
+        sidebarText: "#173B36",
+        sidebarIcon: "#3D746B",
+        sidebarTitle: "#083E35",
+        sidebarActiveBackground: "#DDF7EF",
+        sidebarActiveText: "#06735E",
+        chartPalette: [
+          "#078C72",
+          "#0891B2",
+          "#65A30D",
+          "#2563EB",
+          "#D97706",
+          "#7C3AED",
+          "#DB2777",
+          "#64748B",
+        ],
+      },
+      dark: {
+        sidebarBackground: "#052E2B",
+        sidebarText: "#B7D8D2",
+        sidebarIcon: "#83B9AF",
+        sidebarTitle: "#E1FAF4",
+        sidebarActiveBackground: "#0B4A42",
+        sidebarActiveText: "#5EEAD4",
+        chartPalette: [
+          "#2DD4BF",
+          "#22D3EE",
+          "#A3E635",
+          "#60A5FA",
+          "#FBBF24",
+          "#A78BFA",
+          "#F472B6",
           "#94A3B8",
         ],
       },
@@ -512,4 +560,12 @@ export function listPresetPrimaryColors(): string[] {
     preset.primary.light.toLowerCase(),
     preset.primary.dark.toLowerCase(),
   ]);
+}
+
+export function getLockedFoodLogiThemePreset(
+  assembly: string,
+  siteOrHost: string
+): ActiveThemePresetCode | null {
+  if (!isFoodLogiProductAssembly(assembly)) return null;
+  return resolveFoodLogiSite(siteOrHost) === "znceedi" ? "energy" : "ocean";
 }
