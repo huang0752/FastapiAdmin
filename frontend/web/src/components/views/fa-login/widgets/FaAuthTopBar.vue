@@ -3,7 +3,7 @@
   <header
     class="auth-top-bar pointer-events-none fixed left-0 right-0 top-0 z-100 flex items-center justify-between gap-3 bg-transparent px-5 py-4.5 md:gap-4 md:px-10"
   >
-    <div class="pointer-events-auto flex min-w-0 flex-1 items-center gap-3">
+    <div v-if="!isFoodProduct" class="pointer-events-auto flex min-w-0 flex-1 items-center gap-3">
       <FaLogo class="icon shrink-0" size="46" :src="webLogoSrc" />
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-2">
