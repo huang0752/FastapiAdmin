@@ -56,6 +56,29 @@ describe("food logistics product brand assets", () => {
     const favicon = readPng(name, "favicons");
     expect([logo.width, logo.height]).toEqual([512, 512]);
     expect([favicon.width, favicon.height]).toEqual([64, 64]);
+    expect(logo.data.equals(favicon.data)).toBe(false);
+  });
+
+  it.each(brands)("keeps the four outer corners transparent for %s", (name) => {
+    for (const kind of ["logos", "favicons"] as const) {
+      const { data, width, height } = readPng(name, kind);
+      const idat: Buffer[] = [];
+      for (let offset = 8; offset < data.length; ) {
+        const length = data.readUInt32BE(offset);
+        const type = data.subarray(offset + 4, offset + 8).toString("ascii");
+        if (type === "IDAT") idat.push(data.subarray(offset + 8, offset + 8 + length));
+        offset += 12 + length;
+      }
+      const raw = inflateSync(Buffer.concat(idat));
+      const stride = width * 4 + 1;
+      const alphaAt = (x: number, y: number) => raw[y * stride + 1 + x * 4 + 3];
+      expect([
+        alphaAt(0, 0),
+        alphaAt(width - 1, 0),
+        alphaAt(0, height - 1),
+        alphaAt(width - 1, height - 1),
+      ]).toEqual([0, 0, 0, 0]);
+    }
   });
 
   it.each(brands)("provides safe vector motion artwork for %s", (name) => {

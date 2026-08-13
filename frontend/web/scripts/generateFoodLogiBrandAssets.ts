@@ -147,7 +147,7 @@ function scalePoint(point: Point, scale: number): Point {
   return [point[0] * scale, point[1] * scale];
 }
 
-function drawMark(canvas: Canvas, site: Site, system: System) {
+function drawMark(canvas: Canvas, site: Site, system: System, compact = false) {
   const scale = canvas.size / 512;
   const p = palettes[site];
   const point = (x: number, y: number): Point => scalePoint([x, y], scale);
@@ -160,9 +160,6 @@ function drawMark(canvas: Canvas, site: Site, system: System) {
       points.map((item) => scalePoint(item, scale)),
       color
     );
-
-  circle(256, 256, 204, site === "data360" ? [5, 23, 46] : [5, 46, 43]);
-  circle(256, 256, 178, site === "data360" ? [10, 38, 75] : [6, 64, 57]);
 
   if (system === "trace") {
     const shield: Point[] =
@@ -212,6 +209,11 @@ function drawMark(canvas: Canvas, site: Site, system: System) {
             [256, 397],
           ];
     for (const [x, y] of nodes) circle(x, y, 15, p.accent);
+    if (!compact) {
+      line([173, 111], [130, 92], 8, p.accent);
+      line([339, 111], [382, 92], 8, p.accent);
+      circle(256, 455, 8, p.accent);
+    }
   } else if (system === "agri") {
     const leafA: Point[] =
       site === "data360"
@@ -258,6 +260,10 @@ function drawMark(canvas: Canvas, site: Site, system: System) {
           [256, 385],
         ]) as Point[])
       circle(x, y, 14, p.accent);
+    if (!compact) {
+      line([108, 336], [72, 358], 8, p.accent);
+      line([404, 329], [442, 348], 8, p.accent);
+    }
   } else {
     const body: Point[] =
       site === "data360"
@@ -303,6 +309,10 @@ function drawMark(canvas: Canvas, site: Site, system: System) {
       );
     }
     circle(snowCenter[0] / scale, snowCenter[1] / scale, 16, [226, 252, 250]);
+    if (!compact) {
+      line([89, 209], [70, 186], 8, p.accent);
+      line([423, 386], [455, 386], 8, p.accent);
+    }
   }
 }
 
@@ -338,10 +348,10 @@ for (const site of sites) {
   for (const system of systems) {
     const name = `${site}-${system}`;
     const logo = new Canvas(512);
-    drawMark(logo, site, system);
+    drawMark(logo, site, system, false);
     write(resolve(OUTPUT_ROOT, "logos", `${name}.png`), encodePng(512, 512, logo.pixels));
     const favicon = new Canvas(64);
-    drawMark(favicon, site, system);
+    drawMark(favicon, site, system, true);
     write(resolve(OUTPUT_ROOT, "favicons", `${name}.png`), encodePng(64, 64, favicon.pixels));
     write(resolve(OUTPUT_ROOT, "motion", `${name}.svg`), svgFor(site, system));
   }

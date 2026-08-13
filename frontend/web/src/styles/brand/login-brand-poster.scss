@@ -1,0 +1,412 @@
+.brand-poster {
+  --poster-primary: #2563eb;
+  --poster-accent: #38bdf8;
+  --poster-ink: #0b1f45;
+  --poster-paper: #eaf1ff;
+  --poster-cut: polygon(0 0, 100% 0, 100% 88%, 88% 100%, 0 100%);
+  --poster-path-duration: 10s;
+
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: var(--poster-ink);
+  background:
+    radial-gradient(
+      circle at 72% 18%,
+      color-mix(in srgb, var(--poster-accent) 22%, transparent),
+      transparent 26%
+    ),
+    linear-gradient(
+      135deg,
+      var(--poster-paper),
+      color-mix(in srgb, var(--poster-paper) 82%, #bcd3ff)
+    );
+  isolation: isolate;
+  clip-path: var(--poster-cut);
+}
+
+.brand-poster--znceedi {
+  --poster-primary: #078c72;
+  --poster-accent: #2dd4bf;
+  --poster-ink: #093b35;
+  --poster-paper: #e4f1ee;
+  --poster-cut: polygon(0 0, 96% 0, 100% 7%, 100% 100%, 12% 100%, 0 90%);
+  --poster-path-duration: 12s;
+}
+
+html.dark .brand-poster--data360 {
+  --poster-ink: #dceaff;
+  --poster-paper: #07172e;
+}
+
+html.dark .brand-poster--znceedi {
+  --poster-ink: #d8fff6;
+  --poster-paper: #052e2b;
+}
+
+.brand-layer {
+  position: absolute;
+  top: 3.2%;
+  right: 4%;
+  left: 4%;
+  z-index: 5;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.brand-layer__logo {
+  flex: none;
+  filter: drop-shadow(0 8px 18px color-mix(in srgb, var(--poster-primary) 25%, transparent));
+}
+
+.brand-layer strong,
+.brand-layer span {
+  display: block;
+}
+
+.brand-layer strong {
+  font-size: clamp(16px, 1.35vw, 22px);
+}
+
+.brand-layer span {
+  margin-top: 2px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  opacity: 0.58;
+}
+
+.brand-layer small {
+  padding: 5px 9px;
+  margin-left: auto;
+  font-weight: 700;
+  color: var(--poster-primary);
+  border: 1px solid color-mix(in srgb, var(--poster-primary) 30%, transparent);
+  border-radius: 999px;
+}
+
+.spatial-layer,
+.spatial-grid,
+.spatial-glow,
+.spatial-noise {
+  position: absolute;
+  inset: 0;
+}
+
+.spatial-grid {
+  background-image:
+    linear-gradient(
+      color-mix(in srgb, var(--poster-primary) 12%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--poster-primary) 12%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 64px 64px;
+  opacity: 0.28;
+  mask-image: linear-gradient(to bottom, black, transparent 86%);
+}
+
+.spatial-glow {
+  background: radial-gradient(
+    ellipse at 44% 43%,
+    color-mix(in srgb, var(--poster-accent) 18%, transparent),
+    transparent 48%
+  );
+}
+
+.spatial-noise {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.24'/%3E%3C/svg%3E");
+  opacity: 0.14;
+}
+
+.narrative-layer {
+  position: absolute;
+  inset: 11% 3% 26%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+}
+
+.brand-motion-layer {
+  width: min(92%, 900px);
+  height: min(82%, 640px);
+}
+
+.brand-motion-layer.is-paused * {
+  animation-play-state: paused !important;
+}
+
+.brand-scene {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: color-mix(in srgb, var(--poster-primary) 58%, transparent);
+  stroke-width: 2;
+}
+
+.scene-grid,
+.cold-lanes {
+  opacity: 0.22;
+}
+
+.field-contours {
+  opacity: 0.34;
+  stroke-dasharray: 8 12;
+}
+
+.field-cells {
+  fill: color-mix(in srgb, var(--poster-primary) 8%, transparent);
+  stroke-width: 1.5;
+}
+
+.business-path {
+  stroke: url("#trace-flow");
+  stroke: var(--poster-accent);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-dasharray: 12 18;
+  animation: poster-path var(--poster-path-duration) linear infinite;
+}
+
+.trace-ledger,
+.cold-truck {
+  fill: color-mix(in srgb, var(--poster-paper) 78%, transparent);
+  stroke: var(--poster-primary);
+  stroke-width: 3;
+}
+
+.scene-node,
+.route-hub,
+.temperature-core {
+  fill: color-mix(in srgb, var(--poster-paper) 88%, transparent);
+  stroke: var(--poster-accent);
+  stroke-width: 4;
+}
+
+.scene-node path,
+.temperature-core path {
+  stroke: var(--poster-primary);
+  stroke-width: 5;
+}
+
+.cold-truck circle {
+  fill: var(--poster-paper);
+  stroke: var(--poster-accent);
+  stroke-width: 8;
+}
+
+.trace-batch-chain {
+  filter: drop-shadow(0 22px 32px color-mix(in srgb, var(--poster-primary) 10%, transparent));
+}
+
+.agri-field-route {
+  filter: drop-shadow(0 22px 34px color-mix(in srgb, var(--poster-accent) 10%, transparent));
+}
+
+.logistic-temperature-lane {
+  filter: drop-shadow(0 20px 34px color-mix(in srgb, var(--poster-primary) 12%, transparent));
+}
+
+.brand-poster--znceedi .narrative-layer {
+  transform: translate(3.5%, 2%) rotate(-1deg);
+}
+
+.brand-poster--znceedi .scene-node {
+  stroke-linecap: round;
+}
+
+.brand-poster--data360 .brand-scene {
+  stroke-linejoin: bevel;
+}
+
+.status-layer {
+  position: absolute;
+  top: 17%;
+  right: 4%;
+  z-index: 4;
+  display: grid;
+  gap: 10px;
+}
+
+.status-chip {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--poster-paper) 76%, transparent);
+  border: 1px solid color-mix(in srgb, var(--poster-primary) 23%, transparent);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--poster-primary) 8%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.status-chip i {
+  width: 7px;
+  height: 7px;
+  background: var(--poster-accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--poster-accent) 14%, transparent);
+  animation: status-pulse calc(8s + var(--status-index) * 1s) ease-in-out infinite;
+}
+
+.copy-layer {
+  position: absolute;
+  right: 7%;
+  bottom: 6%;
+  left: 5%;
+  z-index: 5;
+  max-width: 760px;
+}
+
+.copy-layer__eyebrow {
+  display: flex;
+  gap: 8px;
+}
+
+.copy-layer__eyebrow span {
+  padding: 5px 9px;
+  font-size: 11px;
+  color: var(--poster-primary);
+  letter-spacing: 0.12em;
+  border-left: 2px solid var(--poster-accent);
+}
+
+.copy-layer h2 {
+  max-width: 700px;
+  margin: 14px 0 8px;
+  font-size: clamp(25px, 2.5vw, 42px);
+  line-height: 1.14;
+  letter-spacing: -0.035em;
+}
+
+.copy-layer p {
+  max-width: 650px;
+  margin: 0;
+  font-size: clamp(12px, 1vw, 15px);
+  line-height: 1.8;
+  opacity: 0.7;
+}
+
+.poster-enter {
+  animation: poster-enter 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.poster-enter--brand {
+  animation-delay: 0.08s;
+}
+
+.poster-enter--scene {
+  animation-delay: 0.24s;
+}
+
+.poster-enter--status {
+  animation-delay: 0.48s;
+}
+
+.poster-enter--copy {
+  animation-delay: 0.7s;
+}
+
+.login-left-view--legacy {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  overflow: hidden;
+  background: var(--default-box-color);
+}
+
+.legacy-logo {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.legacy-logo h1 {
+  font-size: 20px;
+}
+
+.legacy-logo small {
+  margin-left: auto;
+}
+
+.legacy-art {
+  position: absolute;
+  inset: 18%;
+  display: grid;
+  place-items: center;
+}
+
+.legacy-art img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+@keyframes poster-enter {
+  from {
+    opacity: 0;
+    filter: blur(7px);
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+@keyframes poster-path {
+  to {
+    stroke-dashoffset: -180;
+  }
+}
+@keyframes status-pulse {
+  0%,
+  75%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+
+  82% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-poster,
+  .brand-poster * {
+    transform: none !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
+@media (width <= 768px) {
+  .brand-poster {
+    clip-path: none;
+  }
+
+  .narrative-layer {
+    inset: 16% 0 38%;
+    transform: none !important;
+  }
+
+  .status-layer {
+    display: none;
+  }
+
+  .copy-layer p {
+    display: none;
+  }
+
+  .brand-motion-layer {
+    transform: none !important;
+  }
+}

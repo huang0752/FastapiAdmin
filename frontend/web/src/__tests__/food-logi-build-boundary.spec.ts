@@ -66,7 +66,7 @@ describe("food logi build-time view boundary", () => {
     );
     fs.writeFileSync(
       path.join(output, "app.js"),
-      "@imgs/user/avatar.webp https://service.fastapiadmin.com/logo.png"
+      "trace-batch-chain 让每一批食品 @imgs/user/avatar.webp https://service.fastapiadmin.com/logo.png"
     );
 
     expect(boundary.findFoodLogiBrandingViolations(output, "food-traceability")).toEqual([

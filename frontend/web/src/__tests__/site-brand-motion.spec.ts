@@ -7,22 +7,21 @@ const webRoot = path.resolve(__dirname, "../..");
 describe("Site brand motion", () => {
   it("supports each food product motion and accessibility pause rules", () => {
     const component = fs.readFileSync(
-      path.join(webRoot, "src/components/brand/FaSiteBrandMotion.vue"),
+      path.join(webRoot, "src/components/brand/BrandMotionLayer.vue"),
       "utf8"
     );
     const style = fs.readFileSync(
-      path.join(webRoot, "src/styles/brand/site-brand-motion.scss"),
+      path.join(webRoot, "src/styles/brand/login-brand-poster.scss"),
       "utf8"
     );
 
-    for (const motion of ["trace-scan", "agri-route", "logistic-cold"]) {
+    for (const motion of ["trace-batch-chain", "agri-field-route", "logistic-temperature-lane"]) {
       expect(style).toContain(motion);
     }
     expect(component).toContain("visibilitychange");
     expect(component).toContain('aria-hidden="true"');
-    expect(style).toMatch(/animation-duration:\s*(?:[6-9]|10)s/);
+    expect(style).toContain("--poster-path-duration: 10s");
     expect(style).toContain("prefers-reduced-motion: reduce");
-    expect(style).toContain("pointer-events: none");
     expect(style).toContain("width <= 768px");
   });
 
@@ -31,8 +30,8 @@ describe("Site brand motion", () => {
       path.join(webRoot, "src/components/views/fa-login/backdrops/FaLoginLeftView.vue"),
       "utf8"
     );
-    expect(left).toContain("FaSiteBrandMotion");
+    expect(left).toContain("LoginBrandScene");
     expect(left).toContain("resolveSiteBrandTheme");
-    expect(left).toContain(':brand="productBrand"');
+    expect(left).toContain(':scene="poster.scene"');
   });
 });

@@ -11,6 +11,11 @@ const FOOD_PRODUCT_VIEWS = {
   "agricultural-delivery": "module_agri",
   "cold-chain-vehicle": "module_logistic",
 } as const;
+const FOOD_PRODUCT_SCENES = {
+  "food-traceability": "TraceBrandScene",
+  "agricultural-delivery": "AgriBrandScene",
+  "cold-chain-vehicle": "LogisticBrandScene",
+} as const;
 
 type FoodLogiAssembly = keyof typeof FOOD_PRODUCT_VIEWS;
 
@@ -57,7 +62,13 @@ export function isExcludedFoodLogiModule(id: string, assembly: string): boolean 
     ...ALWAYS_EXCLUDED_VIEW_DIRS,
     ...Object.values(FOOD_PRODUCT_VIEWS).filter((view) => view !== currentProduct),
   ];
+  const currentScene = FOOD_PRODUCT_SCENES[assembly];
+  const isOtherBrandScene = Object.values(FOOD_PRODUCT_SCENES).some(
+    (scene) =>
+      scene !== currentScene && normalized.endsWith(`/src/components/brand/scenes/${scene}.vue`)
+  );
   return (
+    isOtherBrandScene ||
     excludedViews.some((view) => normalized.includes(`/src/views/${view}/`)) ||
     ALWAYS_EXCLUDED_COMPONENT_DIRS.some((component) => normalized.includes(`/src/${component}/`))
   );
@@ -178,7 +189,26 @@ export function findFoodLogiBrandingViolations(
   if (!text.toLowerCase().includes("#2563eb") || !text.toLowerCase().includes("#078c72")) {
     violations.push("产物缺少双 Site 主题 token");
   }
-  for (const marker of ["@imgs/user/avatar.webp", "service.fastapiadmin.com/logo"]) {
+  const requiredScene: Record<string, { marker: string; headline: string }> = {
+    trace: { marker: "trace-batch-chain", headline: "让每一批食品" },
+    agri: { marker: "agri-field-route", headline: "从田间计划" },
+    logistic: { marker: "logistic-temperature-lane", headline: "让温度与轨迹" },
+  };
+  const expected = requiredScene[product.product];
+  if (!text.includes(expected.marker)) violations.push(`产物缺少当前业务场景: ${expected.marker}`);
+  if (!text.includes(expected.headline))
+    violations.push(`产物缺少当前系统品牌主张: ${expected.headline}`);
+  for (const scene of Object.values(requiredScene)) {
+    if (scene.marker !== expected.marker && text.includes(scene.marker)) {
+      violations.push(`产物包含其它系统主场景: ${scene.marker}`);
+    }
+  }
+  for (const marker of [
+    "@imgs/user/avatar.webp",
+    "service.fastapiadmin.com/logo",
+    "site-brand-motion__orbit",
+    "兼具设计美学与高效开发",
+  ]) {
     if (text.includes(marker)) violations.push(`产物包含旧品牌标记: ${marker}`);
   }
   return violations;
