@@ -1,0 +1,100 @@
+.site-brand-motion {
+  position: relative;
+  display: grid;
+  width: min(28rem, 72%);
+  aspect-ratio: 1;
+  place-items: center;
+  pointer-events: none;
+  filter: drop-shadow(0 1.5rem 3rem color-mix(in srgb, var(--el-color-primary) 22%, transparent));
+  animation: site-brand-assemble 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  &__mark {
+    z-index: 2;
+    width: 62%;
+    height: 62%;
+    object-fit: contain;
+  }
+
+  &__orbit,
+  &__signal {
+    position: absolute;
+    border-radius: 50%;
+  }
+
+  &__orbit {
+    inset: 12%;
+    border: 1px solid color-mix(in srgb, var(--el-color-primary) 32%, transparent);
+    animation: site-brand-orbit 8s ease-in-out infinite;
+    animation-duration: 8s;
+  }
+
+  &__signal {
+    inset: 22%;
+    border: 2px solid color-mix(in srgb, var(--el-color-primary) 42%, transparent);
+    animation: site-brand-signal 7s ease-out infinite;
+  }
+
+  &--trace-scan &__signal {
+    border-radius: 38% 62% 48% 52%;
+  }
+
+  &--agri-route &__orbit {
+    border-radius: 62% 38% 58% 42%;
+  }
+
+  &--logistic-cold &__signal {
+    border-style: dashed;
+  }
+
+  &.is-paused * {
+    animation-play-state: paused !important;
+  }
+}
+
+@keyframes site-brand-assemble {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes site-brand-orbit {
+  50% {
+    transform: rotate(14deg) scale(1.035);
+  }
+}
+
+@keyframes site-brand-signal {
+  0%,
+  72%,
+  100% {
+    opacity: 0.18;
+    transform: scale(0.92);
+  }
+  80% {
+    opacity: 0.7;
+    transform: scale(1.04);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-brand-motion,
+  .site-brand-motion * {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+@media (width <= 768px) {
+  .site-brand-motion {
+    width: 5rem;
+  }
+  .site-brand-motion__orbit,
+  .site-brand-motion__signal {
+    display: none;
+  }
+}

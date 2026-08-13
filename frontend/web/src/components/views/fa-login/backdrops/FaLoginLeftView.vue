@@ -14,7 +14,8 @@
     </div>
 
     <div class="left-img">
-      <img v-if="loginBgSrc" class="tenant-login-bg" :src="loginBgSrc" alt="" />
+      <FaSiteBrandMotion v-if="productBrand" :brand="productBrand" />
+      <img v-else-if="loginBgSrc" class="tenant-login-bg" :src="loginBgSrc" alt="" />
       <FaThemeSvg v-else :src="loginIcon" size="100%" />
     </div>
 
@@ -94,7 +95,8 @@ import loginIcon from "@fa_imgs/background.svg";
 import { useConfigStore } from "@stores";
 import { themeAnimation } from "@utils";
 import { defaultAssemblySummary } from "@/config/assembly/default";
-import { resolveFoodLogiBrand } from "@/config/assembly/foodLogiBrand";
+import { resolveSiteBrandTheme } from "@/config/brand/siteBrandTheme";
+import FaSiteBrandMotion from "@/components/brand/FaSiteBrandMotion.vue";
 
 defineOptions({ name: "FaLoginLeftView" });
 
@@ -111,7 +113,7 @@ withDefaults(defineProps<Props>(), {
 
 const configStore = useConfigStore();
 const productBrand = computed(() =>
-  resolveFoodLogiBrand(
+  resolveSiteBrandTheme(
     defaultAssemblySummary.name,
     configStore.siteConfigData.site_code?.config_value || window.location.hostname
   )
