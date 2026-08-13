@@ -14,9 +14,9 @@
           <div class="relative z-10 mt-30 mx-auto">
             <div class="relative inline-block">
               <img
-                v-if="infoFormState.avatar"
+                v-if="brandLogo"
                 class="w-20 h-20 object-cover border-2 border-white rounded-full"
-                :src="infoFormState.avatar"
+                :src="brandLogo"
                 alt=""
               />
               <img
@@ -26,6 +26,7 @@
                 alt=""
               />
               <ElUpload
+                v-if="!isFoodLogiProduct"
                 ref="uploadRef"
                 v-model:file-list="fileList"
                 class="profile-avatar-upload"
@@ -313,12 +314,17 @@ import { Camera } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { redirectToLogin, dataURLToFile } from "@utils";
+import { useConfigStore } from "@/store/modules/config.store";
+import { defaultAssemblySummary } from "@/config/assembly/default";
+import { isFoodLogiProductAssembly } from "@/config/assembly/foodLogiBrand";
+import { resolveSiteBrandTheme } from "@/config/brand/siteBrandTheme";
 
 defineOptions({ name: "UserProfile" });
 
 const { t } = useI18n();
 const userStore = useUserStore();
 const dictStore = useDictStore();
+const configStore = useConfigStore();
 const infoFormRef = ref<FormInstance>();
 const passwordFormRef = ref<FormInstance>();
 
@@ -331,6 +337,13 @@ const isEditPwd = ref(false);
 const dictDataStore = computed(() => dictStore.dictData);
 
 const greeting = ref("");
+const isFoodLogiProduct = isFoodLogiProductAssembly(defaultAssemblySummary.name);
+const brandLogo = computed(() => {
+  const site = configStore.siteConfigData.site_code?.config_value || window.location.hostname;
+  return (
+    resolveSiteBrandTheme(defaultAssemblySummary.name, site)?.logo || infoFormState.avatar || ""
+  );
+});
 
 const roleTagList = computed(() =>
   (infoFormState.roles ?? [])

@@ -18,9 +18,9 @@
           class="fa-user-menu__avatar-ref mr-5 max-sm:mr-[16px] cursor-pointer flex size-8.5 max-sm:w-6.5 max-sm:h-6.5 shrink-0 items-center justify-center"
         >
           <img
-            v-if="userAvatar"
+            v-if="brandLogo"
             class="size-full rounded-full object-cover block"
-            :src="userAvatar"
+            :src="brandLogo"
             alt="avatar"
           />
           <img
@@ -37,9 +37,9 @@
         <div class="pt-3">
           <div class="flex items-center pb-1 px-0">
             <img
-              v-if="userAvatar"
+              v-if="brandLogo"
               class="w-10 h-10 mr-3 ml-0 overflow-hidden rounded-full float-left object-cover"
-              :src="userAvatar"
+              :src="brandLogo"
               alt=""
             />
             <img
@@ -115,6 +115,9 @@ import { useRouter } from "vue-router";
 import { ElMessageBox } from "element-plus";
 import { useAssemblyStore, useUserStore } from "@stores";
 import { WEB_LINKS, mittBus } from "@utils";
+import { useConfigStore } from "@/store/modules/config.store";
+import { defaultAssemblySummary } from "@/config/assembly/default";
+import { resolveSiteBrandTheme } from "@/config/brand/siteBrandTheme";
 
 defineOptions({ name: "FaUserMenu" });
 
@@ -122,6 +125,7 @@ const router = useRouter();
 const { t } = useI18n();
 const assemblyStore = useAssemblyStore();
 const userStore = useUserStore();
+const configStore = useConfigStore();
 
 const { info: userInfo } = storeToRefs(userStore);
 const userMenuPopover = ref();
@@ -130,6 +134,11 @@ const paramDrawerVisible = ref(false);
 const userAvatar = computed(() => {
   const a = (userInfo.value as { avatar?: string })?.avatar?.trim();
   return a || "";
+});
+
+const brandLogo = computed(() => {
+  const site = configStore.siteConfigData.site_code?.config_value || window.location.hostname;
+  return resolveSiteBrandTheme(defaultAssemblySummary.name, site)?.logo || userAvatar.value;
 });
 
 const displayName = computed(

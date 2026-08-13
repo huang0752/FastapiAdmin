@@ -36,8 +36,9 @@ import { ref } from "vue";
 import { defaultAssemblySummary } from "@/config/assembly/default";
 import {
   allowsFoodLogiTenantBrandField,
-  resolveFoodLogiBrand,
 } from "@/config/assembly/foodLogiBrand";
+import { resolveSiteBrandTheme } from "@/config/brand/siteBrandTheme";
+import { useSettingsStore } from "@/store/modules/setting.store";
 
 const SITE_CONFIG_ALIASES: Record<string, string> = {
   name: "tenant_name",
@@ -135,14 +136,15 @@ export const useConfigStore = defineStore(
         }
       }
 
-      const productBrand = resolveFoodLogiBrand(
+      const productBrand = resolveSiteBrandTheme(
         defaultAssemblySummary.name,
         site?.site_code || window.location.hostname
       );
       if (productBrand) {
         upsertSiteConfigItem({ config_key: "name", config_value: productBrand.title });
         upsertSiteConfigItem({ config_key: "logo_url", config_value: productBrand.logo });
-        upsertSiteConfigItem({ config_key: "favicon", config_value: productBrand.logo });
+        upsertSiteConfigItem({ config_key: "favicon", config_value: productBrand.favicon });
+        useSettingsStore().syncSiteThemePreset(site?.site_code || window.location.hostname);
       }
     }
 
