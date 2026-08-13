@@ -9,6 +9,13 @@ export type FoodSystem = "trace" | "agri" | "logistic";
 export type SiteThemePreset = "ocean" | "energy";
 export type FoodBrandMotion = "trace-scan" | "agri-route" | "logistic-cold";
 
+export interface SiteBrandTokens {
+  primary: string;
+  highlight: string;
+  paper: string;
+  base: string;
+}
+
 export interface SiteBrandTheme {
   site: SiteCode;
   system: FoodSystem;
@@ -17,6 +24,7 @@ export interface SiteBrandTheme {
   logo: string;
   favicon: string;
   motion: FoodBrandMotion;
+  tokens: SiteBrandTokens;
 }
 
 const SYSTEM_MOTION: Record<FoodSystem, FoodBrandMotion> = {
@@ -55,5 +63,9 @@ export function resolveSiteBrandTheme(
     logo: `${root}brand/logos/${site}-${product.product}.png`,
     favicon: `${root}brand/favicons/${site}-${product.product}.png`,
     motion: SYSTEM_MOTION[product.product],
+    tokens:
+      site === "znceedi"
+        ? { primary: "#078C72", highlight: "#2DD4BF", paper: "#E4F1EE", base: "#052E2B" }
+        : { primary: "#2563EB", highlight: "#38BDF8", paper: "#EAF1FF", base: "#07172E" },
   };
 }

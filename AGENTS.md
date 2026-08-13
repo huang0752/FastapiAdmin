@@ -45,6 +45,8 @@ Permission codes should follow module namespaces, for example `module_platform:t
 
 ## Testing Guidelines
 
+默认不运行全量测试，只运行与改动直接相关的定向测试、类型检查和静态检查。默认不启动浏览器测试，也不启动浏览器、Playwright 或本地页面服务；仅在用户明确要求时执行全量测试、完整构建或浏览器验收。
+
 Use pytest for backend tests and Vitest for frontend tests. Name backend tests as `test_*.py`; place frontend specs under `src/__tests__/` or near the changed feature.
 
 For shared foundation changes, cover tenant isolation, permission denial, menu/route consistency, and API success paths. Run focused tests first, then broader checks.

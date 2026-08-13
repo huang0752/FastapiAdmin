@@ -3,6 +3,7 @@
     v-if="poster && productBrand"
     class="login-left-view brand-poster"
     :class="`brand-poster--${poster.siteTone}`"
+    :style="posterThemeStyle"
   >
     <div class="brand-layer poster-enter poster-enter--brand">
       <FaLogo class="brand-layer__logo" size="42" :src="productBrand.logo" />
@@ -82,6 +83,16 @@ const poster = computed(() =>
   productBrand.value
     ? resolveLoginBrandPoster(productBrand.value.site, productBrand.value.system)
     : null
+);
+const posterThemeStyle = computed(() =>
+  productBrand.value
+    ? {
+        "--poster-primary": productBrand.value.tokens.primary,
+        "--poster-accent": productBrand.value.tokens.highlight,
+        "--poster-paper": productBrand.value.tokens.paper,
+        "--poster-base": productBrand.value.tokens.base,
+      }
+    : undefined
 );
 const webLogoSrc = computed(
   () => productBrand.value?.logo || configStore.configData.tenant_logo?.config_value?.trim()
