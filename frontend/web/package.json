@@ -1,6 +1,6 @@
 {
-  "name": "fastapiadmin",
-  "description": "Vue3 + Vite + TypeScript + Element-Plus 的后台管理模板",
+  "name": "xiaoshi-saas",
+  "description": "小柿 SaaS：支持独立部署与中控联动的多租户应用框架",
   "version": "3.0.0",
   "private": true,
   "type": "module",

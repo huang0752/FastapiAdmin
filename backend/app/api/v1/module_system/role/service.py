@@ -1,11 +1,15 @@
 from typing import Any
 
+from sqlalchemy import select
+
 from app.api.v1.module_platform.tenant.service import TenantService
 from app.core.base_schema import AuthSchema, BatchSetAvailable
 from app.core.exceptions import CustomException
 from app.utils.excel_util import ExcelUtil
 
+from .constants import system_managed_role_codes
 from .crud import RoleCRUD
+from .model import CONTROL_PORTAL_USER_ROLE_CODE, RoleModel
 from .schema import (
     RoleCreateSchema,
     RoleOutSchema,
@@ -13,8 +17,6 @@ from .schema import (
     RoleQueryParam,
     RoleUpdateSchema,
 )
-
-TENANT_GOVERNANCE_ROLE_CODES = frozenset({"owner", "admin", "member"})
 
 
 class RoleService:
@@ -27,11 +29,62 @@ class RoleService:
     def __init__(self, auth: AuthSchema) -> None:
         self.auth = auth
 
+    async def assignable_menus(self) -> list[dict]:
+        """角色授权专用目录：业务租户仅能选择套餐和装配允许的菜单。"""
+        from app.api.v1.module_platform.menu.crud import MenuCRUD
+        from app.api.v1.module_platform.menu.schema import MenuOutSchema
+        from app.api.v1.module_system.user.authorization import UserAuthorizationResolver
+        from app.core.assembly import filter_menu_tree_by_assembly
+        from app.utils.common_util import traversal_to_tree
+
+        search = {"status": 0, "client": "pc"}
+        if not self.auth.is_platform_global:
+            allowed_ids = await UserAuthorizationResolver(self.auth).effective_tenant_menu_ids()
+            if not allowed_ids:
+                return []
+            search["id"] = ("in", sorted(allowed_ids))
+        menus = await MenuCRUD(self.auth).tree_list(search=search, order_by=[{"order": "asc"}])
+        tree = traversal_to_tree([MenuOutSchema.model_validate(menu).model_dump() for menu in menus])
+        return filter_menu_tree_by_assembly(tree, audience="platform" if self.auth.is_platform_global else "tenant")
+
     @staticmethod
-    def _reject_governance_roles(roles) -> None:
-        reserved = sorted(role.code for role in roles if role.code in TENANT_GOVERNANCE_ROLE_CODES)
+    def _reject_system_managed_roles(roles) -> None:
+        reserved = sorted(
+            role.code
+            for role in roles
+            if role.is_system or role.code in system_managed_role_codes()
+        )
         if reserved:
-            raise CustomException(msg=f"租户治理角色由成员与套餐服务维护，禁止直接修改: {reserved}")
+            raise CustomException(
+                msg=f"系统管理角色（含租户治理角色）由专用服务维护，禁止直接修改: {reserved}"
+            )
+
+    async def _lock_roles(self, ids: list[int], *, missing_msg: str) -> list[RoleModel]:
+        if self.auth.db is None or self.auth.tenant_id is None:
+            raise CustomException(msg="租户上下文缺失")
+        # Keep the existing data-scope check, then lock and refresh the rows before
+        # deciding whether a protected role may be changed.
+        visible = await RoleCRUD(self.auth).get_list(search={"id": ("in", ids)})
+        if len(visible) != len(set(ids)):
+            raise CustomException(msg=missing_msg)
+        roles = list(
+            (
+                await self.auth.db.scalars(
+                    select(RoleModel)
+                    .where(
+                        RoleModel.id.in_(ids),
+                        RoleModel.tenant_id == self.auth.tenant_id,
+                        RoleModel.is_deleted.is_(False),
+                    )
+                    .order_by(RoleModel.id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).all()
+        )
+        if len(roles) != len(set(ids)):
+            raise CustomException(msg=missing_msg)
+        return roles
 
     async def detail(self, id: int) -> RoleOutSchema:
         """
@@ -43,7 +96,10 @@ class RoleService:
         返回:
         - RoleOutSchema: 角色详情响应模型
         """
-        return await RoleCRUD(self.auth).get_or_404(id=id, out_schema=RoleOutSchema)
+        role = await RoleCRUD(self.auth).get_or_404(id=id)
+        if role.code == CONTROL_PORTAL_USER_ROLE_CODE:
+            self._reject_system_managed_roles([role])
+        return RoleOutSchema.model_validate(role)
 
     async def get_list(
         self,
@@ -61,7 +117,7 @@ class RoleService:
         - list[RoleOutSchema]: 角色响应模型列表
         """
         role_list = await RoleCRUD(self.auth).get_list(search=vars(search) if search else None, order_by=order_by)
-        return [RoleOutSchema.model_validate(role) for role in role_list]
+        return [RoleOutSchema.model_validate(role) for role in role_list if role.code != CONTROL_PORTAL_USER_ROLE_CODE]
 
     async def page(
         self,
@@ -82,14 +138,16 @@ class RoleService:
         返回:
         - dict: 分页结果（结构由 ``CRUD.page`` 返回约定）
         """
+        role_list = await self.get_list(search=search, order_by=order_by or [{"id": "asc"}])
         offset = (page_no - 1) * page_size
-        return await RoleCRUD(self.auth).page(
-            offset=offset,
-            limit=page_size,
-            order_by=order_by or [{"id": "asc"}],
-            search=vars(search) if search else None,
-            out_schema=RoleOutSchema,
-        )
+        total = len(role_list)
+        return {
+            "page_no": page_no,
+            "page_size": page_size,
+            "total": total,
+            "has_next": offset + page_size < total,
+            "items": [item.model_dump() for item in role_list[offset : offset + page_size]],
+        }
 
     async def create(self, data: RoleCreateSchema) -> RoleOutSchema:
         """
@@ -101,8 +159,8 @@ class RoleService:
         返回:
         - RoleOutSchema: 新创建的角色响应模型
         """
-        if data.code in TENANT_GOVERNANCE_ROLE_CODES:
-            raise CustomException(msg="租户治理角色由成员与套餐服务维护，禁止直接创建")
+        if data.code in system_managed_role_codes():
+            raise CustomException(msg="系统管理角色由专用服务维护，禁止直接创建")
 
         role = await RoleCRUD(self.auth).get(name=data.name)
         if role:
@@ -128,10 +186,10 @@ class RoleService:
         返回:
         - RoleOutSchema: 更新后的角色响应模型
         """
-        role = await RoleCRUD(self.auth).get_or_404(id=id, msg="更新失败，该数据不存在")
-        self._reject_governance_roles([role])
-        if data.code in TENANT_GOVERNANCE_ROLE_CODES:
-            raise CustomException(msg="普通角色不可使用租户治理角色编码")
+        roles = await self._lock_roles([id], missing_msg="更新失败，该数据不存在")
+        self._reject_system_managed_roles(roles)
+        if data.code in system_managed_role_codes():
+            raise CustomException(msg="普通角色不可使用系统管理角色编码")
         exist_role = await RoleCRUD(self.auth).get(name=data.name)
         if exist_role and exist_role.id != id:
             raise CustomException(msg="更新失败，名称已存在")
@@ -155,10 +213,8 @@ class RoleService:
             raise CustomException(msg="删除失败，删除对象不能为空")
 
         # 批量校验角色存在性
-        roles = await RoleCRUD(self.auth).get_list(search={"id": ("in", ids)})
-        if len(roles) != len(ids):
-            raise CustomException(msg="删除失败，部分ID不存在")
-        self._reject_governance_roles(roles)
+        roles = await self._lock_roles(ids, missing_msg="删除失败，部分ID不存在")
+        self._reject_system_managed_roles(roles)
 
         await RoleCRUD(self.auth).delete(ids=ids)
 
@@ -172,10 +228,8 @@ class RoleService:
         返回:
         - None
         """
-        roles = await RoleCRUD(self.auth).get_list(search={"id": ("in", data.role_ids)})
-        if len(roles) != len(data.role_ids):
-            raise CustomException(msg="该数据不存在")
-        self._reject_governance_roles(roles)
+        roles = await self._lock_roles(data.role_ids, missing_msg="该数据不存在")
+        self._reject_system_managed_roles(roles)
 
         # 设置角色菜单权限
         await RoleCRUD(self.auth).set_role_menus_crud(role_ids=data.role_ids, menu_ids=data.menu_ids)
@@ -199,12 +253,8 @@ class RoleService:
         返回:
         - None
         """
-        roles = await RoleCRUD(self.auth).get_list(search={"id": ("in", data.ids)})
-        role_map = {r.id: r for r in roles}
-        for rid in data.ids:
-            if rid not in role_map:
-                raise CustomException(msg="该数据不存在")
-        self._reject_governance_roles(roles)
+        roles = await self._lock_roles(data.ids, missing_msg="该数据不存在")
+        self._reject_system_managed_roles(roles)
         await RoleCRUD(self.auth).set(ids=data.ids, status=data.status)
 
     @staticmethod

@@ -1,0 +1,33 @@
+{
+  "product": "gamma",
+  "read_only": true,
+  "batch_size": 100,
+  "after_id": 0,
+  "next_after_id": 1,
+  "entitlement_count": 1,
+  "entitlements": [
+    {
+      "application_code": "gamma",
+      "tenant_code": "tenant-gamma",
+      "central_user_uuid": "66666666-6666-4666-8666-666666666666",
+      "active": true,
+      "applied_version": 1,
+      "role_codes": [
+        "GLOBAL_GAMMA_e41b8a73",
+        "USER"
+      ],
+      "user_role_effective_menu_count": 3,
+      "effective_business_menu_count": 3,
+      "admin_permission_count": 0,
+      "admin_permissions": [],
+      "principal_role": "member",
+      "is_superuser": false,
+      "platform_global_role_count": 1,
+      "platform_global_role_codes": [
+        "GLOBAL_GAMMA_e41b8a73"
+      ],
+      "default_role_mode": "declared",
+      "access_state": "blocked"
+    }
+  ]
+}

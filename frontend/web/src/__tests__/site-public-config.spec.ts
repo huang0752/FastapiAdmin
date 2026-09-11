@@ -91,7 +91,7 @@ describe("Host/Site public branding", () => {
           resolveSite = resolve;
         });
       }
-      if (url === "/platform/tenant/9/config") {
+      if (url === "/platform/tenant/current/brand-config") {
         return new Promise((resolve) => {
           resolveTenant = resolve;
         });
@@ -112,10 +112,7 @@ describe("Host/Site public branding", () => {
   });
 
   it("clears stale public branding when the current Host has no configured site", async () => {
-    vi.spyOn(Date, "now")
-      .mockReturnValueOnce(0)
-      .mockReturnValueOnce(6_000)
-      .mockReturnValue(6_000);
+    vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValueOnce(6_000).mockReturnValue(6_000);
     requestMock
       .mockResolvedValueOnce({
         data: { data: { site_code: "carbon", name: "能碳云", logo_url: "/old.svg" } },
@@ -161,7 +158,7 @@ describe("Host/Site public branding", () => {
       headers: { Authorization: "NO_AUTH" },
     });
     expect(requestMock).toHaveBeenNthCalledWith(2, {
-      url: "/platform/tenant/9/config",
+      url: "/platform/tenant/current/brand-config",
       method: "get",
     });
     expect(configStore.configData.tenant_name?.config_value).toBe("甲方集团");
@@ -170,10 +167,7 @@ describe("Host/Site public branding", () => {
   });
 
   it("clears the previous tenant overlay when switching tenants", async () => {
-    vi.spyOn(Date, "now")
-      .mockReturnValueOnce(0)
-      .mockReturnValueOnce(6_000)
-      .mockReturnValue(6_000);
+    vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValueOnce(6_000).mockReturnValue(6_000);
     requestMock
       .mockResolvedValueOnce({
         data: { data: { site_code: "carbon", name: "能碳云", status: 0 } },
@@ -203,10 +197,7 @@ describe("Host/Site public branding", () => {
   });
 
   it("keeps the authenticated tenant layer on an in-app refresh without a repeated id", async () => {
-    vi.spyOn(Date, "now")
-      .mockReturnValueOnce(0)
-      .mockReturnValueOnce(6_000)
-      .mockReturnValue(6_000);
+    vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValueOnce(6_000).mockReturnValue(6_000);
     requestMock
       .mockResolvedValueOnce({
         data: { data: { site_code: "carbon", name: "能碳云", status: 0 } },
@@ -226,7 +217,7 @@ describe("Host/Site public branding", () => {
     await configStore.getConfig(true);
 
     expect(requestMock).toHaveBeenNthCalledWith(4, {
-      url: "/platform/tenant/9/config",
+      url: "/platform/tenant/current/brand-config",
       method: "get",
     });
     expect(configStore.configData.tenant_name?.config_value).toBe("甲方集团新名称");

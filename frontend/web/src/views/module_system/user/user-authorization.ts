@@ -55,7 +55,7 @@ export function sourceLabel(source?: UserAuthSource): string {
 }
 
 export function authorizationLabel(status?: UserAuthorizationStatus | null): string {
-  if (status === "pending") return "待授权";
+  if (status === "pending") return "仅基础访问";
   if (status === "authorized") return "已授权";
   return "—";
 }

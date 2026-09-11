@@ -207,11 +207,19 @@
       </template>
     </FaDialog>
 
+    <ControlTenantProvisionWizard
+      v-if="tenantCreateMode === 'control-wizard'"
+      v-model="provisionWizardVisible"
+      @created="handleProvisionCreated"
+    />
+
     <TenantInitialAdminDialog
       v-if="initialAdminCredentials"
       v-model="initialAdminDialogVisible"
       :tenant-name="createdTenantName"
       :credentials="initialAdminCredentials"
+      :provisions="createdTenantProvisions"
+      :application-names="createdApplicationNames"
       @closed="clearInitialAdminCredentials"
     />
   </div>
@@ -238,6 +246,11 @@ import TenantAPI, {
 } from "@/api/module_platform/tenant";
 import TenantInitialAdminDialog from "./TenantInitialAdminDialog.vue";
 import {
+  resolveTenantCreateMode,
+  type TenantProvisionListItem,
+  type TenantWithProvisionsResult,
+} from "@/api/module_control";
+import {
   normalizeCreditCode,
   normalizeCreditCodeForUpdate,
   validateCreditCode,
@@ -245,6 +258,7 @@ import {
 import PackageAPI from "@/api/module_platform/package";
 import SiteAPI from "@/api/module_platform/site";
 import { useAuth } from "@/hooks/core/useAuth";
+import { useAssemblyStore } from "@/store/modules/assembly.store";
 import { PLATFORM_TENANT_PERMISSIONS } from "@/constants/permissions";
 import { renderTableOperationCell, type TableOperationAction, resolveStatusColumns } from "@utils";
 import type { SearchFormItem } from "@/components/forms/fa-search-bar/index.vue";
@@ -252,7 +266,11 @@ import type FaSearchBar from "@/components/forms/fa-search-bar/index.vue";
 import type { FormItem } from "@/components/forms/fa-form/index.vue";
 import type FaForm from "@/components/forms/fa-form/index.vue";
 import { ElMessage, ElTabs, ElTabPane, ElForm, ElFormItem, ElRow, ElCol } from "element-plus";
-import { h, ref, computed, onMounted } from "vue";
+import { computed, defineAsyncComponent, h, onBeforeUnmount, onMounted, ref } from "vue";
+
+const ControlTenantProvisionWizard = defineAsyncComponent(
+  () => import("./ControlTenantProvisionWizard.vue")
+);
 
 defineOptions({
   name: "Tenant",
@@ -260,6 +278,15 @@ defineOptions({
 });
 
 const { hasAuth } = useAuth();
+const assemblyStore = useAssemblyStore();
+const tenantCreateMode = computed(() =>
+  resolveTenantCreateMode(
+    {
+      tenantAutoProvisioning: assemblyStore.isFeatureEnabled("tenantAutoProvisioning", false),
+    },
+    hasAuth
+  )
+);
 
 type TenantSearchForm = {
   name?: string;
@@ -549,11 +576,16 @@ const { dialogVisible } = useCrudDialog();
 const initialAdminDialogVisible = ref(false);
 const initialAdminCredentials = ref<TenantInitialAdmin | null>(null);
 const createdTenantName = ref("");
+const createdTenantProvisions = ref<TenantProvisionListItem[]>([]);
+const createdApplicationNames = ref<Record<number, string>>({});
+const provisionWizardVisible = ref(false);
 
 function clearInitialAdminCredentials() {
   initialAdminDialogVisible.value = false;
   initialAdminCredentials.value = null;
   createdTenantName.value = "";
+  createdTenantProvisions.value = [];
+  createdApplicationNames.value = {};
 }
 
 const CODE_PATTERN = /^[A-Za-z0-9]+$/;
@@ -634,10 +666,31 @@ const tenantFormRenderKey = ref(0);
 async function handleAdd() {
   createLoading.value = true;
   try {
+    if (tenantCreateMode.value === "control-wizard") {
+      provisionWizardVisible.value = true;
+      return;
+    }
     await handleOpenDialog("create");
   } finally {
     createLoading.value = false;
   }
+}
+
+async function handleProvisionCreated(
+  result: TenantWithProvisionsResult,
+  applicationNames: Record<number, string>
+) {
+  await refreshCreate();
+  const credentials = result.tenant.initial_admin ?? null;
+  if (!credentials) {
+    ElMessage.warning("租户已创建，但未收到初始管理员密码，请立即前往用户管理重置密码");
+    return;
+  }
+  createdTenantName.value = result.tenant.name;
+  initialAdminCredentials.value = credentials;
+  createdTenantProvisions.value = result.provisions;
+  createdApplicationNames.value = applicationNames;
+  initialAdminDialogVisible.value = true;
 }
 
 async function handleOpenDialog(type: "create" | "update" | "detail", id?: number) {
@@ -709,6 +762,8 @@ async function fetchPackageOptions(siteId?: number) {
 onMounted(() => {
   fetchSiteOptions();
 });
+
+onBeforeUnmount(clearInitialAdminCredentials);
 
 const basicFormItems = computed<FormItem[]>(() => [
   {

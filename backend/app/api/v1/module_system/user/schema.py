@@ -356,6 +356,8 @@ class UserAuthorizationStatus(StrEnum):
 class UserOutSchema(UserUpdateSchema, BaseSchema, UserBySchema, TenantBySchema):
     """响应"""
 
+    is_superuser: bool = Field(default=False, description="是否超管（只读）")
+
     model_config = ConfigDict(arbitrary_types_allowed=True, from_attributes=True)
 
     username: str | None = Field(default=None, max_length=32, description="用户名")
@@ -366,6 +368,7 @@ class UserOutSchema(UserUpdateSchema, BaseSchema, UserBySchema, TenantBySchema):
         description="联邦账号在当前租户的本地菜单授权状态",
     )
     password_login_enabled: bool = Field(default=True, description="是否允许密码登录")
+    session_tenant_id: int | None = Field(default=None, description="当前认证会话的租户ID")
 
     tenant_id: int | None = Field(
         default=None,

@@ -65,12 +65,15 @@ async def websocket_chat_controller(websocket: WebSocket) -> None:
             user = auth.user
             logger.info("WebSocket连接已建立: {} - 用户: {}", websocket.client, user.username if user else "未认证")
 
-            chat_service = ChatService(auth)
-
             # 消息循环
             while True:
                 try:
                     data = await websocket.receive_text()
+                    # 长连接不能沿用建连时的权限快照：每条消息均重新校验
+                    # Redis 会话、租户上下文和联邦访问资格。
+                    auth = await _authenticate(token, db, redis)
+                    await validate_dynamic_plugin_access_for_path(websocket.url.path, auth)
+                    chat_service = ChatService(auth)
                     try:
                         message_data = json.loads(data)
                         query = ChatQuerySchema(**message_data)
@@ -100,12 +103,20 @@ async def websocket_chat_controller(websocket: WebSocket) -> None:
                     stop_event.clear()
                     # 统一解析当前生效模型配置（每次可动态切换）
                     model_config = await resolve_effective_model_config(redis, auth)
+                    stream = chat_service.chat_query(
+                        query=query,
+                        stop_event=stop_event,
+                        model_config=model_config,
+                    )
                     try:
-                        async for chunk in chat_service.chat_query(
-                            query=query,
-                            stop_event=stop_event,
-                            model_config=model_config,
-                        ):
+                        async for chunk in stream:
+                            # 流式生成期间撤权也必须在下一个 chunk 发送前
+                            # 生效；不能只依赖进入本条 client message 时的快照。
+                            auth = await _authenticate(token, db, redis)
+                            await validate_dynamic_plugin_access_for_path(
+                                websocket.url.path,
+                                auth,
+                            )
                             if not chunk:
                                 continue
                             try:
@@ -114,6 +125,9 @@ async def websocket_chat_controller(websocket: WebSocket) -> None:
                                 logger.warning("WebSocket连接已关闭，停止发送消息")
                                 return
                     finally:
+                        close_stream = getattr(stream, "aclose", None)
+                        if close_stream is not None:
+                            await close_stream()
                         is_generating.clear()
                         stop_event.clear()
 

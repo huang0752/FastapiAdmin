@@ -25,12 +25,12 @@
         <div class="tenant-credentials__row">
           <dt>登录账号</dt>
           <dd>
-            <code>{{ credentials.username }}</code>
+            <code>{{ credentialSnapshot.username }}</code>
             <ElButton
               data-test="copy-username"
               link
               type="primary"
-              @click="copyText(credentials.username)"
+              @click="copyText(credentialSnapshot.username)"
             >
               复制账号
             </ElButton>
@@ -39,12 +39,12 @@
         <div class="tenant-credentials__row">
           <dt>临时密码</dt>
           <dd>
-            <code>{{ credentials.password }}</code>
+            <code>{{ credentialSnapshot.password }}</code>
             <ElButton
               data-test="copy-password"
               link
               type="primary"
-              @click="copyText(credentials.password)"
+              @click="copyText(credentialSnapshot.password)"
             >
               复制密码
             </ElButton>
@@ -55,6 +55,8 @@
       <ElButton data-test="copy-all" type="primary" plain @click="copyText(handoffText)">
         复制完整交付信息
       </ElButton>
+
+      <TenantProvisionResult :provisions="provisions" :application-names="applicationNames" />
 
       <ElCheckbox v-model="acknowledged" class="tenant-credentials__acknowledgement">
         我已安全保存账号和临时密码
@@ -71,8 +73,10 @@
 
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { TenantInitialAdmin } from "@/api/module_platform/tenant";
+import type { TenantProvisionListItem } from "@/api/module_control";
+import TenantProvisionResult from "./TenantProvisionResult.vue";
 
 defineOptions({ name: "TenantInitialAdminDialog" });
 
@@ -80,9 +84,14 @@ interface Props {
   modelValue: boolean;
   tenantName: string;
   credentials: TenantInitialAdmin;
+  provisions?: TenantProvisionListItem[];
+  applicationNames?: Record<number, string>;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  provisions: () => [],
+  applicationNames: () => ({}),
+});
 
 const emit = defineEmits<{
   "update:modelValue": [value: boolean];
@@ -90,17 +99,24 @@ const emit = defineEmits<{
 }>();
 
 const acknowledged = ref(false);
+const credentialSnapshot = ref<TenantInitialAdmin>({ username: "", password: "" });
 
 const handoffText = computed(
   () =>
-    `租户：${props.tenantName}\n登录账号：${props.credentials.username}\n临时密码：${props.credentials.password}\n请首次登录后立即修改密码。`
+    `租户：${props.tenantName}\n登录账号：${credentialSnapshot.value.username}\n临时密码：${credentialSnapshot.value.password}\n请首次登录后立即修改密码。`
 );
 
 watch(
   () => props.modelValue,
   (visible) => {
-    if (visible) acknowledged.value = false;
-  }
+    if (visible) {
+      acknowledged.value = false;
+      credentialSnapshot.value = { ...props.credentials };
+    } else {
+      clearCredentialSnapshot();
+    }
+  },
+  { immediate: true }
 );
 
 async function copyText(text: string) {
@@ -127,7 +143,15 @@ function handleVisibilityUpdate(value: boolean) {
 function finish() {
   if (!acknowledged.value) return;
   emit("update:modelValue", false);
+  clearCredentialSnapshot();
 }
+
+function clearCredentialSnapshot() {
+  credentialSnapshot.value = { username: "", password: "" };
+}
+
+defineExpose({ credentialSnapshot: () => ({ ...credentialSnapshot.value }) });
+onBeforeUnmount(clearCredentialSnapshot);
 </script>
 
 <style scoped lang="scss">

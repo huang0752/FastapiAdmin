@@ -1,0 +1,45 @@
+services:
+  control-web:
+    build:
+      context: ..
+      dockerfile: docker/backend/Dockerfile.runtime
+    command: ["python", "main.py", "run", "--env=prod"]
+    environment: &control-environment
+      APP_ASSEMBLY: "control"
+      ENVIRONMENT: "prod"
+      SECRET_KEY: "${CONTROL_SECRET_KEY:?set CONTROL_SECRET_KEY}"
+      ALLOW_ORIGINS: '["https://control.example.com"]'
+      SERVER_PORT: "8100"
+      DATABASE_TYPE: "postgres"
+      DATABASE_HOST: "${CONTROL_DATABASE_HOST:?set CONTROL_DATABASE_HOST}"
+      DATABASE_PORT: "${CONTROL_DATABASE_PORT:-5432}"
+      DATABASE_NAME: "${CONTROL_DATABASE_NAME:?set CONTROL_DATABASE_NAME}"
+      DATABASE_USER: "${CONTROL_DATABASE_USER:?set CONTROL_DATABASE_USER}"
+      DATABASE_PASSWORD: "${CONTROL_DATABASE_PASSWORD:?set CONTROL_DATABASE_PASSWORD}"
+      REDIS_HOST: "${CONTROL_REDIS_HOST:?set CONTROL_REDIS_HOST}"
+      REDIS_PORT: "${CONTROL_REDIS_PORT:-6379}"
+      REDIS_PASSWORD: "${CONTROL_REDIS_PASSWORD:?set CONTROL_REDIS_PASSWORD}"
+      CELERY_ENABLED: "true"
+      CELERY_BROKER_URL: "${CONTROL_CELERY_BROKER_URL:?set CONTROL_CELERY_BROKER_URL}"
+      CELERY_BROKER_KEY_PREFIX: "fastapiadmin-control:celery:"
+      CELERY_DEFAULT_QUEUE: "fastapiadmin-control"
+      REQUEST_LIMITER_REDIS_PREFIX: "fastapiadmin-control:request-limiter:"
+    ports:
+      - "127.0.0.1:8100:8100"
+    restart: unless-stopped
+
+  control-worker:
+    build:
+      context: ..
+      dockerfile: docker/backend/Dockerfile.runtime
+    command:
+      - celery
+      - -A
+      - app.plugin.module_task.runtime.worker:celery_app
+      - worker
+      - --loglevel=INFO
+      - --queues=fastapiadmin-control
+    environment:
+      <<: *control-environment
+      APP_ASSEMBLY: "control"
+    restart: unless-stopped

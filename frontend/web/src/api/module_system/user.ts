@@ -228,6 +228,8 @@ export interface UserInfo extends BaseType {
   created_by?: CommonType;
   updated_by?: CommonType;
   deleted_by?: CommonType;
+  /** 当前已验证会话所选租户，可能与用户创建时租户不同。 */
+  session_tenant_id?: number;
   tenant_id?: number;
   tenant_name?: string;
   gitee_login?: string;

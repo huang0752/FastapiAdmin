@@ -90,6 +90,36 @@ def _to_camel_case(value: str) -> str:
 
 
 @dataclass(frozen=True)
+class FederationDefaultRole:
+    """Product-declared default permissions; no implicit business access."""
+
+    mode: str = "manual"
+    code: str = "USER"
+    name: str = "普通用户"
+    permission_codes: list[str] = field(default_factory=list)
+    permission_prefixes: list[str] = field(default_factory=list)
+    data_scope: int = 1
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"manual", "declared"}:
+            raise ValueError("默认角色策略必须是 manual 或 declared")
+        if self.mode == "declared" and not (self.permission_codes or self.permission_prefixes):
+            raise ValueError("声明默认角色必须指定业务权限")
+        if self.code != "USER" or not self.name.strip():
+            raise ValueError("默认角色代码必须为 USER，名称不能为空")
+        if self.data_scope != 1:
+            raise ValueError("普通默认角色仅支持本人数据范围")
+        reserved = {"module_system", "module_platform", "module_control", "module_ai"}
+        for permission in [*self.permission_codes, *self.permission_prefixes]:
+            if not permission.strip() or permission != permission.strip() or "*" in permission:
+                raise ValueError("默认业务权限不能为空或包含通配符")
+            if permission.split(":", 1)[0] in reserved:
+                raise ValueError("默认业务权限不能包含管理模块")
+        if any(":" in prefix for prefix in self.permission_prefixes):
+            raise ValueError("权限前缀必须为模块名，不含冒号")
+
+
+@dataclass(frozen=True)
 class AssemblyConfig:
     """当前产品能力装配。"""
 
@@ -107,6 +137,8 @@ class AssemblyConfig:
     tenant_menu_route_names: list[str] = field(default_factory=list)
     seed_packs: list[str] = field(default_factory=lambda: ["legacy"])
     feature_flags: dict[str, bool] = field(default_factory=dict)
+    application_code: str = ""
+    federation_default_role: FederationDefaultRole = field(default_factory=FederationDefaultRole)
 
     def is_plugin_enabled(self, code: str) -> bool:
         module_code = _normalize_module_code(code)
@@ -149,6 +181,9 @@ class AssemblyConfig:
             runtime = manifest.get("runtime", {})
             if not isinstance(runtime, dict):
                 raise TypeError(f"插件 {plugin_name} 的 [runtime] 必须是 TOML table")
+            required_feature = runtime.get("required_feature")
+            if required_feature and not self.is_feature_enabled(str(required_feature), default=False):
+                continue
             for module in _string_list(runtime.get("business_task_modules")):
                 expected_prefix = f"app.plugin.{plugin_name}"
                 if module != expected_prefix and not module.startswith(f"{expected_prefix}."):
@@ -162,6 +197,8 @@ class AssemblyConfig:
         permission = str(item.get("permission") or "")
         component_path = str(item.get("component_path") or "")
         route_group = self._menu_route_group(item)
+        if (permission.startswith("module_control:") or route_group in {"control", "module-control"}) and not self.is_feature_enabled("sso_provider", default=False):
+            return False
 
         for module_code in self.disabled_plugins:
             for candidate in plugin_code_candidates(module_code):
@@ -269,6 +306,15 @@ def load_assembly_from_file(path: Path) -> AssemblyConfig:
     menus = raw.get("menus", {})
     seed = raw.get("seed", {})
     features = raw.get("features", {})
+    role_config = raw.get("federation", {}).get("default_role", {})
+    default_role = FederationDefaultRole(
+        mode=str(role_config.get("mode", "manual")),
+        code=str(role_config.get("code", "USER")),
+        name=str(role_config.get("name", "普通用户")),
+        permission_codes=_string_list(role_config.get("permission_codes")),
+        permission_prefixes=_string_list(role_config.get("permission_prefixes")),
+        data_scope=int(role_config.get("data_scope", 1)),
+    )
 
     flags_raw = features.get("flags", {})
     if flags_raw is None:
@@ -293,6 +339,8 @@ def load_assembly_from_file(path: Path) -> AssemblyConfig:
         tenant_menu_route_names=_string_list(menus.get("tenant_route_names")),
         seed_packs=_string_list(seed.get("packs")) or ["legacy"],
         feature_flags={str(k): bool(v) for k, v in flags_raw.items()},
+        application_code=str(assembly.get("application_code") or "").strip(),
+        federation_default_role=default_role,
     )
 
 

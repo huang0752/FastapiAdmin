@@ -127,6 +127,16 @@ function mountTable(apiFn: (params: Record<string, unknown>) => Promise<TableRes
   return table;
 }
 
+it("clears the previous total when a subsequent list request is denied", async () => {
+  const api = vi.fn().mockResolvedValueOnce(response).mockRejectedValueOnce(new Error("forbidden"));
+  const table = mountTable(api);
+  await table.fetchData({ page_no: 1 });
+  expect(table.pagination.total).toBe(1);
+  await table.fetchData({ page_no: 2 });
+  expect(table.data.value).toEqual([]);
+  expect(table.pagination.total).toBe(0);
+});
+
 describe("useTable request deduplication scope", () => {
   it("does not merge identical params sent to different API functions", async () => {
     const first = deferred<TableResponse>();

@@ -14,6 +14,10 @@ export function collectElementPlusComponentNames(source: string): string[] {
     const componentName = match[1];
     if (componentName) names.add(toKebabCase(componentName));
   }
+  for (const match of source.matchAll(/\bEl([A-Z][A-Za-z0-9]*)\b/g)) {
+    if (match[1]) names.add(toKebabCase(match[1]));
+  }
+  if (/\bv-loading\b/.test(source)) names.add("loading");
   return [...names].sort();
 }
 
@@ -24,7 +28,11 @@ export function createElementPlusStyleIncludes(
   return [...new Set(used)]
     .filter((name) => available.has(name))
     .sort()
-    .map((name) => `element-plus/es/components/${name}/style/index`);
+    .flatMap((name) => [
+      // ElementPlus 插件和组件自动导入分别可能使用这两个入口。
+      `element-plus/es/components/${name}/style/index`,
+      `element-plus/es/components/${name}/style/css`,
+    ]);
 }
 
 export function scanElementPlusStyleIncludes(
@@ -38,7 +46,7 @@ export function scanElementPlusStyleIncludes(
         const target = path.join(directory, entry.name);
         if (entry.isDirectory()) {
           walk(target);
-        } else if (entry.name.endsWith(".vue")) {
+        } else if (/\.(vue|ts|tsx)$/.test(entry.name)) {
           sources.push(fs.readFileSync(target, "utf8"));
         }
       }
@@ -53,7 +61,7 @@ export function scanElementPlusStyleIncludes(
     );
 
     return createElementPlusStyleIncludes(
-      sources.flatMap(collectElementPlusComponentNames),
+      ["base", ...sources.flatMap(collectElementPlusComponentNames)],
       available
     );
   } catch {

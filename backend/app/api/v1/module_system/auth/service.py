@@ -1,4 +1,3 @@
-
 import json
 import uuid
 from datetime import datetime, timedelta
@@ -23,6 +22,7 @@ from app.core.base_schema import (
     LogoutPayloadSchema,
     RefreshTokenPayloadSchema,
 )
+from app.core.database import async_db_session
 from app.core.exceptions import CustomException
 from app.core.logger import logger
 from app.core.redis_crud import RedisCURD
@@ -44,6 +44,11 @@ from .schema import (
     SelectTenantOutSchema,
     TenantOptionSchema,
     TenantRegisterOutSchema,
+)
+from .session_registry import (
+    RedisLockOwnership,
+    UserSessionRegistry,
+    require_active_federated_entitlement,
 )
 
 CaptchaKey = NewType("CaptchaKey", str)
@@ -132,9 +137,7 @@ async def get_unique_user_by_username(
     return await resolve_user_by_login_identifier(db, username, site_id)
 
 
-async def _async_fill_login_location(
-    redis, login_log_id: int, ip: str | None
-) -> None:
+async def _async_fill_login_location(redis, login_log_id: int, ip: str | None) -> None:
     """后台异步补全登录日志的归属地。"""
     if not ip:
         return
@@ -149,13 +152,10 @@ async def _async_fill_login_location(
 
         async with async_db_session() as session:
             async with session.begin():
-                await session.execute(
-                    sa_update(LoginLogModel)
-                    .where(LoginLogModel.id == login_log_id)
-                    .values(login_location=location)
-                )
+                await session.execute(sa_update(LoginLogModel).where(LoginLogModel.id == login_log_id).values(login_location=location))
     except Exception as e:
         from app.core.logger import logger
+
         logger.warning(f"异步补全登录归属地失败: {e}")
 
 
@@ -318,6 +318,7 @@ class LoginService:
         *,
         tenant_id: int,
         site_id: int,
+        _fence_ownerships: list[RedisLockOwnership] | None = None,
     ) -> JWTOutSchema:
         """创建访问令牌和刷新令牌"""
         session_id = str(uuid.uuid4())
@@ -359,13 +360,6 @@ class LoginService:
             login_type=login_type,
         ).model_dump_json()
 
-        # 会话信息存 Redis（完整 JSON），JWT sub 仅含 session_id
-        await RedisCURD(redis).set(
-            key=f"{RedisInitKeyConfig.USER_SESSION.key}:{session_id}",
-            value=session_info,
-            expire=int(refresh_expires.total_seconds()),
-        )
-
         access_token = create_access_token(
             payload=JWTPayloadSchema(
                 sub=session_id,
@@ -383,17 +377,48 @@ class LoginService:
             )
         )
 
-        await RedisCURD(redis).set(
-            key=f"{RedisInitKeyConfig.ACCESS_TOKEN.key}:{session_id}",
-            value=access_token,
-            expire=int(access_expires.total_seconds()),
-        )
-
-        await RedisCURD(redis).set(
-            key=f"{RedisInitKeyConfig.REFRESH_TOKEN.key}:{session_id}",
-            value=refresh_token,
-            expire=int(refresh_expires.total_seconds()),
-        )
+        if _fence_ownerships is not None:
+            await UserSessionRegistry.ensure_ownerships(_fence_ownerships)
+            if len(_fence_ownerships) != 1:
+                raise RuntimeError("联邦登录会话创建必须持有唯一用户 fence")
+            await UserSessionRegistry.create_fenced(
+                redis,
+                ownership=_fence_ownerships[0],
+                session_id=session_id,
+                session_info=session_info,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                site_id=site_id,
+                tenant_id=tenant_id,
+                user_id=user.id,
+                access_expire=int(access_expires.total_seconds()),
+                refresh_expire=int(refresh_expires.total_seconds()),
+            )
+        else:
+            # 本地账号和关闭强制开关的兼容路径保持原有写入语义。
+            await RedisCURD(redis).set(
+                key=f"{RedisInitKeyConfig.USER_SESSION.key}:{session_id}",
+                value=session_info,
+                expire=int(refresh_expires.total_seconds()),
+            )
+            await RedisCURD(redis).set(
+                key=f"{RedisInitKeyConfig.ACCESS_TOKEN.key}:{session_id}",
+                value=access_token,
+                expire=int(access_expires.total_seconds()),
+            )
+            await RedisCURD(redis).set(
+                key=f"{RedisInitKeyConfig.REFRESH_TOKEN.key}:{session_id}",
+                value=refresh_token,
+                expire=int(refresh_expires.total_seconds()),
+            )
+            await UserSessionRegistry.add(
+                redis,
+                session_id=session_id,
+                site_id=site_id,
+                tenant_id=tenant_id,
+                user_id=user.id,
+                expire=int(refresh_expires.total_seconds()),
+            )
 
         return JWTOutSchema(
             access_token=access_token,
@@ -409,6 +434,8 @@ class LoginService:
         db: AsyncSession,
         redis: Redis,
         refresh_token: RefreshTokenPayloadSchema,
+        _mutation_ownership: RedisLockOwnership | None = None,
+        _fence_ownerships: list[RedisLockOwnership] | None = None,
     ) -> JWTOutSchema:
         """刷新访问令牌"""
         token_payload: JWTPayloadSchema = decode_access_token(token=refresh_token.refresh_token)
@@ -416,15 +443,25 @@ class LoginService:
             raise CustomException(msg="非法凭证，请传入刷新令牌")
 
         session_id = token_payload.sub
-        current_refresh_token = _redis_value_to_str(
-            await RedisCURD(redis).get(f"{RedisInitKeyConfig.REFRESH_TOKEN.key}:{session_id}")
-        )
+        if not session_id:
+            raise CustomException(msg="刷新凭证已失效，请重新登录", code=10401, status_code=401)
+        if _mutation_ownership is None:
+            async with UserSessionRegistry.mutation_lock(
+                redis, session_id
+            ) as ownership:
+                return await cls.refresh_token(
+                    request=request,
+                    db=db,
+                    redis=redis,
+                    refresh_token=refresh_token,
+                    _mutation_ownership=ownership,
+                    _fence_ownerships=None,
+                )
+        current_refresh_token = _redis_value_to_str(await redis.get(f"{RedisInitKeyConfig.REFRESH_TOKEN.key}:{session_id}"))
         if not current_refresh_token or current_refresh_token != refresh_token.refresh_token:
             raise CustomException(msg="刷新凭证已失效，请重新登录", code=10401, status_code=401)
 
-        session_info = await RedisCURD(redis).get(
-            f"{RedisInitKeyConfig.USER_SESSION.key}:{session_id}"
-        )
+        session_info = _redis_value_to_str(await redis.get(f"{RedisInitKeyConfig.USER_SESSION.key}:{session_id}"))
         if not session_info:
             raise CustomException(msg="会话已过期，请重新登录")
 
@@ -435,11 +472,28 @@ class LoginService:
 
         if not session_id or not user_id or not tenant_id or not site_id:
             raise CustomException(msg="非法凭证,无法获取会话编号、用户ID、租户ID或站点ID", code=10401, status_code=401)
+        if _fence_ownerships is None:
+            async with UserSessionRegistry.user_fences(
+                redis,
+                [(int(site_id), int(tenant_id), int(user_id))],
+            ) as ownerships:
+                return await cls.refresh_token(
+                    request=request,
+                    db=db,
+                    redis=redis,
+                    refresh_token=refresh_token,
+                    _mutation_ownership=_mutation_ownership,
+                    _fence_ownerships=ownerships,
+                )
 
-        user_stmt = select(UserModel).where(
-            UserModel.id == user_id,
-            UserModel.is_deleted.is_(False),
-        ).limit(1)
+        user_stmt = (
+            select(UserModel)
+            .where(
+                UserModel.id == user_id,
+                UserModel.is_deleted.is_(False),
+            )
+            .limit(1)
+        )
         user = (await db.execute(user_stmt)).scalar_one_or_none()
         if not user:
             raise CustomException(msg="刷新token失败，用户不存在", code=10401, status_code=401)
@@ -448,11 +502,7 @@ class LoginService:
 
         from app.api.v1.module_platform.tenant.model import TenantModel
 
-        tenant_stmt = (
-            select(TenantModel)
-            .where(TenantModel.id == tenant_id, TenantModel.status.in_((0, 1)), TenantModel.is_deleted.is_(False))
-            .limit(1)
-        )
+        tenant_stmt = select(TenantModel).where(TenantModel.id == tenant_id, TenantModel.status.in_((0, 1)), TenantModel.is_deleted.is_(False)).limit(1)
         tenant_result = await db.execute(tenant_stmt)
         tenant = tenant_result.scalar_one_or_none()
         if not tenant:
@@ -470,24 +520,21 @@ class LoginService:
         )
 
         if not user.is_superuser:
-            relation_stmt = (
-                select(TenantUserModel)
-                .where(TenantUserModel.user_id == user.id, TenantUserModel.tenant_id == tenant_id)
-                .limit(1)
-            )
+            relation_stmt = select(TenantUserModel).where(TenantUserModel.user_id == user.id, TenantUserModel.tenant_id == tenant_id).limit(1)
             relation_result = await db.execute(relation_stmt)
             if not relation_result.scalar_one_or_none():
                 raise CustomException(msg="租户会话已失效", code=10401, status_code=401)
 
+        await require_active_federated_entitlement(
+            db,
+            user=user,
+            site_id=int(site_id),
+            tenant_id=int(tenant_id),
+        )
+
         access_expires = timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
         refresh_expires = timedelta(seconds=settings.REFRESH_TOKEN_EXPIRE_SECONDS)
         now = datetime.now()
-
-        # 延长会话信息 Redis TTL
-        await RedisCURD(redis).expire(
-            key=f"{RedisInitKeyConfig.USER_SESSION.key}:{session_id}",
-            expire=int(refresh_expires.total_seconds()),
-        )
 
         access_token = create_access_token(
             payload=JWTPayloadSchema(
@@ -507,16 +554,22 @@ class LoginService:
             )
         )
 
-        await RedisCURD(redis).set(
-            key=f"{RedisInitKeyConfig.ACCESS_TOKEN.key}:{session_id}",
-            value=access_token,
-            expire=int(access_expires.total_seconds()),
-        )
-
-        await RedisCURD(redis).set(
-            key=f"{RedisInitKeyConfig.REFRESH_TOKEN.key}:{session_id}",
-            value=refresh_token_new,
-            expire=int(refresh_expires.total_seconds()),
+        await _mutation_ownership.ensure_owned()
+        await UserSessionRegistry.ensure_ownerships(_fence_ownerships)
+        await UserSessionRegistry.rotate_tokens(
+            redis,
+            session_id=session_id,
+            site_id=int(site_id),
+            tenant_id=int(tenant_id),
+            user_id=int(user_id),
+            expected_session=session_info,
+            expected_refresh_token=refresh_token.refresh_token,
+            new_access_token=access_token,
+            new_refresh_token=refresh_token_new,
+            access_expire=int(access_expires.total_seconds()),
+            refresh_expire=int(refresh_expires.total_seconds()),
+            mutation_ownership=_mutation_ownership,
+            fence_ownerships=_fence_ownerships,
         )
 
         return JWTOutSchema(
@@ -527,7 +580,12 @@ class LoginService:
         )
 
     @staticmethod
-    async def logout(redis: Redis, token: LogoutPayloadSchema, current_token: str) -> bool:
+    async def logout(
+        redis: Redis,
+        token: LogoutPayloadSchema,
+        current_token: str,
+        _mutation_ownership: RedisLockOwnership | None = None,
+    ) -> bool:
         """退出登录"""
         payload: JWTPayloadSchema = decode_access_token(token=token.token)
         current_payload: JWTPayloadSchema = decode_access_token(token=current_token)
@@ -540,9 +598,26 @@ class LoginService:
         if not session_id:
             raise CustomException(msg="非法凭证,无法获取会话编号")
 
-        await RedisCURD(redis).delete(f"{RedisInitKeyConfig.ACCESS_TOKEN.key}:{session_id}")
-        await RedisCURD(redis).delete(f"{RedisInitKeyConfig.REFRESH_TOKEN.key}:{session_id}")
-        await RedisCURD(redis).delete(f"{RedisInitKeyConfig.USER_SESSION.key}:{session_id}")
+        if _mutation_ownership is None:
+            async with UserSessionRegistry.mutation_lock(
+                redis, session_id
+            ) as ownership:
+                return await LoginService.logout(
+                    redis=redis,
+                    token=token,
+                    current_token=current_token,
+                    _mutation_ownership=ownership,
+                )
+
+        await _mutation_ownership.ensure_owned()
+        deleted = await UserSessionRegistry.delete_session(
+            redis,
+            session_id,
+            expected_access_token=current_token,
+            mutation_ownership=_mutation_ownership,
+        )
+        if not deleted:
+            raise CustomException(msg="会话已失效", code=10401, status_code=401)
 
         logger.info(f"用户退出登录成功,会话编号:{session_id}")
 
@@ -566,11 +641,15 @@ class LoginService:
             raise CustomException(msg="站点上下文缺失", code=10403, status_code=403)
 
         if self.auth.user and self.auth.user.is_superuser:
-            stmt = select(TenantModel).where(
-                TenantModel.site_id == site_id,
-                TenantModel.status.in_((0, 1)),
-                TenantModel.is_deleted.is_(False),
-            ).order_by(TenantModel.sort, TenantModel.id)
+            stmt = (
+                select(TenantModel)
+                .where(
+                    TenantModel.site_id == site_id,
+                    TenantModel.status.in_((0, 1)),
+                    TenantModel.is_deleted.is_(False),
+                )
+                .order_by(TenantModel.sort, TenantModel.id)
+            )
             result = await self.auth.db.execute(stmt)
             tenant_objs = result.scalars().all()
             return [TenantOptionSchema(id=t.id, name=t.name, code=t.code) for t in tenant_objs]
@@ -586,6 +665,19 @@ class LoginService:
             )
             .order_by(TenantUserModel.is_default.desc(), TenantModel.sort, TenantModel.id)
         )
+        if settings.CONTROL_USER_ACCESS_ENFORCEMENT_ENABLED and self.auth.user and self.auth.user.auth_source == "federated":
+            from app.api.v1.module_system.federated_access.model import (
+                FederatedAccessEntitlementModel,
+            )
+
+            stmt = stmt.join(
+                FederatedAccessEntitlementModel,
+                (FederatedAccessEntitlementModel.tenant_id == TenantModel.id) & (FederatedAccessEntitlementModel.local_user_id == uid),
+            ).where(
+                FederatedAccessEntitlementModel.site_id == site_id,
+                FederatedAccessEntitlementModel.issuer == settings.CONTROL_SSO_ISSUER.rstrip("/"),
+                FederatedAccessEntitlementModel.status == "active",
+            )
         result = await self.auth.db.execute(stmt)
         tenant_objs = result.scalars().all()
         return [TenantOptionSchema(id=t.id, name=t.name, code=t.code) for t in tenant_objs]
@@ -595,6 +687,9 @@ class LoginService:
         request: Request,
         redis: Redis,
         tenant_id: int,
+        current_token: str | None = None,
+        _mutation_ownership: RedisLockOwnership | None = None,
+        _fence_ownerships: list[RedisLockOwnership] | None = None,
     ) -> SelectTenantOutSchema:
         """选择租户：验证用户归属并签发含租户上下文的新 JWT Token"""
         from sqlalchemy import select
@@ -603,51 +698,128 @@ class LoginService:
 
         if not self.auth.user:
             raise CustomException(msg="未认证用户")
-
-        if not self.auth.user.is_superuser:
-            exist_stmt = (
-                select(TenantUserModel)
-                .where(
-                    TenantUserModel.user_id == self.auth.user.id,
-                    TenantUserModel.tenant_id == tenant_id,
-                )
-                .limit(1)
-            )
-            result = await self.auth.db.execute(exist_stmt)
-            if not result.scalar_one_or_none():
-                raise CustomException(msg="您不属于该租户，无法切换")
-
-        tenant_stmt = select(TenantModel).where(TenantModel.id == tenant_id, TenantModel.status.in_((0, 1)), TenantModel.is_deleted.is_(False)).limit(1)
-        result = await self.auth.db.execute(tenant_stmt)
-        tenant = result.scalar_one_or_none()
-        if not tenant:
-            raise CustomException(msg="租户不存在或已被禁用")
+        authenticated_user_id = int(self.auth.user.id)
 
         ctx = getattr(request.state, "ctx", None)
         session_id = ctx.session_id if ctx else None
-        session_info = ctx.session_info if ctx else None
+        if not session_id:
+            raise CustomException(msg="会话已失效", code=10401, status_code=401)
+        if current_token is None:
+            authorization = request.headers.get("authorization", "")
+            current_token = authorization.split(" ", 1)[1] if authorization.lower().startswith("bearer ") else ""
+        if not current_token:
+            raise CustomException(msg="会话凭证缺失", code=10401, status_code=401)
+        if _mutation_ownership is None:
+            # AuthPermission 解析 Host 时会触发请求级 DB 查询。等待
+            # Redis 锁前必须结束该事务，避免与 recovery 的 fence -> DB
+            # 锁序形成反序。后续仅使用锁内新建的 scoped session。
+            await self.auth.db.rollback()
+            async with UserSessionRegistry.mutation_lock(
+                redis, session_id
+            ) as ownership:
+                return await self.select_tenant(
+                    request=request,
+                    redis=redis,
+                    tenant_id=tenant_id,
+                    current_token=current_token,
+                    _mutation_ownership=ownership,
+                    _fence_ownerships=None,
+                )
 
-        if not session_id or not session_info:
-            raise CustomException(msg="会话已失效")
+        raw_session = _redis_value_to_str(await redis.get(UserSessionRegistry.session_key(session_id)))
+        stored_access = _redis_value_to_str(await redis.get(UserSessionRegistry.access_key(session_id)))
+        if not raw_session or stored_access != current_token:
+            raise CustomException(msg="会话已失效", code=10401, status_code=401)
+        try:
+            session_info = json.loads(raw_session)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raise CustomException(msg="会话数据无效", code=10401, status_code=401) from None
+        if int(session_info.get("user_id") or 0) != authenticated_user_id:
+            raise CustomException(msg="会话用户不匹配", code=10401, status_code=401)
+        old_tenant_id = int(session_info.get("tenant_id") or 0)
+        session_site_id = int(session_info.get("site_id") or 0)
+        if not old_tenant_id or not session_site_id:
+            raise CustomException(msg="会话数据无效", code=10401, status_code=401)
+        if _fence_ownerships is None:
+            async with UserSessionRegistry.user_fences(
+                redis,
+                [
+                    (session_site_id, old_tenant_id, authenticated_user_id),
+                    (session_site_id, tenant_id, authenticated_user_id),
+                ],
+            ) as ownerships:
+                return await self.select_tenant(
+                    request=request,
+                    redis=redis,
+                    tenant_id=tenant_id,
+                    current_token=current_token,
+                    _mutation_ownership=_mutation_ownership,
+                    _fence_ownerships=ownerships,
+                )
 
-        request_site = await resolve_request_site(self.auth.db, request)
-        validate_session_site(
-            session_site_id=session_info.get("site_id"),
-            request_site_id=request_site.id,
-            tenant_site_id=tenant.site_id,
-        )
+        async with async_db_session() as scoped_db:
+            user = (
+                await scoped_db.execute(
+                    select(UserModel)
+                    .where(
+                        UserModel.id == authenticated_user_id,
+                        UserModel.is_deleted.is_(False),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if user is None:
+                raise CustomException(msg="用户不存在", code=10401, status_code=401)
+            if user.status == 1:
+                raise CustomException(msg="用户已被停用", code=10401, status_code=401)
 
-        # 更新会话中的租户 ID 并写回 Redis
-        session_info["tenant_id"] = tenant_id
+            if not user.is_superuser:
+                exist_stmt = (
+                    select(TenantUserModel)
+                    .where(
+                        TenantUserModel.user_id == user.id,
+                        TenantUserModel.tenant_id == tenant_id,
+                    )
+                    .limit(1)
+                )
+                result = await scoped_db.execute(exist_stmt)
+                if not result.scalar_one_or_none():
+                    raise CustomException(msg="您不属于该租户，无法切换")
+
+            tenant_stmt = (
+                select(TenantModel)
+                .where(
+                    TenantModel.id == tenant_id,
+                    TenantModel.status.in_((0, 1)),
+                    TenantModel.is_deleted.is_(False),
+                )
+                .limit(1)
+            )
+            result = await scoped_db.execute(tenant_stmt)
+            tenant = result.scalar_one_or_none()
+            if not tenant:
+                raise CustomException(msg="租户不存在或已被禁用")
+
+            request_site = await resolve_request_site(scoped_db, request)
+            validate_session_site(
+                session_site_id=session_info.get("site_id"),
+                request_site_id=request_site.id,
+                tenant_site_id=tenant.site_id,
+            )
+            await require_active_federated_entitlement(
+                scoped_db,
+                user=user,
+                site_id=request_site.id,
+                tenant_id=tenant_id,
+            )
+            user_id = int(user.id)
+            user_username = str(user.username)
+            tenant_name = str(tenant.name)
+
+        # 会话锁内以 Redis 当前值为 CAS 基准，不信任请求初始快照。
+        new_session_info = {**session_info, "tenant_id": tenant_id}
         refresh_expires = timedelta(seconds=settings.REFRESH_TOKEN_EXPIRE_SECONDS)
-        from app.core.redis_crud import RedisCURD
         from app.core.security import create_access_token
-
-        await RedisCURD(redis).set(
-            key=f"{RedisInitKeyConfig.USER_SESSION.key}:{session_id}",
-            value=json.dumps(session_info) if isinstance(session_info, dict) else session_info,
-            expire=int(refresh_expires.total_seconds()),
-        )
 
         access_expires = timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
         now = datetime.now()
@@ -655,23 +827,42 @@ class LoginService:
         new_access_token = create_access_token(
             payload=JWTPayloadSchema(
                 sub=session_id,
-                site_id=session_info.get("site_id"),
+                site_id=new_session_info.get("site_id"),
                 is_refresh=False,
                 exp=now + access_expires,
             )
         )
 
-        await RedisCURD(redis).set(
-            key=f"{RedisInitKeyConfig.ACCESS_TOKEN.key}:{session_id}",
-            value=new_access_token,
-            expire=int(access_expires.total_seconds()),
+        await _mutation_ownership.ensure_owned()
+        await UserSessionRegistry.ensure_ownerships(_fence_ownerships)
+        await UserSessionRegistry.switch_tenant(
+            redis,
+            session_id=session_id,
+            site_id=int(new_session_info["site_id"]),
+            old_tenant_id=old_tenant_id,
+            new_tenant_id=tenant_id,
+            user_id=user_id,
+            expected_session=raw_session,
+            expected_access_token=current_token,
+            new_session=json.dumps(new_session_info),
+            new_access_token=new_access_token,
+            session_expire=int(refresh_expires.total_seconds()),
+            access_expire=int(access_expires.total_seconds()),
+            mutation_ownership=_mutation_ownership,
+            fence_ownerships=_fence_ownerships,
         )
 
         from app.core.request_context import set_current_tenant
 
         set_current_tenant(tenant_id)
 
-        logger.info(f"用户 {self.auth.user.username}(id={self.auth.user.id}) 切换到租户 {tenant.name}(id={tenant_id})")
+        logger.info(
+            "用户 {}(id={}) 切换到租户 {}(id={})",
+            user_username,
+            user_id,
+            tenant_name,
+            tenant_id,
+        )
 
         return SelectTenantOutSchema(
             access_token=new_access_token,
@@ -932,17 +1123,10 @@ class TenantRegisterService:
         from app.api.v1.module_system.user.login_identifier import resolve_user_by_login_identifier
         from app.api.v1.module_system.user.model import UserModel
 
-        if await resolve_user_by_login_identifier(db, username, site_id) or await resolve_user_by_login_identifier(
-            db, email, site_id
-        ):
+        if await resolve_user_by_login_identifier(db, username, site_id) or await resolve_user_by_login_identifier(db, email, site_id):
             raise CustomException(msg="用户名或邮箱已被占用")
 
-        pkg_stmt = (
-            select(PackageModel)
-            .where(PackageModel.site_id == site_id, PackageModel.status == 0)
-            .order_by(PackageModel.id)
-            .limit(1)
-        )
+        pkg_stmt = select(PackageModel).where(PackageModel.site_id == site_id, PackageModel.status == 0).order_by(PackageModel.id).limit(1)
         default_pkg = (await db.execute(pkg_stmt)).scalar_one_or_none()
 
         now = datetime.now()
@@ -1013,11 +1197,14 @@ class TenantRegisterService:
             logger.info("无可用 SMTP 配置，跳过欢迎邮件")
             return
 
-        html_body = render_template_file("emails/welcome.jinja2", {
-            "tenant_name": tenant_name,
-            "username": username,
-            "trial_end": trial_end.strftime("%Y-%m-%d"),
-        })
+        html_body = render_template_file(
+            "emails/welcome.jinja2",
+            {
+                "tenant_name": tenant_name,
+                "username": username,
+                "trial_end": trial_end.strftime("%Y-%m-%d"),
+            },
+        )
 
         await send_email(
             smtp_host=cfg.smtp_host,

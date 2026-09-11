@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -13,6 +14,23 @@ from app.config.setting import settings
 from app.core.base_schema import AuthSchema, RefreshTokenPayloadSchema
 from app.core.exceptions import CustomException
 from app.core.request_context import RequestContext
+
+
+class _BoundaryRedis:
+    def __init__(self, values: dict[str, str] | None = None) -> None:
+        self.values = values or {}
+
+    async def get(self, key: str):
+        return self.values.get(key)
+
+    async def set(self, key: str, value: str, **_kwargs):
+        self.values[key] = value
+        return True
+
+    async def eval(self, script: str, _numkeys: int, *args):
+        if "SESSION_LOCK_RELEASE_V1" in script:
+            self.values.pop(str(args[0]), None)
+        return 1
 
 
 def _request(host: str) -> Request:
@@ -109,7 +127,7 @@ def test_create_token_persists_selected_tenant_and_site(
     asyncio.run(
         LoginService.create_token(
             request=_request("brand.example.com"),
-            redis=SimpleNamespace(),
+            redis=_BoundaryRedis(),
             user=user,
             login_type="PC端",
             tenant_id=20,
@@ -185,12 +203,36 @@ def test_select_tenant_rejects_target_from_other_request_site(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _Result:
-        def scalar_one_or_none(self):
-            return SimpleNamespace(id=20, site_id=2, name="Other Site Tenant")
+        def __init__(self, value):
+            self.value = value
 
-    class _DB:
+        def scalar_one_or_none(self):
+            return self.value
+
+    class _RequestDB:
+        async def rollback(self):
+            return None
+
+    class _ScopedDB:
+        def __init__(self):
+            self.results = iter(
+                [
+                    SimpleNamespace(
+                        id=10,
+                        username="admin",
+                        status=0,
+                        is_superuser=True,
+                    ),
+                    SimpleNamespace(id=20, site_id=2, name="Other Site Tenant"),
+                ]
+            )
+
         async def execute(self, _statement):
-            return _Result()
+            return _Result(next(self.results))
+
+    @asynccontextmanager
+    async def scoped_db():
+        yield _ScopedDB()
 
     async def current_site(_db, _request):
         return SimpleNamespace(id=1)
@@ -199,13 +241,17 @@ def test_select_tenant_rejects_target_from_other_request_site(
         "app.api.v1.module_system.auth.service.resolve_request_site",
         current_site,
     )
+    monkeypatch.setattr(
+        "app.api.v1.module_system.auth.service.async_db_session",
+        scoped_db,
+    )
     request = _request("brand.example.com")
     request.state.ctx = RequestContext(
         session_id="session-1",
         session_info={"user_id": 10, "tenant_id": 10, "site_id": 1},
     )
     auth = AuthSchema.model_construct(
-        db=_DB(),
+        db=_RequestDB(),
         user=SimpleNamespace(id=10, username="admin", is_superuser=True),
         tenant_id=10,
         check_data_scope=False,
@@ -215,8 +261,14 @@ def test_select_tenant_rejects_target_from_other_request_site(
         asyncio.run(
             LoginService(auth).select_tenant(
                 request=request,
-                redis=SimpleNamespace(),
+                redis=_BoundaryRedis(
+                    {
+                        "user_session:session-1": json.dumps({"user_id": 10, "tenant_id": 10, "site_id": 1}),
+                        "access_token:session-1": "access-token",
+                    }
+                ),
                 tenant_id=20,
+                current_token="access-token",
             )
         )
 
@@ -224,16 +276,6 @@ def test_select_tenant_rejects_target_from_other_request_site(
 def test_refresh_rejects_session_tenant_outside_request_site(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    redis_values = iter(
-        [
-            "refresh-token",
-            json.dumps({"user_id": 10, "tenant_id": 20, "site_id": 1}),
-        ]
-    )
-
-    async def fake_get(self, _key):
-        return next(redis_values)
-
     async def current_site(_db, _request):
         return SimpleNamespace(id=1)
 
@@ -258,9 +300,8 @@ def test_refresh_rejects_session_tenant_outside_request_site(
 
     monkeypatch.setattr(
         "app.api.v1.module_system.auth.service.decode_access_token",
-        lambda token: SimpleNamespace(is_refresh=True, sub="session-1"),
+        lambda token: SimpleNamespace(is_refresh=True, sub="session-1", site_id=1),
     )
-    monkeypatch.setattr("app.api.v1.module_system.auth.service.RedisCURD.get", fake_get)
     monkeypatch.setattr(
         "app.api.v1.module_system.auth.service.resolve_request_site",
         current_site,
@@ -271,7 +312,12 @@ def test_refresh_rejects_session_tenant_outside_request_site(
             LoginService.refresh_token(
                 request=_request("brand.example.com"),
                 db=_DB(),
-                redis=SimpleNamespace(),
+                redis=_BoundaryRedis(
+                    {
+                        "refresh_token:session-1": "refresh-token",
+                        "user_session:session-1": json.dumps({"user_id": 10, "tenant_id": 20, "site_id": 1}),
+                    }
+                ),
                 refresh_token=RefreshTokenPayloadSchema(refresh_token="refresh-token"),
             )
         )

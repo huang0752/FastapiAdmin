@@ -10,7 +10,6 @@ import {
   shouldShowResetPassword,
   sourceLabel,
 } from "@/views/module_system/user/user-authorization";
-import { buildAuthorizationRetryUrl } from "@/views/module_system/auth/control-waiting/retry";
 
 const source = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
@@ -79,28 +78,23 @@ describe("federated user authorization", () => {
   it("formats source and authorization labels", () => {
     expect(sourceLabel("federated")).toBe("统一登录");
     expect(sourceLabel("local")).toBe("本地账号");
-    expect(authorizationLabel("pending")).toBe("待授权");
+    expect(authorizationLabel("pending")).toBe("仅基础访问");
     expect(authorizationLabel("authorized")).toBe("已授权");
     expect(authorizationLabel(null)).toBe("—");
   });
 
-  it("builds a root hash URL for a complete authorization recheck", () => {
-    expect(
-      buildAuthorizationRetryUrl("http://127.0.0.1:15394/web#/auth/control/waiting", "/web#/")
-    ).toBe("http://127.0.0.1:15394/web#/");
-  });
-
-  it("explains local authorization and performs a top-level recheck", () => {
+  it("explains local authorization and performs an in-app recheck", () => {
     const waitingSource = source("src/views/module_system/auth/control-waiting/index.vue");
 
-    expect(waitingSource).toContain("账号已创建，目标系统尚未授予有效菜单权限");
-    expect(waitingSource).toContain("系统管理 → 用户管理 → 筛选待授权 → 去授权");
+    expect(waitingSource).toContain("个人工作区");
+    expect(waitingSource).not.toContain("等待管理员授权");
+    expect(waitingSource).toContain("基础访问已开通");
     expect(waitingSource).toContain("displayName");
     expect(waitingSource).toContain("account");
-    expect(waitingSource).toContain('router.resolve({ path: "/" }).href');
-    expect(waitingSource).toContain("reloadAuthorization");
-    expect(waitingSource).not.toContain("router.replace");
+    expect(waitingSource).toContain("getUserInfo");
+    expect(waitingSource).toContain("createAuthorizationReloader");
+    expect(waitingSource).not.toContain("window.location");
     expect(waitingSource).not.toContain("setInterval");
-    expect(waitingSource).not.toMatch(/mobile|email|accessToken|refreshToken|launchCode/);
+    expect(waitingSource).not.toMatch(/accessToken|refreshToken|launchCode/);
   });
 });

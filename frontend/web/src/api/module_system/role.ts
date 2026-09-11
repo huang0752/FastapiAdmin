@@ -1,8 +1,15 @@
 import { request } from "@utils";
+import type { MenuTable } from "@/api/module_platform/menu";
 
 const API_PATH = "/system/role";
 
 const RoleAPI = {
+  assignableMenus() {
+    return request<ApiResponse<MenuTable[]>>({
+      url: `${API_PATH}/assignable-menus`,
+      method: "get",
+    });
+  },
   listRole(query?: TablePageQuery) {
     return request<ApiResponse<PageResult<RoleTable>>>({
       url: `${API_PATH}/list`,
@@ -75,6 +82,7 @@ export interface TablePageQuery extends PageQuery, UserByQueryParams {
 }
 
 export interface RoleTable extends BaseType {
+  is_system?: boolean;
   name: string;
   order?: number;
   code: string;

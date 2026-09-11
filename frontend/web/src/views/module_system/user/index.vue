@@ -4,7 +4,10 @@
     <div
       class="user-manage-body box-border flex gap-4 h-full max-md:block max-md:gap-0 max-md:h-auto"
     >
-      <div class="user-dept-panel shrink-0 w-58 h-full max-md:w-full max-md:h-auto max-md:mb-5">
+      <div
+        v-if="canReadDepartments"
+        class="user-dept-panel shrink-0 w-58 h-full max-md:w-full max-md:h-auto max-md:mb-5"
+      >
         <ElCard class="tree-card fa-card-xs flex flex-col h-full mt-0" shadow="hover">
           <template #header>
             <b>部门</b>
@@ -85,6 +88,12 @@
       </div>
     </div>
 
+    <ControlUserCreateDrawer
+      v-if="useControlUserCreate"
+      v-model="controlUserCreateVisible"
+      @created="refreshCreate"
+    />
+
     <FaDrawer
       v-model="dialogVisible.visible"
       :title="dialogVisible.title"
@@ -140,6 +149,27 @@
           :closable="false"
           show-icon
         />
+        <ElAlert
+          v-if="roleOptions?.length === 0"
+          class="mb-4"
+          type="warning"
+          title="当前租户尚未配置可分配的业务角色"
+          :closable="false"
+          show-icon
+        >
+          <p>
+            先创建角色并设置菜单权限和数据范围，再返回用户管理分配。中控访问资格不会自动授予产品业务权限。
+          </p>
+          <ElButton
+            v-if="hasAuth('module_system:role:create')"
+            link
+            type="primary"
+            @click="openRoleSetup"
+          >
+            去创建角色并配置权限
+          </ElButton>
+          <p v-else>请联系本租户管理员配置业务角色。</p>
+        </ElAlert>
         <FaForm
           :key="userFormRenderKey"
           ref="dataFormRef"
@@ -251,7 +281,7 @@ import {
 import PositionAPI from "@/api/module_system/position";
 import DeptAPI from "@/api/module_system/dept";
 import RoleAPI from "@/api/module_system/role";
-import { useAppStore, useUserStore } from "@stores";
+import { useAppStore, useAssemblyStore, useUserStore } from "@stores";
 import { useAuth } from "@/hooks/core/useAuth";
 import type { ColumnOption } from "@/types/component";
 import type { DescriptionsItem } from "@/components/others/fa-descriptions/index.vue";
@@ -261,11 +291,23 @@ import type { FormItem } from "@/components/forms/fa-form/index.vue";
 import type FaForm from "@/components/forms/fa-form/index.vue";
 import type { IContentConfig, IObject } from "@/components/modal/types";
 import FaDeptTree from "./components/FaDeptTree.vue";
+import { resolveControlUserCreate } from "@/config/assembly/controlFeatures";
+import { defineAsyncComponent } from "vue";
+const ControlUserCreateDrawer = defineAsyncComponent(
+  () => import("./components/ControlUserCreateDrawer.vue")
+);
 import { ElMessage, ElMessageBox } from "element-plus";
 
+const router = useRouter();
 const { hasAuth } = useAuth();
+const canReadDepartments = computed(() => hasAuth("module_system:dept:query"));
 const appStore = useAppStore();
+const assemblyStore = useAssemblyStore();
 const userStore = useUserStore();
+const controlUserCreateVisible = ref(false);
+const useControlUserCreate = computed(() =>
+  resolveControlUserCreate(assemblyStore.summary.featureFlags, hasAuth)
+);
 
 type UserSearchForm = UserAuthorizationSearch;
 
@@ -466,7 +508,12 @@ const userDialogFormItems = computed<FormItem[]>(() => [
     hidden: !!formData.value.id,
     props: { placeholder: "请输入密码", type: "password", showPassword: true, clearable: true },
   },
-  { key: "is_superuser", label: "是否超管", type: "switch" },
+  {
+    key: "is_superuser",
+    label: "是否超管",
+    type: "switch",
+    hidden: !!formData.value.id || userStore.basicInfo.is_superuser !== true,
+  },
   {
     key: "status",
     label: "状态",
@@ -518,7 +565,7 @@ const authSourceOptions = [
 ];
 
 const authorizationStatusOptions = [
-  { label: "待授权", value: "pending" },
+  { label: "仅基础访问", value: "pending" },
   { label: "已授权", value: "authorized" },
 ];
 
@@ -867,6 +914,11 @@ function onResetSearch() {
   void resetSearchParams();
 }
 
+function openRoleSetup() {
+  handleCloseDialog();
+  router.push("/system/role");
+}
+
 async function handleDeptNodeClick() {
   await getData();
 }
@@ -904,6 +956,10 @@ async function handleCloseDialog() {
 }
 
 async function handleAdd() {
+  if (useControlUserCreate.value) {
+    controlUserCreateVisible.value = true;
+    return;
+  }
   createLoading.value = true;
   try {
     await handleOpenDialog("create");
@@ -941,8 +997,11 @@ async function handleOpenDialog(type: "create" | "update" | "detail", id?: numbe
     dataFormRef.value.clearValidate();
   }
 
-  const deptResponse = await DeptAPI.listDept({});
-  deptOptions.value = formatTree(deptResponse.data.data);
+  deptOptions.value = [];
+  if (canReadDepartments.value) {
+    const deptResponse = await DeptAPI.listDept({});
+    deptOptions.value = formatTree(deptResponse.data.data);
+  }
 
   const roleResponse = await RoleAPI.listRole();
   const roleRows = roleResponse.data.data.items ?? [];
@@ -951,7 +1010,12 @@ async function handleOpenDialog(type: "create" | "update" | "detail", id?: numbe
     .map((item) => ({
       value: item.id as number,
       label: item.name as string,
-      disabled: item.status === 1,
+      disabled:
+        item.status === 1 ||
+        item.is_system === true ||
+        ["owner", "admin", "member", "SUPER_ADMIN", "ADMIN", "CONTROL_PORTAL_USER"].includes(
+          item.code
+        ),
     }))
     .filter((opt) => !opt.disabled);
 

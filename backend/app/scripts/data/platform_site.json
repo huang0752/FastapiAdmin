@@ -1,15 +1,15 @@
 [
   {
     "code": "default",
-    "name": "FastapiAdmin",
-    "logo_url": "https://service.fastapiadmin.com/api/v1/static/image/logo.svg",
-    "favicon": "https://service.fastapiadmin.com/api/v1/static/image/favicon.ico",
-    "login_bg": "https://service.fastapiadmin.com/api/v1/static/image/background.svg",
-    "copyright": "Copyright © 2025-2027 service.fastapiadmin.com 版权所有",
-    "keep_record": "陕ICP备2025069493号-1",
-    "help_doc": "https://docs.fastapiadmin.com",
-    "privacy": "https://fastapiadmin.com/privacy",
-    "clause": "https://fastapiadmin.com/clause",
+    "name": "小柿 SaaS",
+    "logo_url": "/web/logo.png",
+    "favicon": "/web/logo.png",
+    "login_bg": "",
+    "copyright": "",
+    "keep_record": "",
+    "help_doc": "",
+    "privacy": "",
+    "clause": "",
     "status": 0
   }
 ]

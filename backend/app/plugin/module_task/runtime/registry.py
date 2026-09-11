@@ -12,7 +12,10 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from app.config.setting import settings
 
+from .context import DomainClosureDisposition
+
 Handler = Callable[[Any, Any], Awaitable[dict | None]]
+PreHandlerFailure = Callable[[Any, Any, Exception], Awaitable[bool | DomainClosureDisposition]]
 PayloadValidator = Callable[[dict], Any]
 
 _HANDLER_CODE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
@@ -37,6 +40,8 @@ class BusinessTaskDefinition:
     soft_time_limit: int
     hard_time_limit: int
     supports_cancel: bool
+    release_context_db_before_handler: bool
+    pre_handler_failure: PreHandlerFailure | None
     payload_schema: type[BaseModel] | None
     payload_validator: PayloadValidator | None
     retryable_exceptions: tuple[type[Exception], ...]
@@ -70,6 +75,8 @@ class BusinessTaskRegistry:
         soft_time_limit: int | None = None,
         hard_time_limit: int | None = None,
         supports_cancel: bool = False,
+        release_context_db_before_handler: bool = False,
+        pre_handler_failure: PreHandlerFailure | None = None,
         payload_schema: type[BaseModel] | None = None,
         payload_validator: PayloadValidator | None = None,
         retryable_exceptions: tuple[type[Exception], ...] = (),
@@ -99,6 +106,8 @@ class BusinessTaskRegistry:
             soft_time_limit=settings.CELERY_TASK_SOFT_TIME_LIMIT if soft_time_limit is None else soft_time_limit,
             hard_time_limit=settings.CELERY_TASK_TIME_LIMIT if hard_time_limit is None else hard_time_limit,
             supports_cancel=supports_cancel,
+            release_context_db_before_handler=release_context_db_before_handler,
+            pre_handler_failure=pre_handler_failure,
             payload_schema=payload_schema,
             payload_validator=payload_validator,
             retryable_exceptions=retryable_exceptions,

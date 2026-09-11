@@ -2,6 +2,7 @@ import json
 
 from redis.asyncio.client import Redis
 
+from app.api.v1.module_system.auth.session_registry import UserSessionRegistry
 from app.common.enums import RedisInitKeyConfig
 from app.core.logger import logger
 from app.core.redis_crud import RedisCURD
@@ -27,9 +28,7 @@ class OnlineService:
                 session_id = payload.sub
 
                 # 从 Redis 读取完整会话信息
-                raw = await RedisCURD(redis).get(
-                    f"{RedisInitKeyConfig.USER_SESSION.key}:{session_id}"
-                )
+                raw = await RedisCURD(redis).get(f"{RedisInitKeyConfig.USER_SESSION.key}:{session_id}")
                 if not raw:
                     continue
                 session_info = json.loads(raw)
@@ -59,15 +58,10 @@ class OnlineService:
 
     @staticmethod
     async def delete_online(redis: Redis, session_id: str) -> None:
-        await RedisCURD(redis).delete(f"{RedisInitKeyConfig.ACCESS_TOKEN.key}:{session_id}")
-        await RedisCURD(redis).delete(f"{RedisInitKeyConfig.REFRESH_TOKEN.key}:{session_id}")
-        await RedisCURD(redis).delete(f"{RedisInitKeyConfig.USER_SESSION.key}:{session_id}")
+        await UserSessionRegistry.delete_session(redis, session_id)
         logger.info(f"强制下线用户会话: {session_id}")
 
     @staticmethod
     async def clear_online(redis: Redis) -> None:
-        await RedisCURD(redis).clear(f"{RedisInitKeyConfig.ACCESS_TOKEN.key}:*")
-        await RedisCURD(redis).clear(f"{RedisInitKeyConfig.REFRESH_TOKEN.key}:*")
-        await RedisCURD(redis).clear(f"{RedisInitKeyConfig.USER_SESSION.key}:*")
+        await UserSessionRegistry.clear_all(redis)
         logger.info("清除所有在线用户会话成功")
-

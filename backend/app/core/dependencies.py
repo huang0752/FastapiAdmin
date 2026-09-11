@@ -35,6 +35,16 @@ async def db_getter() -> AsyncGenerator[AsyncSession, None]:
             yield session
 
 
+async def db_session_getter() -> AsyncGenerator[AsyncSession, None]:
+    """Yield an unmanaged session for workflows with an explicit commit boundary.
+
+    This is reserved for DB-first/outbox-like workflows that must commit a
+    durable decision before performing a fallible external side effect.
+    """
+    async with async_db_session() as session:
+        yield session
+
+
 async def redis_getter(request: Request) -> Redis:
     """获取Redis连接
 
@@ -358,6 +368,16 @@ async def _authenticate(
             session_site_id=int(site_id),
             request_site_id=int(request_site_id),
             jwt_site_id=getattr(jwt_payload, "site_id", None),
+        )
+        from app.api.v1.module_system.auth.session_registry import (
+            require_active_federated_entitlement,
+        )
+
+        await require_active_federated_entitlement(
+            lookup_db,
+            user=user,
+            site_id=int(site_id),
+            tenant_id=int(tenant_id),
         )
 
     # 设置请求上下文（仅在当前 request 对象上，业务方通过 request.state.ctx 读取）

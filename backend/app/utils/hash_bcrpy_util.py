@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import hmac
 import os
 
 from cryptography.hazmat.backends.openssl import backend
@@ -27,7 +28,7 @@ class PwdUtil:
             salt = base64.b64decode(salt_b64)
             expected = base64.b64decode(hash_b64)
             dk = hashlib.pbkdf2_hmac(_PBKDF2_ALGO, plain_password.encode(), salt, int(iters_str))
-            return dk == expected
+            return hmac.compare_digest(dk, expected)
         except Exception:
             return False
 

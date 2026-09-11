@@ -11,6 +11,18 @@ class RetryableBusinessTaskError(BusinessTaskRuntimeError):
     error_code = "TEMPORARY_FAILURE"
 
 
+class PreHandlerRetryableBusinessTaskError(RetryableBusinessTaskError):
+    """A temporary failure before domain processing started."""
+
+    error_code = "PREFLIGHT_TEMPORARY_FAILURE"
+
+
+class DomainClosureRetryableBusinessTaskError(RetryableBusinessTaskError):
+    """A temporary database failure while writing guarded domain outcome."""
+
+    error_code = "DOMAIN_CLOSURE_TEMPORARY_FAILURE"
+
+
 class BusinessTaskCancelled(BusinessTaskRuntimeError):
     """任务在安全检查点响应协作取消。"""
 

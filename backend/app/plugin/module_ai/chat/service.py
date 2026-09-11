@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import hashlib
+import inspect
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import datetime
@@ -186,6 +187,7 @@ class ChatService:
 
             logger.info("开始流式生成: session_id={} message={!r}", session_id, message[:80])
             chunk_count = 0
+            stream = None
             try:
                 stream = agent.arun(input=message, stream=True)
                 logger.info("agent.arun 返回对象类型: {}", type(stream).__name__)
@@ -207,7 +209,15 @@ class ChatService:
                         yield stream.content
             except asyncio.CancelledError:
                 logger.info("生成任务被取消: session_id={}", session_id)
-                return
+                raise
+            finally:
+                close_stream = getattr(stream, "aclose", None)
+                if close_stream is None:
+                    close_stream = getattr(stream, "cancel", None)
+                if callable(close_stream):
+                    close_result = close_stream()
+                    if inspect.isawaitable(close_result):
+                        await close_result
 
             logger.info("流式生成结束: session_id={} chunk_count={}", session_id, chunk_count)
 

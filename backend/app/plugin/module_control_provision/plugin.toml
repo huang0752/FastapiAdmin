@@ -1,0 +1,10 @@
+name = "control_provision"
+title = "中控租户开通"
+optional = true
+
+[runtime]
+required_feature = "sso_provider"
+business_task_modules = [
+  "app.plugin.module_control_provision.handlers",
+  "app.plugin.module_control_provision.entitlement_handlers",
+]

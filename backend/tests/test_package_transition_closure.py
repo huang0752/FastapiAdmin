@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -93,6 +94,8 @@ def test_package_change_rejects_cross_site_package() -> None:
 def test_apply_package_change_updates_package_syncs_roles_and_invalidates_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import app.api.v1.module_platform.tenant.service as tenant_service_module
+
     tenant = _tenant()
     package = _package()
     db = SimpleNamespace(get=AsyncMock(), flush=AsyncMock())
@@ -135,6 +138,11 @@ def test_apply_package_change_updates_package_syncs_roles_and_invalidates_cache(
     def fake_invalidate(tenant_id, request_auth=None) -> None:
         invalidations.append((tenant_id, request_auth))
 
+    @asynccontextmanager
+    async def fake_lock(_db, tenant_id):
+        assert tenant_id == tenant.id
+        yield
+
     monkeypatch.setattr(PackageService, "get_package_menu_ids", fake_package_menus)
     monkeypatch.setattr(PackageService, "get_tenant_available_menu_ids", fake_current_menus)
     monkeypatch.setattr(PackageService, "get_owner_minimum_menu_ids", fake_owner_menus)
@@ -146,6 +154,11 @@ def test_apply_package_change_updates_package_syncs_roles_and_invalidates_cache(
         raising=False,
     )
     monkeypatch.setattr(PackageService, "invalidate_tenant_menu_cache", fake_invalidate)
+    monkeypatch.setattr(
+        tenant_service_module,
+        "lock_tenant_role_assignment",
+        fake_lock,
+    )
 
     plan = asyncio.run(TenantService(auth).apply_package_change(tenant.id, package.id))
 

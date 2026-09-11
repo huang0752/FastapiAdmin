@@ -1,0 +1,26 @@
+[assembly]
+name = "federated-saas"
+application_code = "example-product"
+title = "接受中控登录的 SaaS"
+description = "保留租户、套餐、插件、平台管理、任务、通知和代码生成等 SaaS 底座能力。"
+
+[core]
+required = ["auth", "tenant", "user", "role", "permission", "menu", "settings", "audit"]
+
+[backend]
+enabled_plugins = ["module_task", "module_generator", "module_ai"]
+disabled_plugins = ["module_example"]
+
+[frontend]
+enabled_route_groups = ["auth", "home", "dashboard", "system", "platform", "module-task", "module-generator", "ai-chat", "user-profile", "payment", "workspace", "outside", "exception"]
+disabled_route_groups = ["pricing", "article", "tutorial"]
+
+[seed]
+packs = ["saas-admin"]
+
+[features]
+flags = { ai_assistant = true, plugin_market = true, tenant_package = true, demo_content = false, fast_enter = true, sso_provider = false, sso_client = true, app_portal = false, control_user_entitlements = false, tenant_auto_provisioning = false }
+
+# 基础个人工作区对有效登录账号开放；业务角色人工授权。产品可声明业务权限后改为 declared。
+[federation.default_role]
+mode = "manual"

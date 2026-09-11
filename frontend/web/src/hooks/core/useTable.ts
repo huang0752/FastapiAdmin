@@ -438,6 +438,7 @@ function useTableImpl<TApiFn extends (params: any) => Promise<any>>(
         }
         loadingState.value = "error";
         data.value = [];
+        pagination.total = 0;
         const tableError = handleError(err, "获取表格数据失败");
         throw tableError;
       }
@@ -533,6 +534,7 @@ function useTableImpl<TApiFn extends (params: any) => Promise<any>>(
         }
         loadingState.value = "error";
         data.value = [];
+        pagination.total = 0;
         const tableError = handleError(err, "获取表格数据失败");
         throw tableError;
       }

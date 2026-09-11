@@ -14,12 +14,25 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config.setting import settings
+from app.core.exceptions import CustomException
 from app.core.logger import logger
 
 from ..business.task.model import BusinessTaskModel
-from .context import BusinessTaskContext, build_background_auth, utc_now
+from .context import (
+    BusinessTaskContext,
+    BusinessTaskFailureContext,
+    DomainClosureDisposition,
+    build_background_auth,
+    utc_now,
+)
 from .database import worker_async_session
-from .exceptions import BusinessTaskCancelled, InvalidBackgroundActorError, RetryableBusinessTaskError
+from .exceptions import (
+    BusinessTaskCancelled,
+    DomainClosureRetryableBusinessTaskError,
+    InvalidBackgroundActorError,
+    PreHandlerRetryableBusinessTaskError,
+    RetryableBusinessTaskError,
+)
 from .registry import BusinessTaskRegistry, UnknownBusinessTaskHandlerError, business_task_registry
 
 
@@ -33,6 +46,8 @@ class ExecutionOutcome:
 
 class BusinessTaskExecutor:
     """以 PostgreSQL 为事实来源的至少一次消费执行器。"""
+
+    _domain_closure_retry_limit = 3
 
     def __init__(
         self,
@@ -59,13 +74,30 @@ class BusinessTaskExecutor:
             return ExecutionOutcome(status="failed")
 
         async with self.session_factory() as handler_db:
+            context_db_released = False
+            context: BusinessTaskContext | None = None
+            handler_started = False
+            failure_context = BusinessTaskFailureContext(
+                task_id=task.id,
+                tenant_id=task.tenant_id,
+                actor_user_id=task.created_id or 0,
+                trace_id=task.trace_id or "",
+                execution_token=execution_token,
+                session_factory=self.session_factory,
+            )
             try:
-                auth = await build_background_auth(
-                    handler_db,
-                    tenant_id=task.tenant_id,
-                    actor_user_id=task.created_id,
-                    required_permissions=definition.required_permissions,
-                )
+                lifecycle_verified = False
+                if task.handler_code == "control.user_entitlement_sync" and (task.payload or {}).get("mode") == "lifecycle":
+                    from app.api.v1.module_control.user_entitlement.lifecycle import build_lifecycle_revocation_auth
+                    auth = await build_lifecycle_revocation_auth(handler_db, task)
+                    lifecycle_verified = True
+                else:
+                    auth = await build_background_auth(
+                        handler_db,
+                        tenant_id=task.tenant_id,
+                        actor_user_id=task.created_id,
+                        required_permissions=definition.required_permissions,
+                    )
                 context = BusinessTaskContext(
                     task_id=task.id,
                     tenant_id=task.tenant_id,
@@ -75,10 +107,18 @@ class BusinessTaskExecutor:
                     db=handler_db,
                     auth=auth,
                     session_factory=self.session_factory,
+                    lifecycle_revocation_verified=lifecycle_verified,
                 )
+                if definition.release_context_db_before_handler:
+                    # Opt-in handlers perform their writes through short independent sessions.
+                    # Return the authentication session before potentially slow external I/O.
+                    await handler_db.commit()
+                    await handler_db.close()
+                    context_db_released = True
                 await context.check_cancelled()
                 heartbeat_task = asyncio.create_task(self._heartbeat_loop(context))
                 try:
+                    handler_started = True
                     result = await definition.handler(context, payload)
                 finally:
                     heartbeat_task.cancel()
@@ -86,25 +126,217 @@ class BusinessTaskExecutor:
                         await heartbeat_task
                 await context.check_cancelled()
                 safe_result = self._validate_result(result)
-                await handler_db.commit()
+                if not context_db_released:
+                    await handler_db.commit()
             except BusinessTaskCancelled:
-                await handler_db.rollback()
+                if not context_db_released:
+                    await handler_db.rollback()
                 await self._finish_canceled(task.id, execution_token)
                 return ExecutionOutcome(status="canceled")
             except InvalidBackgroundActorError as exc:
-                await handler_db.rollback()
+                if not context_db_released:
+                    await handler_db.rollback()
+                if definition.pre_handler_failure is not None:
+                    try:
+                        closed = await definition.pre_handler_failure(failure_context, payload, exc)
+                    except Exception:
+                        logger.exception(
+                            "业务任务前置失败收口异常 task_id={} trace_id={}",
+                            task.id,
+                            task.trace_id or "-",
+                        )
+                        if task.attempt > task.max_retries:
+                            return await self._defer_domain_closure(task, execution_token)
+                        return await self._handle_failure(
+                            task,
+                            execution_token,
+                            RetryableBusinessTaskError("业务任务失败状态收口暂时异常"),
+                            retryable=True,
+                        )
+                    if not closed:
+                        await self._finish_success(
+                            task.id,
+                            execution_token,
+                            {"status": "superseded"},
+                        )
+                        return ExecutionOutcome(status="success")
                 await self._finish_failed(task.id, execution_token, error_code=exc.error_code, summary=str(exc))
                 return ExecutionOutcome(status="failed")
             except Exception as exc:
-                await handler_db.rollback()
+                if not context_db_released:
+                    await handler_db.rollback()
                 logger.exception("业务任务执行失败 task_id={} trace_id={}", task.id, task.trace_id or "-")
-                retryable = isinstance(exc, (RetryableBusinessTaskError, *definition.retryable_exceptions))
+                closure_required = not handler_started or isinstance(
+                    exc,
+                    (PreHandlerRetryableBusinessTaskError, DomainClosureRetryableBusinessTaskError),
+                )
+                preflight_retryable = closure_required
+                retryable = preflight_retryable or isinstance(
+                    exc,
+                    (RetryableBusinessTaskError, *definition.retryable_exceptions),
+                )
+                if (
+                    closure_required
+                    and task.attempt > task.max_retries
+                    and definition.pre_handler_failure is not None
+                ):
+                    try:
+                        closed = await definition.pre_handler_failure(failure_context, payload, exc)
+                    except Exception:
+                        return await self._defer_domain_closure(task, execution_token)
+                    if not closed:
+                        await self._finish_success(
+                            task.id,
+                            execution_token,
+                            {"status": "superseded"},
+                        )
+                        return ExecutionOutcome(status="success")
                 return await self._handle_failure(task, execution_token, exc, retryable=retryable)
 
         if await self._finish_success(task.id, execution_token, safe_result):
             return ExecutionOutcome(status="success")
         await self._finish_canceled(task.id, execution_token)
         return ExecutionOutcome(status="canceled")
+
+    async def _defer_domain_closure(self, task: BusinessTaskModel, token: str) -> ExecutionOutcome:
+        """Use a finite, visible reconciliation budget before parking for manual recovery."""
+        closure_attempt = max(1, task.attempt - task.max_retries)
+        if closure_attempt > self._domain_closure_retry_limit:
+            return await self._park_domain_closure(task, token)
+        countdown = min(60, 10 * (2 ** min(max(0, task.attempt - 1), 3)))
+        async with self.session_factory() as db:
+            await db.execute(
+                update(BusinessTaskModel)
+                .where(
+                    BusinessTaskModel.id == task.id,
+                    BusinessTaskModel.status == "running",
+                    BusinessTaskModel.execution_token == token,
+                )
+                .values(
+                    status="retrying",
+                    execution_token=None,
+                    lease_expires_at=None,
+                    error_code="DOMAIN_CLOSURE_PENDING",
+                    error="业务失败状态尚未收口，等待重试",
+                )
+            )
+            await db.commit()
+        return ExecutionOutcome(
+            status="retrying",
+            retry_countdown=countdown,
+            retry_budget=1,
+            retry_attempt=task.attempt,
+        )
+
+    async def _park_domain_closure(self, task: BusinessTaskModel, token: str) -> ExecutionOutcome:
+        now = utc_now()
+        async with self.session_factory() as db:
+            await db.execute(
+                update(BusinessTaskModel)
+                .where(
+                    BusinessTaskModel.id == task.id,
+                    BusinessTaskModel.status == "running",
+                    BusinessTaskModel.execution_token == token,
+                )
+                .values(
+                    status="failed",
+                    finished_at=now,
+                    execution_token=None,
+                    lease_expires_at=None,
+                    heartbeat_at=now,
+                    error_code="DOMAIN_CLOSURE_PENDING",
+                    error="业务失败状态自动收口超过限额，需要显式重试",
+                )
+            )
+            await db.commit()
+        return ExecutionOutcome(status="failed")
+
+    async def reconcile_domain_closure(
+        self,
+        business_task_id: int,
+        *,
+        tenant_id: int | None = None,
+        site_id: int | None = None,
+    ) -> ExecutionOutcome:
+        """Atomically close one parked domain generation without re-running external work."""
+        async with self.session_factory() as db:
+            conditions = [
+                BusinessTaskModel.id == business_task_id,
+                BusinessTaskModel.is_deleted.is_(False),
+            ]
+            if tenant_id is not None:
+                conditions.append(BusinessTaskModel.tenant_id == tenant_id)
+            task = (
+                await db.execute(
+                    select(BusinessTaskModel).where(*conditions).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if (
+                task is None
+                or task.status != "failed"
+                or task.error_code != "DOMAIN_CLOSURE_PENDING"
+            ):
+                return ExecutionOutcome(status="noop")
+            try:
+                definition = self.registry.get(task.handler_code or "")
+                payload = definition.validate_payload(task.payload)
+            except (UnknownBusinessTaskHandlerError, ValidationError, ValueError):
+                return ExecutionOutcome(status="failed")
+            if definition.pre_handler_failure is None:
+                return ExecutionOutcome(status="failed")
+
+            claimed = await db.execute(
+                update(BusinessTaskModel)
+                .where(
+                    BusinessTaskModel.id == task.id,
+                    BusinessTaskModel.status == "failed",
+                    BusinessTaskModel.error_code == "DOMAIN_CLOSURE_PENDING",
+                )
+                .values(error_code="DOMAIN_CLOSURE_RECONCILING")
+            )
+            if not claimed.rowcount:
+                await db.rollback()
+                return ExecutionOutcome(status="noop")
+            context = BusinessTaskFailureContext(
+                task_id=task.id,
+                tenant_id=task.tenant_id,
+                actor_user_id=task.created_id or 0,
+                trace_id=task.trace_id or "",
+                execution_token="",
+                session_factory=self.session_factory,
+                reconciliation=True,
+                db=db,
+                site_id=site_id,
+            )
+            try:
+                disposition = await definition.pre_handler_failure(
+                    context,
+                    payload,
+                    DomainClosureRetryableBusinessTaskError("显式重试业务失败状态收口"),
+                )
+            except CustomException:
+                await db.rollback()
+                raise
+            except Exception:
+                await db.rollback()
+                return ExecutionOutcome(status="closure_pending")
+            if not isinstance(disposition, DomainClosureDisposition):
+                await db.rollback()
+                return ExecutionOutcome(status="closure_pending")
+
+            task.status = "failed"
+            task.finished_at = task.finished_at or utc_now()
+            if disposition in {
+                DomainClosureDisposition.CLOSED,
+                DomainClosureDisposition.ALREADY_CLOSED,
+            }:
+                task.error_code = "DOMAIN_CLOSURE_FAILED"
+                task.error = "业务失败状态已经显式收口"
+            else:
+                task.error_code = "DOMAIN_CLOSURE_SUPERSEDED"
+                task.error = "业务失败状态收口时已存在更新授权世代"
+            await db.commit()
+            return ExecutionOutcome(status=disposition.value)
 
     @staticmethod
     async def _heartbeat_loop(context: BusinessTaskContext) -> None:

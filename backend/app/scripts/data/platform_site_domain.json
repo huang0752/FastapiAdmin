@@ -1,6 +1,5 @@
 [
-  {"site_id": 1, "host": "service.fastapiadmin.com", "is_primary": true},
-  {"site_id": 1, "host": "localhost", "is_primary": false},
+  {"site_id": 1, "host": "localhost", "is_primary": true},
   {"site_id": 1, "host": "127.0.0.1", "is_primary": false},
   {"site_id": 1, "host": "testserver", "is_primary": false}
 ]

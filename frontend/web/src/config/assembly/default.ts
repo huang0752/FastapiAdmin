@@ -78,7 +78,7 @@ function buildTimeAssemblySummary(): AssemblySummary | null {
 
 export const defaultAssemblySummary: AssemblySummary = buildTimeAssemblySummary() ?? {
   name: "default",
-  title: String(import.meta.env.VITE_APP_TITLE || "FastapiAdmin"),
+  title: String(import.meta.env.VITE_APP_TITLE || "小柿 SaaS"),
   enabledRouteGroups: [],
   disabledRouteGroups: [],
   featureFlags: {
@@ -87,6 +87,9 @@ export const defaultAssemblySummary: AssemblySummary = buildTimeAssemblySummary(
     tenantPackage: true,
     demoContent: true,
     fastEnter: true,
+    tenantAutoProvisioning: false,
+    controlUserEntitlements: false,
+    appPortal: false,
   },
 };
 

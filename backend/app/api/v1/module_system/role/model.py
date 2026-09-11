@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.common.enums import PermissionFilterStrategy
@@ -10,6 +10,9 @@ if TYPE_CHECKING:
     from app.api.v1.module_platform.menu.model import MenuModel
     from app.api.v1.module_system.dept.model import DeptModel
     from app.api.v1.module_system.user.model import UserModel
+
+
+CONTROL_PORTAL_USER_ROLE_CODE = "CONTROL_PORTAL_USER"
 
 
 class RoleMenusModel(MappedBase):
@@ -65,7 +68,7 @@ class RoleModel(ModelMixin, TenantMixin, UserMixin):
     """
     角色模型
 
-    角色列表只显示当前用户绑定的角色
+    租户治理管理员可管理本租户角色，其他用户只显示已绑定角色
     """
 
     __tablename__: str = "sys_role"
@@ -84,6 +87,7 @@ class RoleModel(ModelMixin, TenantMixin, UserMixin):
     code: Mapped[str] = mapped_column(String(64), nullable=False, comment="角色编码")
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=999, comment="显示排序")
     status: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment="状态(0:启动 1:停用)", index=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False, comment="是否系统保留角色")
     description: Mapped[str | None] = mapped_column(Text, default=None, nullable=True, comment="备注")
     data_scope: Mapped[int] = mapped_column(Integer, default=1, nullable=False, comment="数据权限范围(1:仅本人 2:本部门 3:本部门及以下 4:全部 5:自定义)")
 

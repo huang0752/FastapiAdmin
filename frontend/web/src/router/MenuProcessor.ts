@@ -1,7 +1,8 @@
 import type { AppRouteRecord, RouteMeta } from "@/types/router";
 import type { UserInfo } from "@/api/module_system/user";
 import type { MenuTable } from "@/api/module_platform/menu";
-import { useUserStore } from "@stores";
+import { useAssemblyStore, useUserStore } from "@stores";
+import { filterControlMenus } from "@/config/assembly/controlFeatures";
 import { useAppMode } from "@/hooks/core/useAppMode";
 
 import {
@@ -200,7 +201,9 @@ export class MenuProcessor {
     const userStore = useUserStore();
     const fromUser = userStore.routeList;
     if (Array.isArray(fromUser) && fromUser.length > 0) {
-      const routes = backendMenusToAppRoutes(fromUser);
+      const routes = backendMenusToAppRoutes(
+        filterControlMenus(fromUser, useAssemblyStore().summary.featureFlags)
+      );
       return this.filterEmptyMenus(routes);
     }
     return [];

@@ -182,7 +182,9 @@ async function handleRouteGuard(
 
   const menuStore = useMenuStore();
   const shouldInitRoutes =
-    userStore.isLogin && (!routeRegistry?.isRegistered() || menuStore.menuList.length === 0);
+    userStore.isLogin &&
+    !to.meta.skipDynamicRouteInit &&
+    (!routeRegistry?.isRegistered() || menuStore.menuList.length === 0);
 
   if (shouldInitRoutes) {
     if (routeInitInProgress) return false;
@@ -586,4 +588,9 @@ export class RoutePermissionValidator {
 
     return { path: homePath, hasPermission: false };
   }
+}
+
+/** Rebuild dynamic routes after refreshing the current user authorization. */
+export async function rebuildDynamicRoutesFromCurrentUser(): Promise<void> {
+  await refreshMenuAndRoutes();
 }

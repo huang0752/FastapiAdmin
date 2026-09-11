@@ -32,7 +32,7 @@ const linkList = [
   { label: "文档", url: WEB_LINKS.INTRODUCE },
   { label: "Github", url: WEB_LINKS.GITHUB_HOME },
   { label: "Gitee", url: WEB_LINKS.GITEE },
-];
+].filter((link) => Boolean(link.url));
 
 /**
  * 在新标签页中打开指定 URL

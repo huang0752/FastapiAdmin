@@ -1,4 +1,7 @@
+import hashlib
+import json
 import threading
+from datetime import UTC, datetime
 from typing import ClassVar
 
 import anyio
@@ -15,6 +18,14 @@ from app.api.v1.module_platform.tenant.credit_code import validate_unified_socia
 from app.api.v1.module_platform.tenant.model import TenantModel
 from app.api.v1.module_platform.tenant.schema import TenantCreateSchema
 from app.api.v1.module_platform.tenant.service import TenantService
+from app.api.v1.module_system.federated_access.model import FederatedAccessEventModel
+from app.api.v1.module_system.federated_access.service import (
+    ControlUserAccessSyncService,
+)
+from app.api.v1.module_system.federated_access.tenant_role_lock import (
+    lock_tenant_membership_users,
+    lock_tenant_role_assignment,
+)
 from app.config.setting import settings
 from app.core.base_schema import AuthSchema
 from app.core.exceptions import CustomException
@@ -39,10 +50,11 @@ class ControlTenantProvisioningService:
         db: AsyncSession,
         code: str,
     ) -> ControlTenantProvisionOut:
-        claims = await cls._exchange_code(code)
+        site = await resolve_request_site(db, request)
+        claims = await cls._exchange_code(code, site.code)
         await anyio.to_thread.run_sync(cls._provision_lock.acquire)
         try:
-            return await cls._provision_claims(request=request, db=db, claims=claims)
+            return await cls._provision_claims(request=request, db=db, claims=claims, site=site)
         finally:
             cls._provision_lock.release()
 
@@ -53,8 +65,9 @@ class ControlTenantProvisioningService:
         request: Request,
         db: AsyncSession,
         claims: ControlTenantProvisionClaims,
+        site=None,
     ) -> ControlTenantProvisionOut:
-        site = await resolve_request_site(db, request)
+        site = site or await resolve_request_site(db, request)
         if claims.site_code != site.code:
             raise CustomException(msg="开户声明站点与当前访问站点不一致", status_code=403)
 
@@ -123,6 +136,11 @@ class ControlTenantProvisioningService:
                 )
                 db.add(mapping)
                 await db.flush()
+                await cls._ensure_owner_entitlement(
+                    db=db,
+                    mapping=mapping,
+                    claims=claims,
+                )
         except IntegrityError:
             mapping = await cls._find_mapping(db, site.id, claims)
             if mapping is not None:
@@ -133,8 +151,12 @@ class ControlTenantProvisioningService:
         return cls._result("created", tenant)
 
     @classmethod
-    async def _exchange_code(cls, code: str) -> ControlTenantProvisionClaims:
+    async def _exchange_code(cls, code: str, site_code: str) -> ControlTenantProvisionClaims:
         issuer = settings.CONTROL_SSO_ISSUER.rstrip("/")
+        try:
+            credentials = settings.control_client_for_site(site_code)
+        except ValueError as exc:
+            raise CustomException(msg="当前站点未配置中控客户端", status_code=503) from exc
         timeout_seconds = settings.CONTROL_SSO_TIMEOUT_SECONDS
         timeout = httpx.Timeout(
             connect=timeout_seconds,
@@ -148,8 +170,8 @@ class ControlTenantProvisioningService:
                     f"{issuer}/control/provisioning/exchange",
                     json={"code": code},
                     auth=httpx.BasicAuth(
-                        settings.CONTROL_SSO_CLIENT_ID,
-                        settings.CONTROL_SSO_CLIENT_SECRET,
+                        credentials.client_id,
+                        credentials.client_secret.get_secret_value(),
                     ),
                 )
                 response.raise_for_status()
@@ -231,7 +253,115 @@ class ControlTenantProvisioningService:
         if mapping.central_tenant_code != claims.central_tenant_code:
             mapping.central_tenant_code = claims.central_tenant_code
             await db.flush()
+        await cls._ensure_owner_entitlement(
+            db=db,
+            mapping=mapping,
+            claims=claims,
+        )
         return cls._result("already_exists", tenant)
+
+    @classmethod
+    async def _ensure_owner_entitlement(
+        cls,
+        *,
+        db: AsyncSession,
+        mapping: FederatedTenantModel,
+        claims: ControlTenantProvisionClaims,
+    ) -> None:
+        """为开户 owner 补建 v1 访问资格，不改动 owner/admin 治理角色。"""
+        if (
+            mapping.issuer.rstrip("/") != claims.issuer.rstrip("/")
+            or mapping.central_tenant_uuid != claims.central_tenant_uuid
+            or mapping.owner_central_user_uuid != claims.owner.central_user_uuid
+            or mapping.provision_request_uuid != claims.provision_request_uuid
+        ):
+            raise CustomException(
+                msg="中控租户开户 owner 映射不一致",
+                status_code=409,
+            )
+
+        issuer = claims.issuer.rstrip("/")
+        async with lock_tenant_role_assignment(db, mapping.local_tenant_id):
+            entitlement = (
+                await ControlUserAccessSyncService._lock_or_create_entitlement(
+                    db=db,
+                    site_id=mapping.site_id,
+                    tenant_id=mapping.local_tenant_id,
+                    issuer=issuer,
+                    central_user_uuid=claims.owner.central_user_uuid,
+                )
+            )
+            # 已有用户授权治理版本时，开户幂等路径不反向覆盖。
+            if entitlement.applied_version >= 1:
+                return
+
+            identity = await ControlUserAccessSyncService._find_identity(
+                db=db,
+                site_id=mapping.site_id,
+                issuer=issuer,
+                central_user_uuid=claims.owner.central_user_uuid,
+            )
+            if identity is None:
+                raise CustomException(
+                    msg="中控租户开户 owner 本地身份不存在",
+                    status_code=409,
+                )
+            async with lock_tenant_membership_users(db, [identity.local_user_id]):
+                entitlement.local_user_id = identity.local_user_id
+                entitlement.status = "active"
+                entitlement.applied_version = 1
+                entitlement.last_event_id = claims.provision_request_uuid
+                entitlement.last_synced_at = datetime.now(UTC)
+                await db.flush()
+
+                fingerprint_payload = {
+                    "issuer": issuer,
+                    "site_id": mapping.site_id,
+                    "central_tenant_uuid": mapping.central_tenant_uuid,
+                    "tenant_id": mapping.local_tenant_id,
+                    "central_user_uuid": mapping.owner_central_user_uuid,
+                    "event_id": mapping.provision_request_uuid,
+                    "sync_version": 1,
+                    "desired_state": "active",
+                }
+                fingerprint = hashlib.sha256(
+                    json.dumps(
+                        fingerprint_payload,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest()
+                receipt = await ControlUserAccessSyncService._lock_event(
+                    db,
+                    claims.provision_request_uuid,
+                )
+                if receipt is not None:
+                    if (
+                        receipt.entitlement_id != entitlement.id
+                        or receipt.request_fingerprint != fingerprint
+                    ):
+                        raise CustomException(
+                            msg="中控租户开户 owner 事件冲突",
+                            status_code=409,
+                        )
+                    return
+                result = await ControlUserAccessSyncService._build_result(
+                    db=db,
+                    entitlement=entitlement,
+                    disposition="applied",
+                )
+                db.add(
+                    FederatedAccessEventModel(
+                        event_id=claims.provision_request_uuid,
+                        entitlement_id=entitlement.id,
+                        sync_version=1,
+                        desired_state="active",
+                        request_fingerprint=fingerprint,
+                        result_json=result.model_dump(mode="json"),
+                    )
+                )
+                await db.flush()
 
     @staticmethod
     async def _raise_explicit_tenant_conflict(

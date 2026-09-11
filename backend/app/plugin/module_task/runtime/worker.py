@@ -13,6 +13,7 @@ from celery.exceptions import MaxRetriesExceededError, Reject
 
 from app.config.setting import settings
 from app.core.assembly import get_assembly
+from app.core.control_features import validate_control_capabilities
 from app.core.logger import logger
 
 from .celery_app import create_celery_app
@@ -21,6 +22,7 @@ from .executor import BusinessTaskExecutor
 from .loader import load_business_task_modules
 from .registry import business_task_registry
 
+validate_control_capabilities(get_assembly(), settings)
 celery_app = create_celery_app()
 # 在 Celery 完成 Worker 启动前导入并校验所有 Assembly 任务模块；导入失败、
 # payload schema 错误或 handler_code 冲突会直接阻止 Worker 启动。

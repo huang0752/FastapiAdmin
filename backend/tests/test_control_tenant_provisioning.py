@@ -163,6 +163,7 @@ async def _provision_snapshot(claims: dict) -> dict:
         user = None if identity is None else await db.get(UserModel, identity.local_user_id)
         membership = None
         roles = 0
+        owner_role = None
         role_menus = 0
         tenant_plugins = 0
         if user is not None and tenant is not None:
@@ -186,6 +187,14 @@ async def _provision_snapshot(claims: dict) -> dict:
                     )
                 )
             ).scalar_one()
+            owner_role = (
+                await db.execute(
+                    select(RoleModel).where(
+                        RoleModel.tenant_id == tenant.id,
+                        RoleModel.code == "owner",
+                    )
+                )
+            ).scalar_one_or_none()
             role_menus = (
                 await db.execute(
                     select(func.count())
@@ -227,6 +236,7 @@ async def _provision_snapshot(claims: dict) -> dict:
             "user": user,
             "membership": membership,
             "roles": roles,
+            "owner_role": owner_role,
             "role_menus": role_menus,
             "tenant_plugins": tenant_plugins,
             "package_plugin_count": package_plugin_count,
@@ -357,6 +367,7 @@ def test_tenant_provision_creates_federated_owner_without_local_admin(
     assert snapshot["user"].password_login_enabled is False
     assert snapshot["membership"].role == "owner"
     assert snapshot["roles"] == 1
+    assert snapshot["owner_role"].is_system is True
     assert snapshot["role_menus"] > 0
     assert snapshot["tenant_plugins"] == snapshot["package_plugin_count"]
     assert snapshot["local_admin"] is None
