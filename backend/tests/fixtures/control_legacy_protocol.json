@@ -1,0 +1,622 @@
+{
+  "verification": "Actual Pydantic schema imports from git archive of fixed Food commits; isolated temp files, no env files, sockets denied. Schema/payload compatibility only, not live mixed services or old worker business semantics.",
+  "sources": {
+    "products": {
+      "commit": "593e8e7cb5edf9ad0db5a7e7118820cb6a82a47d",
+      "schema_sha256": {
+        "backend/app/api/v1/module_system/federated_access/schema.py": "4653051b946dd47fc3d574784afb2f5281c5c55c45b04edaa53546d4127e3498",
+        "backend/app/api/v1/module_system/auth/control_sso_schema.py": "08dc2ab48dcc0b441858684e32cc81d0735b4c9c19599bd2917e28650520469e"
+      }
+    },
+    "control": {
+      "commit": "d19ec0b1c44380a7b269e4888b086c886015642f",
+      "schema_sha256": {
+        "backend/app/api/v1/module_control/user_entitlement/task_schema.py": "127951d5b99adc436c9c7d49ea2a63eb13f3f4077d67968e0e1fe2d1546cdead",
+        "backend/app/api/v1/module_control/tenant_provision/schema.py": "f8f9e44a75cdbd2a5594908874dd7f9ca8e38e083d76125452bb335e6822c659",
+        "backend/app/api/v1/module_control/user_entitlement/schema.py": "11fae87a612d16df603fdc45b193613c80665240191e99c639ec6bf53676c3ac",
+        "backend/app/api/v1/module_control/tenant_provision/task_schema.py": "86457c872b70534a0d03b2633056b1c42fd730db796aa2465ab792b3b7cf1a37",
+        "backend/app/api/v1/module_control/schema.py": "9effe3ea35037c42c84079c11e906d6ac439ba4ca7382aa20c391772aa5f1cce"
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "new_control_sso_claims_to_old_product",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.auth.control_sso_schema.ControlIdentityClaims",
+      "new_model": "app.api.v1.module_control.schema.ControlIdentityClaimsSchema",
+      "payload": {
+        "issuer": "https://control.example.test",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "status": 0,
+        "site_code": "site-alpha",
+        "central_tenant_code": "centralalpha",
+        "central_tenant_role": "member",
+        "central_is_superuser": false,
+        "target_tenant_code": "targetalpha"
+      },
+      "legacy_validated_payload": {
+        "issuer": "https://control.example.test",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "mobile": null,
+        "email": null,
+        "avatar": null,
+        "status": 0,
+        "site_code": "site-alpha",
+        "central_tenant_code": "centralalpha",
+        "central_is_superuser": false,
+        "central_tenant_role": "member",
+        "target_tenant_code": "targetalpha"
+      }
+    },
+    {
+      "name": "old_control_sso_claims_to_new_product",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.schema.ControlIdentityClaimsSchema",
+      "new_model": "app.api.v1.module_system.auth.control_sso_schema.ControlIdentityClaims",
+      "payload": {
+        "issuer": "https://control.example.test",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "status": 0,
+        "site_code": "site-alpha",
+        "central_tenant_code": "centralalpha",
+        "central_tenant_role": "member",
+        "central_is_superuser": false,
+        "target_tenant_code": "targetalpha"
+      },
+      "legacy_validated_payload": {
+        "issuer": "https://control.example.test",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "mobile": null,
+        "email": null,
+        "avatar": null,
+        "status": 0,
+        "site_code": "site-alpha",
+        "central_tenant_code": "centralalpha",
+        "central_tenant_role": "member",
+        "central_is_superuser": false,
+        "target_tenant_code": "targetalpha"
+      }
+    },
+    {
+      "name": "new_control_provision_claims_to_old_product",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.auth.control_sso_schema.ControlTenantProvisionClaims",
+      "new_model": "app.api.v1.module_control.tenant_provision.schema.ControlProvisionExchangeClaimsSchema",
+      "payload": {
+        "provision_request_uuid": "pppppppppppppppppppppppppppppppp",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "tenant_name": "示例企业",
+        "site_code": "site-alpha",
+        "target_tenant_code": "targetalpha",
+        "target_package_code": "standard",
+        "issuer": "https://control.example.test",
+        "owner": {
+          "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+          "username": "exampleuser",
+          "name": "示例用户",
+          "status": 0
+        }
+      },
+      "legacy_validated_payload": {
+        "provision_request_uuid": "pppppppppppppppppppppppppppppppp",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "tenant_name": "示例企业",
+        "unified_social_credit_code": null,
+        "contact_name": null,
+        "contact_phone": null,
+        "contact_email": null,
+        "address": null,
+        "site_code": "site-alpha",
+        "target_tenant_code": "targetalpha",
+        "target_package_code": "standard",
+        "owner": {
+          "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+          "username": "exampleuser",
+          "name": "示例用户",
+          "mobile": null,
+          "email": null,
+          "avatar": null,
+          "status": 0
+        },
+        "issuer": "https://control.example.test"
+      }
+    },
+    {
+      "name": "old_control_provision_claims_to_new_product",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.tenant_provision.schema.ControlProvisionExchangeClaimsSchema",
+      "new_model": "app.api.v1.module_system.auth.control_sso_schema.ControlTenantProvisionClaims",
+      "payload": {
+        "provision_request_uuid": "pppppppppppppppppppppppppppppppp",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "tenant_name": "示例企业",
+        "site_code": "site-alpha",
+        "target_tenant_code": "targetalpha",
+        "target_package_code": "standard",
+        "issuer": "https://control.example.test",
+        "owner": {
+          "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+          "username": "exampleuser",
+          "name": "示例用户",
+          "status": 0
+        }
+      },
+      "legacy_validated_payload": {
+        "provision_request_uuid": "pppppppppppppppppppppppppppppppp",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "tenant_name": "示例企业",
+        "unified_social_credit_code": null,
+        "contact_name": null,
+        "contact_phone": null,
+        "contact_email": null,
+        "address": null,
+        "site_code": "site-alpha",
+        "target_tenant_code": "targetalpha",
+        "target_package_code": "standard",
+        "owner": {
+          "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+          "username": "exampleuser",
+          "name": "示例用户",
+          "mobile": null,
+          "email": null,
+          "avatar": null,
+          "status": 0
+        },
+        "issuer": "https://control.example.test"
+      }
+    },
+    {
+      "name": "new_control_access_active_to_old_product",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessClaims",
+      "new_model": "app.api.v1.module_control.user_entitlement.schema.ControlUserAccessClaims",
+      "payload": {
+        "issuer": "https://control.example.test",
+        "event_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sync_version": 7,
+        "desired_state": "active",
+        "application_code": "product-alpha",
+        "site_code": "site-alpha",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "target_tenant_code": "targetalpha",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "user_status": 0
+      },
+      "legacy_validated_payload": {
+        "issuer": "https://control.example.test",
+        "event_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sync_version": 7,
+        "desired_state": "active",
+        "application_code": "product-alpha",
+        "site_code": "site-alpha",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "target_tenant_code": "targetalpha",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "mobile": null,
+        "email": null,
+        "avatar": null,
+        "user_status": 0
+      }
+    },
+    {
+      "name": "old_control_access_active_to_new_product",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.user_entitlement.schema.ControlUserAccessClaims",
+      "new_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessClaims",
+      "payload": {
+        "issuer": "https://control.example.test",
+        "event_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sync_version": 7,
+        "desired_state": "active",
+        "application_code": "product-alpha",
+        "site_code": "site-alpha",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "target_tenant_code": "targetalpha",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "user_status": 0
+      },
+      "legacy_validated_payload": {
+        "issuer": "https://control.example.test",
+        "event_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sync_version": 7,
+        "desired_state": "active",
+        "application_code": "product-alpha",
+        "site_code": "site-alpha",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "target_tenant_code": "targetalpha",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "mobile": null,
+        "email": null,
+        "avatar": null,
+        "user_status": 0
+      }
+    },
+    {
+      "name": "new_control_access_inactive_to_old_product",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessClaims",
+      "new_model": "app.api.v1.module_control.user_entitlement.schema.ControlUserAccessClaims",
+      "payload": {
+        "issuer": "https://control.example.test",
+        "event_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sync_version": 7,
+        "desired_state": "inactive",
+        "application_code": "product-alpha",
+        "site_code": "site-alpha",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "target_tenant_code": "targetalpha",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "user_status": 1
+      },
+      "legacy_validated_payload": {
+        "issuer": "https://control.example.test",
+        "event_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sync_version": 7,
+        "desired_state": "inactive",
+        "application_code": "product-alpha",
+        "site_code": "site-alpha",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "target_tenant_code": "targetalpha",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "mobile": null,
+        "email": null,
+        "avatar": null,
+        "user_status": 1
+      }
+    },
+    {
+      "name": "old_control_access_inactive_to_new_product",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.user_entitlement.schema.ControlUserAccessClaims",
+      "new_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessClaims",
+      "payload": {
+        "issuer": "https://control.example.test",
+        "event_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sync_version": 7,
+        "desired_state": "inactive",
+        "application_code": "product-alpha",
+        "site_code": "site-alpha",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "target_tenant_code": "targetalpha",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "user_status": 1
+      },
+      "legacy_validated_payload": {
+        "issuer": "https://control.example.test",
+        "event_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sync_version": 7,
+        "desired_state": "inactive",
+        "application_code": "product-alpha",
+        "site_code": "site-alpha",
+        "central_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "central_tenant_code": "centralalpha",
+        "target_tenant_code": "targetalpha",
+        "central_user_uuid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "name": "示例用户",
+        "mobile": null,
+        "email": null,
+        "avatar": null,
+        "user_status": 1
+      }
+    },
+    {
+      "name": "new_product_declared_receipt_to_old_control",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.user_entitlement.task_schema.ControlTargetUserEntitlementResult",
+      "new_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessSyncOut",
+      "payload": {
+        "disposition": "applied",
+        "status": "active",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [
+          "USER"
+        ],
+        "effective_menu_count": 3,
+        "session_cleanup_pending": false
+      },
+      "legacy_validated_payload": {
+        "disposition": "applied",
+        "status": "active",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [
+          "USER"
+        ],
+        "effective_menu_count": 3,
+        "session_cleanup_pending": false
+      }
+    },
+    {
+      "name": "old_product_declared_receipt_to_new_control",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessSyncOut",
+      "new_model": "app.api.v1.module_control.user_entitlement.task_schema.ControlTargetUserEntitlementResult",
+      "payload": {
+        "disposition": "applied",
+        "status": "active",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [
+          "USER"
+        ],
+        "effective_menu_count": 3,
+        "session_cleanup_pending": false
+      },
+      "legacy_validated_payload": {
+        "disposition": "applied",
+        "status": "active",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [
+          "USER"
+        ],
+        "effective_menu_count": 3,
+        "session_cleanup_pending": false
+      }
+    },
+    {
+      "name": "new_product_manual_receipt_to_old_control",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.user_entitlement.task_schema.ControlTargetUserEntitlementResult",
+      "new_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessSyncOut",
+      "payload": {
+        "disposition": "applied",
+        "status": "active",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [],
+        "effective_menu_count": 0,
+        "session_cleanup_pending": false
+      },
+      "legacy_validated_payload": {
+        "disposition": "applied",
+        "status": "active",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [],
+        "effective_menu_count": 0,
+        "session_cleanup_pending": false
+      }
+    },
+    {
+      "name": "old_product_manual_receipt_to_new_control",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessSyncOut",
+      "new_model": "app.api.v1.module_control.user_entitlement.task_schema.ControlTargetUserEntitlementResult",
+      "payload": {
+        "disposition": "applied",
+        "status": "active",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [],
+        "effective_menu_count": 0,
+        "session_cleanup_pending": false
+      },
+      "legacy_validated_payload": {
+        "disposition": "applied",
+        "status": "active",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [],
+        "effective_menu_count": 0,
+        "session_cleanup_pending": false
+      }
+    },
+    {
+      "name": "new_product_revoked_receipt_to_old_control",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.user_entitlement.task_schema.ControlTargetUserEntitlementResult",
+      "new_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessSyncOut",
+      "payload": {
+        "disposition": "applied",
+        "status": "inactive",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [],
+        "effective_menu_count": 0,
+        "session_cleanup_pending": false
+      },
+      "legacy_validated_payload": {
+        "disposition": "applied",
+        "status": "inactive",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [],
+        "effective_menu_count": 0,
+        "session_cleanup_pending": false
+      }
+    },
+    {
+      "name": "old_product_revoked_receipt_to_new_control",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessSyncOut",
+      "new_model": "app.api.v1.module_control.user_entitlement.task_schema.ControlTargetUserEntitlementResult",
+      "payload": {
+        "disposition": "applied",
+        "status": "inactive",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [],
+        "effective_menu_count": 0,
+        "session_cleanup_pending": false
+      },
+      "legacy_validated_payload": {
+        "disposition": "applied",
+        "status": "inactive",
+        "applied_version": 7,
+        "local_user_id": 12,
+        "role_codes": [],
+        "effective_menu_count": 0,
+        "session_cleanup_pending": false
+      }
+    },
+    {
+      "name": "new_product_provision_created_receipt_to_old_control",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.tenant_provision.task_schema.ControlTargetProvisionResult",
+      "new_model": "app.api.v1.module_system.auth.control_sso_schema.ControlTenantProvisionOut",
+      "payload": {
+        "result": "created",
+        "target_tenant_id": 21,
+        "target_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "target_tenant_code": "targetalpha"
+      },
+      "legacy_validated_payload": {
+        "result": "created",
+        "target_tenant_id": 21,
+        "target_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "target_tenant_code": "targetalpha"
+      }
+    },
+    {
+      "name": "old_product_provision_created_receipt_to_new_control",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.auth.control_sso_schema.ControlTenantProvisionOut",
+      "new_model": "app.api.v1.module_control.tenant_provision.task_schema.ControlTargetProvisionResult",
+      "payload": {
+        "result": "created",
+        "target_tenant_id": 21,
+        "target_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "target_tenant_code": "targetalpha"
+      },
+      "legacy_validated_payload": {
+        "result": "created",
+        "target_tenant_id": 21,
+        "target_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "target_tenant_code": "targetalpha"
+      }
+    },
+    {
+      "name": "new_product_provision_already_exists_receipt_to_old_control",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.tenant_provision.task_schema.ControlTargetProvisionResult",
+      "new_model": "app.api.v1.module_system.auth.control_sso_schema.ControlTenantProvisionOut",
+      "payload": {
+        "result": "already_exists",
+        "target_tenant_id": 21,
+        "target_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "target_tenant_code": "targetalpha"
+      },
+      "legacy_validated_payload": {
+        "result": "already_exists",
+        "target_tenant_id": 21,
+        "target_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "target_tenant_code": "targetalpha"
+      }
+    },
+    {
+      "name": "old_product_provision_already_exists_receipt_to_new_control",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.auth.control_sso_schema.ControlTenantProvisionOut",
+      "new_model": "app.api.v1.module_control.tenant_provision.task_schema.ControlTargetProvisionResult",
+      "payload": {
+        "result": "already_exists",
+        "target_tenant_id": 21,
+        "target_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "target_tenant_code": "targetalpha"
+      },
+      "legacy_validated_payload": {
+        "result": "already_exists",
+        "target_tenant_id": 21,
+        "target_tenant_uuid": "tttttttttttttttttttttttttttttttt",
+        "target_tenant_code": "targetalpha"
+      }
+    },
+    {
+      "name": "sso_product_request",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.auth.control_sso_schema.ControlExchangeIn",
+      "new_model": "app.api.v1.module_system.auth.control_sso_schema.ControlExchangeIn",
+      "payload": {
+        "code": "protocol-example-code-00000000000001"
+      },
+      "legacy_validated_payload": {
+        "code": "protocol-example-code-00000000000001"
+      }
+    },
+    {
+      "name": "provision_product_request",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.auth.control_sso_schema.ControlTenantProvisionIn",
+      "new_model": "app.api.v1.module_system.auth.control_sso_schema.ControlTenantProvisionIn",
+      "payload": {
+        "code": "protocol-example-code-00000000000001"
+      },
+      "legacy_validated_payload": {
+        "code": "protocol-example-code-00000000000001"
+      }
+    },
+    {
+      "name": "access_product_request",
+      "source": "products",
+      "legacy_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessSyncIn",
+      "new_model": "app.api.v1.module_system.federated_access.schema.ControlUserAccessSyncIn",
+      "payload": {
+        "code": "protocol-example-code-00000000000001"
+      },
+      "legacy_validated_payload": {
+        "code": "protocol-example-code-00000000000001"
+      }
+    },
+    {
+      "name": "sso_control_exchange",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.schema.ControlExchangeInSchema",
+      "new_model": "app.api.v1.module_control.schema.ControlExchangeInSchema",
+      "payload": {
+        "code": "protocol-example-code-00000000000001"
+      },
+      "legacy_validated_payload": {
+        "code": "protocol-example-code-00000000000001"
+      }
+    },
+    {
+      "name": "provision_control_exchange",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.tenant_provision.schema.ControlProvisionExchangeInSchema",
+      "new_model": "app.api.v1.module_control.tenant_provision.schema.ControlProvisionExchangeInSchema",
+      "payload": {
+        "code": "protocol-example-code-00000000000001"
+      },
+      "legacy_validated_payload": {
+        "code": "protocol-example-code-00000000000001"
+      }
+    },
+    {
+      "name": "access_control_exchange",
+      "source": "control",
+      "legacy_model": "app.api.v1.module_control.user_entitlement.schema.ControlUserEntitlementExchangeIn",
+      "new_model": "app.api.v1.module_control.user_entitlement.schema.ControlUserEntitlementExchangeIn",
+      "payload": {
+        "code": "protocol-example-code-00000000000001"
+      },
+      "legacy_validated_payload": {
+        "code": "protocol-example-code-00000000000001"
+      }
+    }
+  ]
+}

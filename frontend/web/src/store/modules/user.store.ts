@@ -35,6 +35,16 @@ export interface LogoutOptions {
   navigate?: boolean;
 }
 
+export interface SessionMutationOptions {
+  shouldApply?: () => boolean;
+}
+
+export interface EstablishSessionOptions {
+  /** SSO launch codes already select the target tenant; do not replace it from local preferences. */
+  restoreSavedTenant?: boolean;
+  isCurrent?: () => boolean;
+}
+
 /**
  * 用户状态管理
  * 管理用户登录状态、个人信息、语言设置、搜索历史、锁屏状态等
@@ -181,19 +191,12 @@ export const useUserStore = defineStore(
     /**
      * 获取用户租户列表
      */
-    async function fetchTenants() {
+    async function fetchTenants(options?: SessionMutationOptions) {
       try {
         const response = await AuthAPI.getTenants();
         const data = response.data.data || [];
+        if (options?.shouldApply?.() === false) return data;
         tenantList.value = data;
-        // 恢复上次选择的租户
-        const savedId = localStorage.getItem(StorageConfig.LAST_TENANT_ID_KEY);
-        if (savedId) {
-          const found = data.find((t: TenantOption) => String(t.id) === savedId);
-          if (found) {
-            currentTenant.value = found;
-          }
-        }
         return data;
       } catch (error) {
         console.error("获取租户列表失败:", error);
@@ -204,8 +207,9 @@ export const useUserStore = defineStore(
     /**
      * 选择租户
      */
-    async function selectTenant(tenantId: number) {
+    async function selectTenant(tenantId: number, options?: SessionMutationOptions) {
       const response = await AuthAPI.selectTenant(tenantId);
+      if (options?.shouldApply?.() === false) return;
       const data = response.data.data;
       if (response.data.code === ResultEnum.SUCCESS && data?.access_token) {
         const currentRefreshToken = Auth.getRefreshToken() || "";
@@ -216,7 +220,8 @@ export const useUserStore = defineStore(
           currentTenant.value = found;
           localStorage.setItem(StorageConfig.LAST_TENANT_ID_KEY, String(found.id));
         }
-        await useConfigStore().getConfig(true, tenantId);
+        await useConfigStore().getConfig(true, tenantId, options);
+        if (options?.shouldApply?.() === false) return;
         resolveAndApplyPreset();
       }
     }
@@ -236,14 +241,16 @@ export const useUserStore = defineStore(
     /**
      * 获取用户信息
      */
-    async function getUserInfo() {
+    async function getUserInfo(options?: SessionMutationOptions) {
       try {
         const response = await UserAPI.getCurrentUserInfo();
+        if (options?.shouldApply?.() === false) return false;
         const data = response.data.data;
         const menus: MenuTable[] = data?.menus || [];
         delete data?.menus;
         info.value = { ...info.value, ...data } as Partial<UserInfo>;
         setRoute(menus);
+        return true;
       } catch (error) {
         console.error("获取用户信息失败:", error);
         throw error;
@@ -264,6 +271,12 @@ export const useUserStore = defineStore(
       routeList.value = routers;
       hasGetRoute.value = true;
       setPermissions(routers);
+    }
+
+    function clearAuthorizationSnapshot() {
+      routeList.value = [];
+      prems.value = [];
+      hasGetRoute.value = false;
     }
 
     /**
@@ -303,33 +316,71 @@ export const useUserStore = defineStore(
     async function establishSession(
       tokens: JWTOut,
       remember = Auth.getRememberMe(),
-      initialTenants: TenantOption[] = []
+      initialTenants: TenantOption[] = [],
+      options?: EstablishSessionOptions
     ) {
+      const isCurrent = options?.isCurrent ?? (() => true);
+      const mutationOptions: SessionMutationOptions = { shouldApply: isCurrent };
+      if (!isCurrent()) return false;
       rememberMe.value = remember;
-      (await getRouterUtils()).resetRouteInitState();
+      const routerUtils = await getRouterUtils();
+      if (!isCurrent()) return false;
+      routerUtils.resetDynamicRoutesSync();
+      if (!isCurrent()) return false;
       Auth.setTokens(tokens.access_token, tokens.refresh_token, remember);
       setToken(tokens.access_token, tokens.refresh_token);
 
       if (initialTenants.length > 0) {
+        if (!isCurrent()) return false;
         tenantList.value = initialTenants;
       }
 
-      await getUserInfo();
-      const tenants = initialTenants.length > 0 ? initialTenants : await fetchTenants();
-      const ui = info.value as UserInfoLike;
+      if (!(await getUserInfo(mutationOptions)) || !isCurrent()) return false;
+      const tenants =
+        initialTenants.length > 0 ? initialTenants : await fetchTenants(mutationOptions);
+      if (!isCurrent()) return false;
       const availableTenants = tenants;
-      const activeTenantId = ui.tenant_id || currentTenant.value?.id || availableTenants[0]?.id;
+      const ui = info.value as UserInfoLike;
+      const sessionTenantId = ui.session_tenant_id;
+      const savedTenantId = localStorage.getItem(StorageConfig.LAST_TENANT_ID_KEY);
+      const savedTenant = savedTenantId
+        ? availableTenants.find(
+            (tenant: TenantOption) => String(tenant.id) === String(savedTenantId)
+          )
+        : undefined;
+
+      if (
+        options?.restoreSavedTenant !== false &&
+        sessionTenantId &&
+        savedTenant &&
+        String(savedTenant.id) !== String(sessionTenantId)
+      ) {
+        await selectTenant(savedTenant.id, mutationOptions);
+        if (!isCurrent()) return false;
+        if (!(await getUserInfo(mutationOptions)) || !isCurrent()) return false;
+      }
+
+      const activeUi = info.value as UserInfoLike;
+      const activeTenantId =
+        activeUi.session_tenant_id ||
+        sessionTenantId ||
+        activeUi.tenant_id ||
+        availableTenants[0]?.id;
       if (activeTenantId) {
         const found = availableTenants.find(
           (tenant: TenantOption) => String(tenant.id) === String(activeTenantId)
         );
         if (found) {
+          if (!isCurrent()) return false;
           setCurrentTenant(found);
         }
       }
-      await useConfigStore().getConfig(true, activeTenantId);
+      await useConfigStore().getConfig(true, activeTenantId, mutationOptions);
+      if (!isCurrent()) return false;
       resolveAndApplyPreset();
+      if (!isCurrent()) return false;
       setLoginStatus(true);
+      return true;
     }
 
     /**
@@ -500,6 +551,7 @@ export const useUserStore = defineStore(
       setToken,
       setAvatar,
       setRoute,
+      clearAuthorizationSnapshot,
       setPermissions,
       establishSession,
       login,

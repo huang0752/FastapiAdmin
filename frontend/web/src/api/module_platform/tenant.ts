@@ -172,7 +172,15 @@ const TenantAPI = {
     });
   },
 
-  /** 获取租户个性化配置 */
+  /** 登录界面配置仅从当前会话取租户，不接受外部租户 ID。 */
+  getCurrentBrandConfig() {
+    return request<ApiResponse<TenantConfigItem[]>>({
+      url: `${API_PATH}/current/brand-config`,
+      method: "get",
+    });
+  },
+
+  /** 获取租户个性化配置（平台管理） */
   getTenantConfig(tenantId: number) {
     return request<ApiResponse<TenantConfigItem[]>>({
       url: `${API_PATH}/${tenantId}/config`,

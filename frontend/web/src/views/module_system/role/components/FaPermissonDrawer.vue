@@ -113,7 +113,7 @@ import { listToTree, formatTree, type CascaderNode } from "@utils";
 import FaMenuTreeTable from "@/components/others/fa-menu-tree-table/index.vue";
 import RoleAPI, { permissionDataType } from "@/api/module_system/role";
 import DeptAPI from "@/api/module_system/dept";
-import MenuAPI, { MenuTable } from "@/api/module_platform/menu";
+import type { MenuTable } from "@/api/module_platform/menu";
 import { DeviceEnum } from "@/enums/settings/device.enum";
 import { useAppStore, useUserStore } from "@stores";
 import { ElMessage } from "element-plus";
@@ -163,7 +163,7 @@ const init = async () => {
     const deptResponse = await DeptAPI.listDept();
     deptTreeData.value = formatTree(listToTree(deptResponse.data.data));
 
-    const menuResponse = await MenuAPI.listMenu();
+    const menuResponse = await RoleAPI.assignableMenus();
     rawMenuTree.value = menuResponse.data.data || [];
 
     const roleResponse = await RoleAPI.detailRole(props.roleId);

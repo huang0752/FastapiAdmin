@@ -17,7 +17,12 @@ from app.core.base_schema import (
     LogoutPayloadSchema,
     RefreshTokenPayloadSchema,
 )
-from app.core.dependencies import AuthPermission, db_getter, redis_getter
+from app.core.dependencies import (
+    AuthPermission,
+    db_getter,
+    db_session_getter,
+    redis_getter,
+)
 from app.core.exceptions import CustomException
 from app.core.logger import logger
 from app.core.redis_crud import RedisCURD
@@ -70,7 +75,7 @@ async def control_sso_exchange_controller(
     request: Request,
     data: ControlExchangeIn,
     redis: Annotated[Redis, Depends(redis_getter)],
-    db: Annotated[AsyncSession, Depends(db_getter)],
+    db: Annotated[AsyncSession, Depends(db_session_getter)],
 ) -> JSONResponse:
     request.state.skip_operation_log = True
     if not settings.CONTROL_SSO_ENABLED:
@@ -158,7 +163,6 @@ async def get_captcha_for_login_controller(
 @AuthRouter.post(
     "/logout",
     summary="退出登录",
-    dependencies=[Depends(AuthPermission())],
     response_model=ResponseSchema[None],
 )
 async def logout_controller(
@@ -230,7 +234,6 @@ async def auto_login_controller(
     "/select-tenant",
     summary="选择租户",
     response_model=ResponseSchema[SelectTenantOutSchema],
-    dependencies=[Depends(AuthPermission())],
 )
 async def select_tenant_controller(
     request: Request,

@@ -189,7 +189,7 @@ export function findFoodLogiBrandingViolations(
   if (!text.toLowerCase().includes("#2563eb") || !text.toLowerCase().includes("#078c72")) {
     violations.push("产物缺少双 Site 主题 token");
   }
-  const requiredScene: Record<string, { marker: string; headline: string }> = {
+  const requiredScene: Record<(typeof product)["product"], { marker: string; headline: string }> = {
     trace: { marker: "trace-batch-chain", headline: "让每一批食品" },
     agri: { marker: "agri-field-route", headline: "从田间计划" },
     logistic: { marker: "logistic-temperature-lane", headline: "让温度与轨迹" },

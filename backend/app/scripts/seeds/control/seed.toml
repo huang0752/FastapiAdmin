@@ -1,0 +1,10 @@
+name = "control"
+depends = ["saas-admin"]
+
+[[tables]]
+table = "platform_package_menu"
+file = "platform_package_menu.json"
+
+[[tables]]
+table = "platform_menu"
+file = "platform_menu.json"

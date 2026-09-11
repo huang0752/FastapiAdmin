@@ -198,6 +198,14 @@ export default ({ mode }: { mode: string }) => {
       ...(isProduction ? [] : [vueDevTools()]),
     ],
     optimizeDeps: {
+      // 菜单页面按需加载，但依赖要在冷启动时发现，避免首次跳转触发整页刷新。
+      entries: [
+        "index.html",
+        "src/**/*.{vue,ts,tsx}",
+        "!src/**/*.d.ts",
+        "!src/**/__tests__/**",
+        "!src/**/*.{test,spec}.{ts,tsx,js}",
+      ],
       include: [
         "vue",
         "vue-router",

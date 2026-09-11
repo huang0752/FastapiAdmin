@@ -1,5 +1,12 @@
 <template>
   <div class="ai-model-config">
+    <ElAlert
+      v-if="scope === 'tenant'"
+      title="当前租户共享配置"
+      description="仅当前产品、当前租户共用。成员仍需拥有对应业务权限；个人聊天优先使用个人激活模型。"
+      type="info"
+      :closable="false"
+    />
     <div v-if="loading" class="loading-tip">
       <ElIcon class="is-loading"><Loading /></ElIcon>
       <span>加载中...</span>
@@ -22,10 +29,13 @@
           @click="handleUseDefault"
         >
           <ElIcon><RefreshLeft /></ElIcon>
-          <span>恢复系统默认</span>
+          <span>{{ scope === "tenant" ? "清除共享默认" : "使用租户 / 系统默认" }}</span>
         </ElButton>
       </div>
 
+      <ElButton v-if="scope === 'tenant' && activeId" :loading="probing" @click="probeActive"
+        >检测当前模型连接</ElButton
+      >
       <!-- 配置列表 -->
       <div class="config-section">
         <div class="section-header">
@@ -46,7 +56,11 @@
           <div class="empty-title">添加你的第一个 AI 模型</div>
           <div class="empty-desc">
             支持 OpenAI、DeepSeek、Ollama 等任何 OpenAI 兼容服务<br />
-            配置后即可在 AI 助手页一键切换
+            {{
+              scope === "tenant"
+                ? "配置后供租户成员和已接入的业务功能使用"
+                : "配置后即可在 AI 助手页一键切换"
+            }}
           </div>
           <ElButton type="primary" size="large" :icon="Plus" @click="openCreate">
             立即添加
@@ -92,10 +106,24 @@
                     </ElButton>
                   </ElTooltip>
                   <ElTooltip content="编辑" placement="top" :show-after="200">
-                    <ElButton text circle size="small" :icon="Edit" @click="openEdit(item)" />
+                    <ElButton
+                      text
+                      circle
+                      size="small"
+                      :icon="Edit"
+                      :aria-label="`编辑模型 ${item.name}`"
+                      @click="openEdit(item)"
+                    />
                   </ElTooltip>
                   <ElTooltip content="删除" placement="top" :show-after="200">
-                    <ElButton text circle size="small" :icon="Delete" @click="handleDelete(item)" />
+                    <ElButton
+                      text
+                      circle
+                      size="small"
+                      :icon="Delete"
+                      :aria-label="`删除模型 ${item.name}`"
+                      @click="handleDelete(item)"
+                    />
                   </ElTooltip>
                 </div>
               </div>
@@ -348,14 +376,30 @@ import {
   Check,
 } from "@element-plus/icons-vue";
 import AiChatAPI, {
+  TenantAiConfigAPI,
   type AiFeatureBinding,
   type AiModelConfigInput,
   type AiModelConfigItem,
   type AiModelConfigList,
 } from "@/api/module_ai/chat";
 
+const props = withDefaults(defineProps<{ scope?: "user" | "tenant" }>(), { scope: "user" });
+const configApi = props.scope === "tenant" ? TenantAiConfigAPI : AiChatAPI;
 const emit = defineEmits<{ changed: [] }>();
 
+const probing = ref(false);
+const probeActive = async () => {
+  if (!activeId.value) return;
+  probing.value = true;
+  try {
+    await TenantAiConfigAPI.probeModel(activeId.value);
+    ElMessage.success("模型连接成功");
+  } catch {
+    /* 请求层显示脱敏错误 */
+  } finally {
+    probing.value = false;
+  }
+};
 const loading = ref(false);
 const saving = ref(false);
 const items = ref<AiModelConfigItem[]>([]);
@@ -429,7 +473,7 @@ const rules: FormRules<AiModelConfigInput> = {
 };
 
 const activeModelName = computed(() => {
-  if (!activeId.value) return "系统默认";
+  if (!activeId.value) return props.scope === "tenant" ? "未选择共享默认" : "租户 / 系统默认";
   const item = items.value.find((i) => i.id === activeId.value);
   return item?.name || "系统默认";
 });
@@ -438,8 +482,8 @@ const loadList = async () => {
   loading.value = true;
   try {
     const [res, featureRes] = await Promise.all([
-      AiChatAPI.getModelConfig(),
-      AiChatAPI.getFeatureBindings(),
+      configApi.getModelConfig(),
+      configApi.getFeatureBindings(),
     ]);
     if (res.data?.code === 0 && res.data.data) {
       const data: AiModelConfigList = res.data.data;
@@ -512,23 +556,24 @@ const handleSave = async () => {
       max_tokens: form.max_tokens,
       allow_business_data: form.allow_business_data,
     };
+    const editing = Boolean(form.id);
     let res;
     if (form.id) {
-      res = await AiChatAPI.updateModelConfig(form.id, payload);
+      res = await configApi.updateModelConfig(form.id, payload);
     } else {
-      res = await AiChatAPI.createModelConfig(payload);
+      res = await configApi.createModelConfig(payload);
     }
     if (res.data?.code === 0) {
       const newId = form.id || res.data.data?.id;
       dialogVisible.value = false;
       if (!form.id && newId) {
-        await AiChatAPI.activateModelConfig(newId);
+        await configApi.activateModelConfig(newId);
       }
       resetForm();
       emit("changed");
       await loadList();
       if (newId) flashHighlight(newId);
-      ElMessage.success(form.id ? "已保存" : "已添加并启用");
+      ElMessage.success(editing ? "已保存" : "已添加并启用");
     } else {
       ElMessage.error(res.data?.msg || "保存失败");
     }
@@ -552,7 +597,7 @@ const handleItemClick = async (item: AiModelConfigItem) => {
     return;
   }
   try {
-    const res = await AiChatAPI.activateModelConfig(item.id);
+    const res = await configApi.activateModelConfig(item.id);
     if (res.data?.code === 0) {
       activeId.value = item.id;
       emit("changed");
@@ -566,7 +611,7 @@ const handleItemClick = async (item: AiModelConfigItem) => {
 
 const handleUseDefault = async () => {
   try {
-    const res = await AiChatAPI.activateModelConfig("");
+    const res = await configApi.activateModelConfig("");
     if (res.data?.code === 0) {
       activeId.value = null;
       emit("changed");
@@ -587,7 +632,7 @@ const handleDelete = async (item: AiModelConfigItem) => {
     return;
   }
   try {
-    const res = await AiChatAPI.deleteModelConfig(item.id);
+    const res = await configApi.deleteModelConfig(item.id);
     if (res.data?.code === 0) {
       ElMessage.success("已删除");
       if (form.id === item.id) dialogVisible.value = false;
@@ -610,7 +655,7 @@ const saveFeature = async (feature: AiFeatureBinding) => {
   if (featureSaving.value) return;
   featureSaving.value = feature.feature_code;
   try {
-    const res = await AiChatAPI.updateFeatureBinding(feature.feature_code, {
+    const res = await configApi.updateFeatureBinding(feature.feature_code, {
       model_config_id: feature.model_config_id,
       fallback_config_id: feature.fallback_config_id,
       prompt_version: feature.prompt_version,

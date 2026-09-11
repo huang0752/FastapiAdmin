@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -15,6 +17,8 @@ class ControlIdentityClaims(BaseModel):
     status: int
     site_code: str
     central_tenant_code: str
+    central_is_superuser: bool = False
+    central_tenant_role: Literal["owner", "admin", "member"] = "member"
     target_tenant_code: str
 
 

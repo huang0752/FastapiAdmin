@@ -1,0 +1,21 @@
+[assembly]
+name = "control"
+title = "统一中控台"
+description = "面向多业务系统的独立中控产品装配；复用 小柿 SaaS 的用户、租户、角色和平台管理底座。"
+
+[core]
+required = ["auth", "tenant", "user", "role", "permission", "menu", "settings", "audit"]
+
+[backend]
+enabled_plugins = ["module_task", "module_generator", "module_ai", "module_control_provision"]
+disabled_plugins = ["module_example"]
+
+[frontend]
+enabled_route_groups = ["auth", "home", "dashboard", "system", "platform", "module-control", "module-task", "module-generator", "ai-chat", "user-profile", "payment", "workspace", "outside", "exception"]
+disabled_route_groups = ["pricing", "article", "tutorial"]
+
+[seed]
+packs = ["control"]
+
+[features]
+flags = { ai_assistant = true, plugin_market = true, tenant_package = true, demo_content = false, fast_enter = true, application_portal = true, app_portal = true, control_user_entitlements = true, sso_provider = true, sso_client = false, tenant_auto_provisioning = true }

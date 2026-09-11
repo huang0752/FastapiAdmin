@@ -92,7 +92,7 @@
                 <div class="manual-html" @click.capture="handleAnchorClick">
                   <div class="manual-html__inner">
                     <h1>
-                      FastapiAdmin 功能点清单
+                      小柿 SaaS 功能点清单
                       <small>用于全功能测试验收，按模块逐页列出所有可操作元素</small>
                     </h1>
 
@@ -806,7 +806,7 @@
                       class="manual-footer-note mt-10 border-t border-g-200 pt-6 text-center text-xs text-g-500 dark:border-g-700 dark:text-g-400"
                     >
                       <p>
-                        FastapiAdmin 功能点清单（完整性）—
+                        小柿 SaaS 功能点清单（完整性）—
                         与当前代码中已实现界面项对齐，用于逐项核对是否漏测，不评价体验优劣。
                       </p>
                     </div>

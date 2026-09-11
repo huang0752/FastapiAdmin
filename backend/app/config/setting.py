@@ -4,18 +4,51 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote_plus, urlparse
 
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.common.enums import EnvironmentEnum
 from app.config.path_conf import BASE_DIR, ENV_DIR
 
 DEFAULT_SECRET_KEY = "vgb0tnl9d58+6n-6h-ea&u^1#s0ccp!794=krylxcjq75vzps$"
+_LOCAL_CONTROL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def validate_control_issuer_url(value: str, environment: EnvironmentEnum) -> str:
+    """中控凭据端点生产必须 HTTPS，开发环境仅放行本机 HTTP。"""
+    issuer = value.strip()
+    parsed = urlparse(issuer)
+    if parsed.scheme == "https" and parsed.hostname:
+        return issuer
+    if (
+        environment == EnvironmentEnum.DEV
+        and parsed.scheme == "http"
+        and parsed.hostname in _LOCAL_CONTROL_HOSTS
+    ):
+        return issuer
+    raise ValueError("中控 issuer 必须使用 HTTPS；开发测试仅允许 localhost HTTP")
+
+
+class ControlSiteClientSettings(BaseModel):
+    model_config = {"hide_input_in_errors": True}
+
+    client_id: str = Field(..., min_length=1)
+    client_secret: SecretStr
+
+    @model_validator(mode="after")
+    def validate_non_blank_credentials(self):
+        if not self.client_id.strip():
+            raise ValueError("中控 client ID 不能为空")
+        if not self.client_secret.get_secret_value().strip():
+            raise ValueError("中控 client secret 不能为空")
+        return self
 
 
 class Settings(BaseSettings):
     """系统配置类"""
 
     model_config = SettingsConfigDict(
+        hide_input_in_errors=True,
         env_file=ENV_DIR / f".env.{os.getenv('ENVIRONMENT')}",
         env_file_encoding="utf-8",
         extra="ignore",
@@ -45,14 +78,26 @@ class Settings(BaseSettings):
         if self.CONTROL_SSO_ENABLED:
             if not self.CONTROL_SSO_ISSUER.strip():
                 raise ValueError("启用中控 SSO 时必须配置 issuer")
-            if not self.CONTROL_SSO_CLIENT_ID.strip():
-                raise ValueError("启用中控 SSO 时必须配置 client ID")
-            if not self.CONTROL_SSO_CLIENT_SECRET.strip():
-                raise ValueError("启用中控 SSO 时必须配置 client secret")
+            self.CONTROL_SSO_ISSUER = validate_control_issuer_url(
+                self.CONTROL_SSO_ISSUER,
+                self.ENVIRONMENT,
+            )
+            if not self.CONTROL_SSO_SITE_CLIENTS:
+                if not self.CONTROL_SSO_CLIENT_ID.strip():
+                    raise ValueError("启用中控 SSO 时必须配置 client ID")
+                if not self.CONTROL_SSO_CLIENT_SECRET.strip():
+                    raise ValueError("启用中控 SSO 时必须配置 client secret")
             if self.CONTROL_SSO_TIMEOUT_SECONDS <= 0:
                 raise ValueError("中控 SSO 超时必须大于 0")
         if self.CONTROL_TENANT_PROVISIONING_ENABLED and not self.CONTROL_SSO_ENABLED:
             raise ValueError("启用中控租户自动开户时必须同时启用中控 SSO")
+        if self.CONTROL_USER_ACCESS_SYNC_ENABLED and not self.CONTROL_SSO_ENABLED:
+            raise ValueError("启用中控用户访问资格同步时必须同时启用中控 SSO")
+        if (
+            self.CONTROL_USER_ACCESS_ENFORCEMENT_ENABLED
+            and not self.CONTROL_USER_ACCESS_SYNC_ENABLED
+        ):
+            raise ValueError("启用中控用户访问资格强制校验时必须同时启用访问资格同步")
 
     # ================================================= #
     # ******************* 项目环境 ****************** #
@@ -69,7 +114,7 @@ class Settings(BaseSettings):
     # ******************* API文档配置 ****************** #
     # ================================================= #
     DEBUG: bool = True  # 调试模式
-    TITLE: str = "🎉 FastapiAdmin 🎉 "  # 文档标题
+    TITLE: str = "🎉 小柿 SaaS 🎉 "  # 文档标题
     VERSION: str = "0.1.0"  # 版本号
     DESCRIPTION: str = "后台接口文档"  # 文档描述
     SUMMARY: str = "接口汇总"  # 文档概述
@@ -112,8 +157,26 @@ class Settings(BaseSettings):
     CONTROL_SSO_ISSUER: str = ""  # 中控 API 根地址
     CONTROL_SSO_CLIENT_ID: str = ""  # 当前应用在中控登记的客户端 ID
     CONTROL_SSO_CLIENT_SECRET: str = ""  # 当前应用在中控登记的客户端密钥
+    CONTROL_SSO_SITE_CLIENTS: dict[str, ControlSiteClientSettings] = Field(default_factory=dict)
     CONTROL_SSO_TIMEOUT_SECONDS: float = 5.0  # 启动码兑换 HTTP 超时
     CONTROL_TENANT_PROVISIONING_ENABLED: bool = False  # 是否接受中控租户自动开户
+    # 独立发布门禁：关闭时不影响存量 Control SSO 登录。
+    CONTROL_USER_ACCESS_SYNC_ENABLED: bool = False  # 是否接受中控用户访问资格同步
+    CONTROL_USER_ACCESS_ENFORCEMENT_ENABLED: bool = False  # 是否强制校验中控用户访问资格
+
+    def control_client_for_site(self, site_code: str) -> ControlSiteClientSettings:
+        normalized = site_code.strip().lower()
+        if self.CONTROL_SSO_SITE_CLIENTS:
+            client = self.CONTROL_SSO_SITE_CLIENTS.get(normalized)
+            if client is None:
+                raise ValueError(f"Site {normalized} 未配置中控 Client 凭据")
+            return client
+        if self.CONTROL_SSO_CLIENT_ID.strip() and self.CONTROL_SSO_CLIENT_SECRET.strip():
+            return ControlSiteClientSettings(
+                client_id=self.CONTROL_SSO_CLIENT_ID,
+                client_secret=self.CONTROL_SSO_CLIENT_SECRET,
+            )
+        raise ValueError(f"Site {normalized} 未配置中控 Client 凭据")
 
     # 多租户中间件白名单路径（不需要租户上下文的公开接口）
     TENANT_WHITELIST_PATHS: list[str] = [

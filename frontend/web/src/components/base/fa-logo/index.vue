@@ -12,7 +12,7 @@
 </template>
 
 <script setup lang="ts">
-import defaultLogoUrl from "@fa_imgs/logo.svg";
+const defaultLogoUrl = `${import.meta.env.BASE_URL.replace(/\/?$/, "/")}logo.png`;
 
 defineOptions({ name: "FaLogo" });
 

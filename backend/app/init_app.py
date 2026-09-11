@@ -20,6 +20,42 @@ from .utils.common_util import import_module, import_modules_async
 from .utils.console import console_end, console_start
 
 
+def assembly_uses_scheduler(assembly) -> bool:
+    """只有装配任务插件的后台才启动依赖 task_job 表的调度器。"""
+    return assembly.is_plugin_enabled("module_task")
+
+
+def start_federated_session_recovery(app: FastAPI) -> None:
+    """Start Redis/DB recovery independently from optional task assemblies."""
+    from app.api.v1.module_system.auth.session_registry import (
+        FederatedSessionRecovery,
+    )
+
+    app.state.federated_session_recovery_task = FederatedSessionRecovery.start(app.state.redis)
+
+
+async def stop_federated_session_recovery(app: FastAPI) -> None:
+    from app.api.v1.module_system.auth.session_registry import (
+        FederatedSessionRecovery,
+    )
+
+    task = getattr(app.state, "federated_session_recovery_task", None)
+    await FederatedSessionRecovery.stop(task)
+    app.state.federated_session_recovery_task = None
+
+
+@asynccontextmanager
+async def federated_session_recovery_lifecycle(
+    app: FastAPI,
+) -> AsyncGenerator[None, None]:
+    """Ensure a started recovery worker is stopped on every exit path."""
+    start_federated_session_recovery(app)
+    try:
+        yield
+    finally:
+        await stop_federated_session_recovery(app)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[Any, Any]:
     from app.api.v1.module_platform.tenant.service import TenantService
@@ -29,7 +65,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, Any]:
     from app.core.assembly import get_assembly
 
     try:
-        get_assembly().log_summary()
+        assembly = get_assembly()
+        from app.core.control_features import validate_control_capabilities
+
+        validate_control_capabilities(assembly, settings)
+        assembly.log_summary()
         await InitializeData().init_db()
         logger.info("✅ {}数据库初始化完成", settings.DATABASE_TYPE)
         await import_modules_async(modules=settings.EVENT_LIST, desc="全局事件", app=app, status=True)
@@ -40,9 +80,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, Any]:
         logger.info("✅ Redis数据字典初始化完成")
         await TenantService.init_cache(redis=app.state.redis)
         logger.info("✅ Redis租户配置初始化完成")
-        await SchedulerUtil.init_scheduler(redis=app.state.redis)
-        logger.info("✅ 定时任务调度器初始化完成")
-        if settings.CELERY_ENABLED and get_assembly().is_plugin_enabled("module_task"):
+        scheduler_ready = False
+        if assembly_uses_scheduler(assembly):
+            await SchedulerUtil.init_scheduler(redis=app.state.redis)
+            scheduler_ready = SchedulerUtil.is_running()
+            logger.info("✅ 定时任务调度器初始化完成")
+        else:
+            logger.info("⏭️ 当前产品装配未启用任务插件，跳过定时任务调度器")
+        if settings.CELERY_ENABLED and assembly.is_plugin_enabled("module_task"):
             from app.core.ap_scheduler import scheduler
             from app.plugin.module_task.runtime.recovery import install_business_task_recovery
 
@@ -57,22 +102,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, Any]:
             ws_callback=ws_limit_callback,
         )
         logger.info("✅ 请求限流器初始化完成")
+        async with federated_session_recovery_lifecycle(app):
+            logger.info("✅ 联邦会话索引与待补偿清理恢复已启用")
 
-        console_start(
-            host=settings.SERVER_HOST, port=settings.SERVER_PORT,
-            reload=settings.ENVIRONMENT,
-            database_ready=True, redis_ready=True,
-            scheduler_ready=SchedulerUtil.is_running(), limiter_ready=True,
-        )
+            console_start(
+                host=settings.SERVER_HOST,
+                port=settings.SERVER_PORT,
+                reload=settings.ENVIRONMENT,
+                database_ready=True,
+                redis_ready=True,
+                scheduler_ready=scheduler_ready,
+                limiter_ready=True,
+            )
+            yield
     except Exception as e:
         logger.error("❌ 应用初始化失败: {}", e)
         raise SystemExit(1)
 
-    yield
-
     try:
-        await SchedulerUtil.shutdown(wait=True)
-        logger.info("✅ 定时任务调度器已关闭")
+        logger.info("✅ 联邦会话恢复任务已关闭")
+        if SchedulerUtil.is_running():
+            await SchedulerUtil.shutdown(wait=True)
+            logger.info("✅ 定时任务调度器已关闭")
         await cache_util.clear()
         logger.info("✅ fastapi-admin-cache 已关闭")
         await FastAPILimiter.close()
@@ -80,6 +131,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, Any]:
         await import_modules_async(modules=settings.EVENT_LIST, desc="全局事件", app=app, status=False)
         logger.info("✅ 全局事件模块卸载完成")
         from app.core.database import async_engine
+
         await async_engine.dispose()
         logger.info("✅ 数据库引擎连接池已释放")
         console_end()
@@ -105,11 +157,18 @@ def register_routers(app: FastAPI) -> None:
     from app.api.v1.module_monitor import monitor_router
     from app.api.v1.module_platform import platform_router
     from app.api.v1.module_system import system_router
+    from app.core.assembly import get_assembly
+    from app.core.control_features import is_control_provider
 
     app.include_router(common_router, dependencies=[Depends(TenantPackageRateLimiter(default_times=200, seconds=10))])
     app.include_router(monitor_router, dependencies=[Depends(TenantPackageRateLimiter(default_times=200, seconds=10))])
     app.include_router(platform_router, dependencies=[Depends(TenantPackageRateLimiter(default_times=200, seconds=10))])
     app.include_router(system_router, dependencies=[Depends(TenantPackageRateLimiter(default_times=200, seconds=10))])
+
+    if is_control_provider():
+        from app.api.v1.module_control import build_control_router
+
+        app.include_router(build_control_router(get_assembly()), dependencies=[Depends(TenantPackageRateLimiter(default_times=200, seconds=10))])
 
     from app.core.assembly import is_plugin_enabled
 

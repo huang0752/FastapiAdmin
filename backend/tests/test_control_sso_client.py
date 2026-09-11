@@ -6,12 +6,14 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 from sqlalchemy import UniqueConstraint, func, select
 
+from app.api.v1.module_platform.menu.model import MenuModel
 from app.api.v1.module_platform.tenant.model import TenantUserModel
 from app.api.v1.module_system.auth.federated_identity_service import (
     FederatedIdentityService,
     FederatedUserProfile,
 )
 from app.api.v1.module_system.auth.model import FederatedIdentityModel
+from app.api.v1.module_system.role.model import RoleMenusModel, RoleModel
 from app.api.v1.module_system.user.model import UserModel, UserRolesModel
 from app.api.v1.module_system.user.schema import UserOutSchema
 from app.config.setting import settings
@@ -78,8 +80,16 @@ def test_federated_user_cannot_password_login_and_creates_no_session(
     assert test_client.app.state.redis.set.call_count == redis_set_calls_before
 
 
-def _claims(subject: str, *, tenant_code: str = "test", name: str = "中控用户") -> dict:
-    return {
+def _claims(
+    subject: str,
+    *,
+    tenant_code: str = "test",
+    name: str = "中控用户",
+    central_tenant_code: str = "central-test",
+    central_is_superuser: bool = False,
+    central_tenant_role: str | None = None,
+) -> dict:
+    claims = {
         "issuer": "https://control.example/api/v1",
         "central_user_uuid": subject,
         "name": name,
@@ -88,9 +98,13 @@ def _claims(subject: str, *, tenant_code: str = "test", name: str = "中控用�
         "avatar": "https://example.com/avatar.png",
         "status": 0,
         "site_code": "default",
-        "central_tenant_code": "central-test",
+        "central_tenant_code": central_tenant_code,
+        "central_is_superuser": central_is_superuser,
         "target_tenant_code": tenant_code,
     }
+    if central_tenant_role is not None:
+        claims["central_tenant_role"] = central_tenant_role
+    return claims
 
 
 def _transport(payloads: list[dict]) -> httpx.MockTransport:
@@ -193,6 +207,41 @@ async def _membership_snapshot(subject: str) -> list[tuple[int, str, int]]:
             )
         ).all()
         return [(tenant_id, role, is_default) for tenant_id, role, is_default in rows]
+
+
+async def _tenant_role_codes(subject: str, tenant_id: int = 2) -> list[str]:
+    user, _identity, _memberships, _roles = await _identity_snapshot(subject)
+    async with async_db_session() as db:
+        rows = (
+            await db.execute(
+                select(RoleModel.code)
+                .join(UserRolesModel, UserRolesModel.role_id == RoleModel.id)
+                .where(
+                    UserRolesModel.user_id == user.id,
+                    RoleModel.tenant_id == tenant_id,
+                )
+                .order_by(RoleModel.code)
+            )
+        ).scalars().all()
+        return list(rows)
+
+
+async def _tenant_permissions(subject: str, tenant_id: int = 2) -> set[str]:
+    user, _identity, _memberships, _roles = await _identity_snapshot(subject)
+    async with async_db_session() as db:
+        rows = (
+            await db.execute(
+                select(MenuModel.permission)
+                .join(RoleMenusModel, RoleMenusModel.menu_id == MenuModel.id)
+                .join(RoleModel, RoleModel.id == RoleMenusModel.role_id)
+                .join(UserRolesModel, UserRolesModel.role_id == RoleModel.id)
+                .where(
+                    UserRolesModel.user_id == user.id,
+                    RoleModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalars().all()
+        return {permission for permission in rows if permission}
 
 
 async def _rollback_new_federated_identity(subject: str) -> tuple[int, int, int]:
@@ -402,6 +451,91 @@ def test_control_exchange_creates_shadow_user_membership_without_role(test_clien
         headers={"Authorization": f"Bearer {response.json()['data']['access_token']}"},
     )
     assert current_user.status_code == 200, current_user.text
+
+
+def test_control_platform_superuser_becomes_local_platform_superuser(test_client, monkeypatch) -> None:
+    subject = f"platform-super-{uuid.uuid4()}"
+    _enable_control_sso(
+        monkeypatch,
+        [
+            _claims(
+                subject,
+                tenant_code="system",
+                central_tenant_code="system",
+                central_is_superuser=True,
+            )
+        ],
+    )
+
+    response = test_client.post("/system/auth/control/exchange", json={"code": "p" * 20})
+
+    assert response.status_code == 200, response.text
+    user, _identity, memberships, roles = asyncio.run(_identity_snapshot(subject))
+    assert user.tenant_id == 1
+    assert user.is_superuser is True
+    assert memberships == 1
+    assert roles == 0
+
+
+def test_control_business_tenant_never_inherits_platform_superuser(test_client, monkeypatch) -> None:
+    subject = f"tenant-super-claim-{uuid.uuid4()}"
+    _enable_control_sso(
+        monkeypatch,
+        [_claims(subject, central_tenant_code="system", central_is_superuser=True)],
+    )
+
+    response = test_client.post("/system/auth/control/exchange", json={"code": "q" * 20})
+
+    assert response.status_code == 200, response.text
+    user, _identity, _memberships, _roles = asyncio.run(_identity_snapshot(subject))
+    assert user.tenant_id == 2
+    assert user.is_superuser is False
+
+
+def test_control_business_tenant_owner_claim_syncs_local_governance_role(test_client, monkeypatch) -> None:
+    subject = f"tenant-owner-{uuid.uuid4()}"
+    _enable_control_sso(
+        monkeypatch,
+        [_claims(subject, central_tenant_role="owner")],
+    )
+
+    response = test_client.post("/system/auth/control/exchange", json={"code": "o" * 20})
+
+    assert response.status_code == 200, response.text
+    user, _identity, memberships, roles = asyncio.run(_identity_snapshot(subject))
+    assert user.is_superuser is False
+    assert memberships == 1
+    assert roles == 1
+    assert asyncio.run(_membership_snapshot(subject)) == [(2, "owner", 1)]
+    assert asyncio.run(_tenant_role_codes(subject)) == ["owner"]
+    assert "module_platform:workspace:query" in asyncio.run(_tenant_permissions(subject))
+
+
+def test_control_business_tenant_admin_claim_heals_existing_member(test_client, monkeypatch) -> None:
+    subject = f"tenant-admin-{uuid.uuid4()}"
+    _enable_control_sso(
+        monkeypatch,
+        [
+            _claims(subject),
+            _claims(subject, central_tenant_role="admin"),
+        ],
+    )
+
+    first_response = test_client.post("/system/auth/control/exchange", json={"code": "m" * 20})
+    assert first_response.status_code == 200, first_response.text
+    assert asyncio.run(_membership_snapshot(subject)) == [(2, "member", 1)]
+    assert asyncio.run(_tenant_role_codes(subject)) == []
+
+    second_response = test_client.post("/system/auth/control/exchange", json={"code": "n" * 20})
+
+    assert second_response.status_code == 200, second_response.text
+    user, _identity, memberships, roles = asyncio.run(_identity_snapshot(subject))
+    assert user.is_superuser is False
+    assert memberships == 1
+    assert roles == 1
+    assert asyncio.run(_membership_snapshot(subject)) == [(2, "admin", 1)]
+    assert asyncio.run(_tenant_role_codes(subject)) == ["admin"]
+    assert "module_platform:workspace:query" in asyncio.run(_tenant_permissions(subject))
 
 
 def test_control_exchange_reuses_identity_and_updates_profile(test_client, monkeypatch) -> None:

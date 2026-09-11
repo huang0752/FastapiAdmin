@@ -180,6 +180,18 @@ async def remove_tenant_user_controller(
     return SuccessResponse(msg="移除用户成功")
 
 @TenantRouter.get(
+    "/current/brand-config",
+    summary="读取当前登录租户品牌",
+    response_model=ResponseSchema[list[TenantConfigOutSchema]],
+)
+async def get_current_brand_config_controller(
+    auth: Annotated[AuthSchema, Depends(AuthPermission())],
+) -> JSONResponse:
+    result = await TenantService(auth).get_self_brand_config_items()
+    return SuccessResponse(data=result, msg="获取当前租户品牌成功")
+
+
+@TenantRouter.get(
     "/brand/config",
     summary="获取当前租户自助品牌配置",
     response_model=ResponseSchema[list[TenantConfigOutSchema]],

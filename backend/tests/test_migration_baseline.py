@@ -10,10 +10,25 @@ from pathlib import Path
 from uuid import uuid4
 
 import psycopg
+import pytest
 from psycopg import sql
+from test_control_upgrade_paths import isolated_postgres as isolated_postgres
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 DATABASE_PREFIX = "fastapiadmin_migration_gate_"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_migration_environment(request, monkeypatch):
+    """Run every gate against a disposable cluster, never application databases."""
+    cluster = request.getfixturevalue("isolated_postgres")
+    for key, value in {
+        "HOST": cluster["host"],
+        "PORT": str(cluster["port"]),
+        "USER": cluster["user"],
+        "PASSWORD": "test",
+    }.items():
+        monkeypatch.setenv(f"MIGRATION_TEST_DATABASE_{key}", value)
 
 
 def _database_environment(database_name: str) -> dict[str, str]:
@@ -117,7 +132,7 @@ def test_empty_postgresql_database_can_upgrade_and_downgrade() -> None:
             )
             tenant_columns = {row[0] for row in cursor.fetchall()}
         assert {"platform_tenant", "platform_package", "platform_site", "sys_user"} <= tables
-        assert "sys_federated_identity" in tables
+        assert {"sys_federated_identity", "sys_federated_access_entitlement", "sys_federated_access_event", "control_user_entitlement_ticket"} <= tables
         assert "platform_federated_tenant" in tables
         assert {"auth_source", "password_login_enabled"} <= user_columns
         assert "unified_social_credit_code" in tenant_columns

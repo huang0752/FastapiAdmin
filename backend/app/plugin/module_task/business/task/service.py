@@ -98,6 +98,57 @@ class BusinessTaskService:
         current = await self.crud.get_or_404(id=id)
         if not current.handler_code:
             raise CustomException(msg="历史任务没有可重投处理器", status_code=status.HTTP_409_CONFLICT)
+        if current.status == "failed" and current.error_code == "DOMAIN_CLOSURE_PENDING":
+            if current.handler_code == "control.user_entitlement_sync":
+                user = self.auth.user
+                if user is None:
+                    raise CustomException(
+                        msg="用户授权收口缺少操作人",
+                        code=10403,
+                        status_code=status.HTTP_403_FORBIDDEN,
+                    )
+                if not user.is_superuser:
+                    from app.core.dependencies import resolve_effective_permissions
+
+                    permissions = await resolve_effective_permissions(
+                        self.auth,
+                        bypass_role_grants=False,
+                        require_active_package=True,
+                    )
+                    if "module_control:user_grant:retry" not in permissions:
+                        raise CustomException(
+                            msg="缺少用户授权重试权限",
+                            code=10403,
+                            status_code=status.HTTP_403_FORBIDDEN,
+                        )
+            if self.auth.site_id is None:
+                raise CustomException(
+                    msg="站点上下文缺失",
+                    code=10403,
+                    status_code=status.HTTP_403_FORBIDDEN,
+                )
+            from app.core.database import async_db_session
+            from app.plugin.module_task.runtime.executor import BusinessTaskExecutor
+            from app.plugin.module_task.runtime.loader import load_business_task_modules
+
+            load_business_task_modules()
+            task_id = current.id
+            task_tenant_id = current.tenant_id
+            await self.auth.db.commit()
+            outcome = await BusinessTaskExecutor(
+                session_factory=async_db_session,
+            ).reconcile_domain_closure(
+                task_id,
+                tenant_id=task_tenant_id,
+                site_id=self.auth.site_id,
+            )
+            if outcome.status == "closure_pending":
+                raise CustomException(
+                    msg="业务失败状态仍未收口",
+                    status_code=status.HTTP_409_CONFLICT,
+                )
+            await self.auth.db.refresh(current)
+            return BusinessTaskActionOutSchema.model_validate(current)
         from app.plugin.module_task.runtime.dispatcher import BusinessTaskDispatcher
 
         try:

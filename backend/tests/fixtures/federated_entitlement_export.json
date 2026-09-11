@@ -1,0 +1,105 @@
+{
+  "product": "alpha",
+  "read_only": true,
+  "batch_size": 100,
+  "after_id": 0,
+  "next_after_id": 4,
+  "entitlement_count": 4,
+  "entitlements": [
+    {
+      "application_code": "alpha",
+      "tenant_code": "tenant-owner",
+      "central_user_uuid": "11111111-1111-4111-8111-111111111111",
+      "active": true,
+      "applied_version": 3,
+      "role_codes": [
+        "GLOBAL_OWNER_7f3a9c21",
+        "owner"
+      ],
+      "user_role_effective_menu_count": 0,
+      "effective_business_menu_count": 0,
+      "admin_permission_count": 1,
+      "admin_permissions": [
+        "module_system:user:query"
+      ],
+      "principal_role": "owner",
+      "is_superuser": false,
+      "platform_global_role_count": 1,
+      "platform_global_role_codes": [
+        "GLOBAL_OWNER_7f3a9c21"
+      ],
+      "default_role_mode": "declared",
+      "access_state": "blocked"
+    },
+    {
+      "application_code": "alpha",
+      "tenant_code": "tenant-admin",
+      "central_user_uuid": "22222222-2222-4222-8222-222222222222",
+      "active": true,
+      "applied_version": 2,
+      "role_codes": [
+        "GLOBAL_ADMIN_b8214d6e",
+        "admin"
+      ],
+      "user_role_effective_menu_count": 0,
+      "effective_business_menu_count": 0,
+      "admin_permission_count": 1,
+      "admin_permissions": [
+        "module_system:user:query"
+      ],
+      "principal_role": "admin",
+      "is_superuser": false,
+      "platform_global_role_count": 1,
+      "platform_global_role_codes": [
+        "GLOBAL_ADMIN_b8214d6e"
+      ],
+      "default_role_mode": "declared",
+      "access_state": "blocked"
+    },
+    {
+      "application_code": "alpha",
+      "tenant_code": "tenant-member",
+      "central_user_uuid": "33333333-3333-4333-8333-333333333333",
+      "active": true,
+      "applied_version": 4,
+      "role_codes": [
+        "USER"
+      ],
+      "user_role_effective_menu_count": 4,
+      "effective_business_menu_count": 4,
+      "admin_permission_count": 0,
+      "admin_permissions": [],
+      "principal_role": "member",
+      "is_superuser": false,
+      "platform_global_role_count": 0,
+      "platform_global_role_codes": [],
+      "default_role_mode": "declared",
+      "access_state": "ready"
+    },
+    {
+      "application_code": "alpha",
+      "tenant_code": "tenant-member-superuser",
+      "central_user_uuid": "44444444-4444-4444-8444-444444444444",
+      "active": true,
+      "applied_version": 1,
+      "role_codes": [
+        "PLATFORM_GLOBAL",
+        "USER"
+      ],
+      "user_role_effective_menu_count": 4,
+      "effective_business_menu_count": 4,
+      "admin_permission_count": 1,
+      "admin_permissions": [
+        "module_system:user:query"
+      ],
+      "principal_role": "member",
+      "is_superuser": true,
+      "platform_global_role_count": 1,
+      "platform_global_role_codes": [
+        "PLATFORM_GLOBAL"
+      ],
+      "default_role_mode": "declared",
+      "access_state": "blocked"
+    }
+  ]
+}

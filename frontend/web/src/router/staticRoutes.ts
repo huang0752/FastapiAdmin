@@ -12,10 +12,7 @@ import { defineComponent, h, onMounted, ref } from "vue";
 import type { RouteRecordRaw } from "vue-router";
 import { RouterView, useRoute } from "vue-router";
 import { $t } from "@/locales";
-import {
-  defaultAssemblySummary,
-  type AssemblySummary,
-} from "@/config/assembly/default";
+import { defaultAssemblySummary, type AssemblySummary } from "@/config/assembly/default";
 import { shouldIncludeShellRouteGroup } from "@/router/filterByAssembly";
 
 /** 首页 / 仪表盘父级 meta（侧栏、静态子路由共用） */
@@ -350,7 +347,13 @@ export const staticRoutes: AppRouteRecordRaw[] = [
   {
     path: "/certificate/verify/:token",
     name: "PublicUsageCertificateVerify",
-    meta: { hidden: true, isHideTab: true, title: "软件使用证明查验", routeGroup: "auth", anonymousPublic: true },
+    meta: {
+      hidden: true,
+      isHideTab: true,
+      title: "软件使用证明查验",
+      routeGroup: "auth",
+      anonymousPublic: true,
+    },
     component: () => import("@views/public/usage_certificate/index.vue"),
   },
   {
@@ -363,16 +366,19 @@ export const staticRoutes: AppRouteRecordRaw[] = [
       title: "统一登录",
       routeGroup: "auth",
       publicAuthCallback: true,
+      skipDynamicRouteInit: true,
     },
   },
   {
-    path: "/auth/control/waiting",
+    path: "/workspace/personal",
+    alias: "/auth/control/waiting",
     name: "ControlSsoWaiting",
     component: () => import("@/views/module_system/auth/control-waiting/index.vue"),
     meta: {
       hidden: true,
       isHideTab: true,
-      title: "等待管理员授权",
+      title: "个人工作区",
+      skipDynamicRouteInit: true,
       routeGroup: "auth",
     },
   },

@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 from fastapi import UploadFile, status
 from redis.asyncio.client import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.v1.module_platform.email.service import EmailSendService
 from app.api.v1.module_platform.menu.crud import MenuCRUD
@@ -14,6 +14,10 @@ from app.api.v1.module_platform.menu.schema import MenuOutSchema
 from app.api.v1.module_platform.tenant.model import TenantUserModel
 from app.api.v1.module_platform.tenant.service import TenantService
 from app.api.v1.module_system.dept.crud import DeptCRUD
+from app.api.v1.module_system.federated_access.tenant_role_lock import (
+    lock_tenant_membership_users,
+    lock_tenant_role_assignment,
+)
 from app.api.v1.module_system.position.crud import PositionCRUD
 from app.api.v1.module_system.role.crud import RoleCRUD
 from app.core.assembly import filter_menu_tree_by_assembly
@@ -241,6 +245,23 @@ class UserService:
             await UserCRUD(self.auth).set_user_positions(user_ids=[new_user.id], position_ids=data.position_ids)
         return await self.detail(new_user.id)
 
+    async def _ensure_global_status_mutation_scope(self, user_ids: list[int]) -> None:
+        """Tenant admins may remove membership, not disable a shared identity globally."""
+        from app.core.control_features import is_control_provider
+        if not user_ids or not is_control_provider() or self.auth.is_platform_global:
+            return
+        other_membership = await self.auth.db.scalar(
+            select(TenantUserModel.id).where(
+                TenantUserModel.user_id.in_(user_ids),
+                TenantUserModel.tenant_id != self.auth.tenant_id,
+            ).limit(1)
+        )
+        if other_membership is not None:
+            raise CustomException(
+                msg="用户属于多个租户，不能修改全局账号状态；请移除当前租户成员或撤销产品权限",
+                status_code=409,
+            )
+
     async def update(self, id: int, data: UserUpdateSchema) -> UserOutSchema:
         if not data.username:
             raise CustomException(msg="账号不能为空")
@@ -249,6 +270,8 @@ class UserService:
         if user.is_superuser:
             raise CustomException(msg="超级管理员不允许修改")
         self._reject_protected_identity_changes(user, data)
+        if data.status is not None and data.status != user.status:
+            await self._ensure_global_status_mutation_scope([id])
 
         exist_user = await UserCRUD(self.auth).get(username=data.username)
         if exist_user and exist_user.id != id:
@@ -274,15 +297,19 @@ class UserService:
             exclude={"role_ids", "position_ids", *AUTH_CONTROL_FIELDS},
         )
         new_user = await UserCRUD(self.auth).update(id=id, data=user_payload)
+        if user_payload.get("status") == 1:
+            from app.api.v1.module_control.user_entitlement.lifecycle import revoke_control_access
+            await revoke_control_access(self.auth, user_ids=[id])
 
         if "role_ids" in fields_set:
             role_ids = data.role_ids or []
             if role_ids:
                 roles = await RoleCRUD(self.auth).get_list(search={"id": ("in", role_ids)})
                 if len(roles) != len(role_ids):
-                    raise CustomException(msg="更新失败，部分角色不存在")
+                    raise CustomException(msg="更新失败，部分角色不存在", status_code=400)
                 if not all(role.status == 0 for role in roles):
                     raise CustomException(msg="更新失败，部分角色已被禁用")
+                UserCRUD.ensure_roles_assignable(roles)
             await UserCRUD(self.auth).set_user_roles(user_ids=[id], role_ids=role_ids)
 
         if "position_ids" in fields_set:
@@ -300,22 +327,113 @@ class UserService:
     async def delete(self, ids: list[int]) -> None:
         if len(ids) < 1:
             raise CustomException(msg="删除失败，删除对象不能为空")
-        users = await UserCRUD(self.auth).get_list(search={"id": ("in", ids)})
+        tenant_id = self.auth.tenant_id
+        if tenant_id is None:
+            raise CustomException(msg="租户上下文缺失", status_code=403)
+        user_ids = list(dict.fromkeys(ids))
+        async with lock_tenant_role_assignment(self.auth.db, tenant_id):
+            async with lock_tenant_membership_users(
+                self.auth.db,
+                user_ids,
+            ) as users:
+                await self._delete_locked_users(
+                    user_ids=user_ids,
+                    users=users,
+                    tenant_id=tenant_id,
+                )
+
+    async def _delete_locked_users(
+        self,
+        *,
+        user_ids: list[int],
+        users: list[UserModel],
+        tenant_id: int,
+    ) -> None:
+        """Validate and delete users while tenant and user locks are held."""
         user_map = {u.id: u for u in users}
-        for uid in ids:
+        for uid in user_ids:
             user = user_map.get(uid)
-            if not user:
+            if (
+                user is None
+                or user.is_deleted
+                or user.tenant_id != tenant_id
+            ):
                 raise CustomException(msg="该数据不存在")
             if user.is_superuser:
                 raise CustomException(msg="超级管理员不能删除")
+            if user.auth_source == "federated":
+                raise CustomException(
+                    msg="统一登录用户请从中控撤权或管理",
+                    status_code=400,
+                )
             if user.status == 0:
                 raise CustomException(msg="用户已启用,不能删除")
             if self.auth.user and self.auth.user.id == uid:
                 raise CustomException(msg="不能删除当前登陆用户")
 
-        await UserCRUD(self.auth).set_user_roles(user_ids=ids, role_ids=[])
-        await UserCRUD(self.auth).set_user_positions(user_ids=ids, position_ids=[])
-        await UserCRUD(self.auth).delete(ids=ids)
+        memberships = (
+            await self.auth.db.execute(
+                select(TenantUserModel).where(
+                    TenantUserModel.user_id.in_(user_ids)
+                )
+            )
+        ).scalars().all()
+        memberships_by_user: dict[int, list[TenantUserModel]] = {
+            user_id: [] for user_id in user_ids
+        }
+        for membership in memberships:
+            memberships_by_user[membership.user_id].append(membership)
+
+        current_memberships: list[TenantUserModel] = []
+        for user_id in user_ids:
+            user_memberships = memberships_by_user[user_id]
+            if any(
+                membership.tenant_id != tenant_id
+                for membership in user_memberships
+            ):
+                raise CustomException(
+                    msg="用户存在其他租户成员关系，"
+                    "请先通过租户成员管理解除",
+                    status_code=409,
+                )
+            current = [
+                membership
+                for membership in user_memberships
+                if membership.tenant_id == tenant_id
+            ]
+            if len(current) != 1:
+                raise CustomException(
+                    msg="用户未唯一关联当前租户，"
+                    "请先通过租户成员管理处理",
+                    status_code=409,
+                )
+            current_memberships.append(current[0])
+
+        deleting_owner_count = sum(
+            membership.role == "owner"
+            for membership in current_memberships
+        )
+        if deleting_owner_count:
+            owner_count = (
+                await self.auth.db.execute(
+                    select(func.count())
+                    .select_from(TenantUserModel)
+                    .where(
+                        TenantUserModel.tenant_id == tenant_id,
+                        TenantUserModel.role == "owner",
+                    )
+                )
+            ).scalar_one()
+            if owner_count <= deleting_owner_count:
+                raise CustomException(
+                    msg="租户至少需要保留一个拥有者(owner)"
+                )
+
+        user_crud = UserCRUD(self.auth)
+        from app.api.v1.module_control.user_entitlement.lifecycle import revoke_control_access
+        await revoke_control_access(self.auth, user_ids=user_ids)
+        await user_crud.unbind_users_for_delete(user_ids=user_ids)
+        await user_crud.delete(ids=user_ids)
 
     async def current_info(self) -> UserOutSchema:
         if not self.auth.user or not self.auth.user.id:
@@ -325,6 +443,7 @@ class UserService:
         # UserCRUD，会被当前租户条件过滤为 None，导致当前用户信息序列化失败。
         user = self.auth.user
         user_dict = UserOutSchema.model_validate(user)
+        user_dict.session_tenant_id = self.auth.tenant_id
         dept = getattr(user, "dept", None)
         if dept:
             user_dict.dept_name = dept.name
@@ -379,11 +498,18 @@ class UserService:
         return UserOutSchema.model_validate(new_user)
 
     async def set_available(self, data: BatchSetAvailable) -> None:
+        changed_ids = []
         for mid in data.ids:
             user = await UserCRUD(self.auth).get_or_404(id=mid)
             if user.is_superuser:
                 raise CustomException(msg="超级管理员状态不能修改")
+            if user.status != data.status:
+                changed_ids.append(mid)
+        await self._ensure_global_status_mutation_scope(changed_ids)
         await UserCRUD(self.auth).set(ids=data.ids, status=data.status)
+        if data.status == 1:
+            from app.api.v1.module_control.user_entitlement.lifecycle import revoke_control_access
+            await revoke_control_access(self.auth, user_ids=data.ids)
 
     async def change_password(self, data: UserChangePasswordSchema) -> UserOutSchema:
         if not self.auth.user or not self.auth.user.id:

@@ -351,6 +351,12 @@ class PackageService:
                 available_ids,
                 owner_menu_ids=available_ids,
             )
+            from app.api.v1.module_system.federated_access.default_role import (
+                DefaultUserRoleService,
+            )
+
+            if DefaultUserRoleService.is_applicable():
+                await DefaultUserRoleService(self.auth.db).ensure(tenant_id)
             self.invalidate_tenant_menu_cache(tenant_id, self.auth)
         logger.info(f"套餐[{package_id}]菜单权限已设置, count={len(resolved_ids)}, tenants={len(tenant_ids)}")
 

@@ -100,6 +100,7 @@ class RoleOutSchema(RoleCreateSchema, BaseSchema, UserBySchema, TenantBySchema):
 
     model_config = ConfigDict(from_attributes=True)
 
+    is_system: bool = Field(default=False, description="是否系统保留角色（只读）")
     menus: list[MenuOutSchema] = Field(default_factory=list, description="角色菜单列表")
     depts: list[DeptOutSchema] = Field(default_factory=list, description="角色部门列表")
 

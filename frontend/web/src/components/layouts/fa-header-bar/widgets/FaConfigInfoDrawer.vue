@@ -8,7 +8,10 @@
     @close="onDrawerClosed"
   >
     <ElTabs v-model="activeTabRef" type="border-card">
-      <ElTabPane label="AI 模型" name="aiModel">
+      <ElTabPane v-if="canManageTenantAi" label="租户 AI" name="tenantAi" lazy>
+        <FaAiModelConfigPanel scope="tenant" />
+      </ElTabPane>
+      <ElTabPane label="个人 AI" name="aiModel" lazy>
         <FaAiModelConfigPanel />
       </ElTabPane>
       <ElTabPane label="接口白名单" name="apiWhitelist">
@@ -198,7 +201,7 @@
     <template #footer>
       <ElButton @click="handleCloseDialog">取消</ElButton>
       <ElButton
-        v-if="activeTabRef !== 'aiModel'"
+        v-if="!['aiModel', 'tenantAi'].includes(activeTabRef)"
         v-hasPerm="['module_system:config:update']"
         type="primary"
         :disabled="!hasChanges"
@@ -211,13 +214,16 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, reactive, onMounted, computed } from "vue";
+import { ref, reactive, onMounted, computed, watch } from "vue";
 import ParamsAPI, { type ConfigTable } from "@/api/module_system/params";
 import { useAppStore, useConfigStore } from "@stores";
 import { useI18n } from "vue-i18n";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { DeviceEnum } from "@/enums/settings/device.enum";
 import FaAiModelConfigPanel from "@/views/module_ai/chat/components/FaAiModelConfigPanel.vue";
+
+import { TenantAiConfigAPI } from "@/api/module_ai/chat";
+const canManageTenantAi = ref(false);
 
 defineOptions({ name: "FaConfigInfoDrawer" });
 
@@ -269,6 +275,23 @@ const drawerVisible = computed({
   get: () => props.modelValue,
   set: (val: boolean) => emit("update:modelValue", val),
 });
+
+let capabilityRequest = 0;
+watch(
+  () => props.modelValue,
+  async (visible) => {
+    const current = ++capabilityRequest;
+    canManageTenantAi.value = false;
+    if (!visible) return;
+    try {
+      const result = await TenantAiConfigAPI.capabilities();
+      if (current === capabilityRequest) canManageTenantAi.value = result.data.data.can_manage;
+    } catch {
+      /* 权限或会话不可用时不展示管理入口 */
+    }
+  },
+  { immediate: true }
+);
 
 // 配置状态管理
 const configState = reactive<ConfigTable>({

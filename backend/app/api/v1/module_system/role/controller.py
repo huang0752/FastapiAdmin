@@ -25,6 +25,14 @@ RoleRouter = APIRouter(route_class=OperationLogRoute, prefix="/role", tags=["系
 
 _ROLE_NS = "role"
 
+
+@RoleRouter.get("/assignable-menus", summary="查询角色可分配菜单", response_model=ResponseSchema[list[dict]])
+async def get_assignable_role_menus(
+    auth: Annotated[AuthSchema, Depends(AuthPermission(["module_system:role:permission"]))],
+) -> JSONResponse:
+    return SuccessResponse(data=await RoleService(auth).assignable_menus(), msg="查询可分配菜单成功")
+
+
 @RoleRouter.get(
     "/list",
     summary="查询角色",

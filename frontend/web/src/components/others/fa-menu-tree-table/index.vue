@@ -22,7 +22,7 @@
       v-loading="loading"
       :data="tableData"
       row-key="id"
-      :tree-props="{ children: 'children', hasChildren: 'hasChildren' }"
+      :tree-props="{ children: 'children', hasChildren: 'hasChildren', checkStrictly: true }"
       :default-expand-all="true"
       class="flex-1 min-h-0"
       @selection-change="onSelectionChange"

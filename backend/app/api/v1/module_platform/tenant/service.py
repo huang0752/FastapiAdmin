@@ -10,6 +10,10 @@ from redis.asyncio.client import Redis
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.module_system.federated_access.tenant_role_lock import (
+    lock_tenant_membership_users,
+    lock_tenant_role_assignment,
+)
 from app.common.enums import RedisInitKeyConfig
 from app.core.base_schema import AuthSchema
 from app.core.dependencies import require_platform_admin
@@ -271,6 +275,7 @@ class TenantService:
                 tenant_id=tenant_id,
                 order=order,
                 status=0,
+                is_system=True,
                 data_scope=data_scope,
                 description=description,
             )
@@ -278,6 +283,7 @@ class TenantService:
             await self.auth.db.flush()
         else:
             role.status = 0
+            role.is_system = True
             role.data_scope = data_scope
 
         self.auth.db.add(UserRolesModel(user_id=user_id, role_id=role.id))
@@ -296,6 +302,38 @@ class TenantService:
             for menu_id in available_ids - current_ids:
                 self.auth.db.add(RoleMenusModel(role_id=role.id, menu_id=menu_id))
         await self.auth.db.flush()
+
+    @staticmethod
+    async def sync_federated_tenant_manager_role(
+        db: AsyncSession,
+        tenant_id: int,
+        user_id: int,
+        role_code: str,
+    ) -> None:
+        """把中控 owner/admin 身份同步为产品租户治理角色。"""
+        if role_code not in {"owner", "admin"}:
+            raise ValueError("仅允许同步 owner/admin 租户治理角色")
+
+        membership = (
+            await db.execute(
+                sa.select(TenantUserModel)
+                .where(
+                    TenantUserModel.tenant_id == tenant_id,
+                    TenantUserModel.user_id == user_id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if membership is None:
+            raise CustomException(msg="联邦用户尚未加入目标租户", status_code=409)
+
+        membership.role = role_code
+        auth = AuthSchema(db=db, tenant_id=tenant_id, check_data_scope=False)
+        await TenantService(auth)._replace_tenant_member_rbac(tenant_id, user_id, role_code)
+
+        from app.api.v1.module_platform.package.service import PackageService
+
+        PackageService.invalidate_tenant_menu_cache(tenant_id, auth)
 
     async def _remove_tenant_member_rbac(self, tenant_id: int, user_id: int) -> None:
         """撤销用户在指定租户内的全部角色，不影响其他租户。"""
@@ -369,28 +407,35 @@ class TenantService:
 
         if self.auth.db is None:
             raise CustomException(msg="数据库会话不存在")
-        plan = await self.plan_package_change(tenant_id, new_package_id)
-        tenant = await self.auth.db.get(TenantModel, tenant_id)
-        if not tenant:
-            raise CustomException(msg="该数据不存在")
+        async with lock_tenant_role_assignment(self.auth.db, tenant_id):
+            plan = await self.plan_package_change(tenant_id, new_package_id)
+            tenant = await self.auth.db.get(TenantModel, tenant_id)
+            if not tenant:
+                raise CustomException(msg="该数据不存在")
 
-        tenant.package_id = new_package_id
-        await PackageService.sync_tenant_plugins(
-            self.auth.db,
-            tenant_id,
-            new_package_id,
-        )
-        await PackageService.sync_tenant_role_menus(
-            self.auth.db,
-            tenant_id,
-            plan.final_menu_ids,
-            owner_menu_ids=plan.final_menu_ids,
-        )
-        PackageService.invalidate_tenant_menu_cache(tenant_id, self.auth)
-        from app.core.http_limit import TenantPackageRateLimiter
+            tenant.package_id = new_package_id
+            await PackageService.sync_tenant_plugins(
+                self.auth.db,
+                tenant_id,
+                new_package_id,
+            )
+            await PackageService.sync_tenant_role_menus(
+                self.auth.db,
+                tenant_id,
+                plan.final_menu_ids,
+                owner_menu_ids=plan.final_menu_ids,
+            )
+            from app.api.v1.module_system.federated_access.default_role import (
+                DefaultUserRoleService,
+            )
 
-        TenantPackageRateLimiter.clear_cache()
-        await self.auth.db.flush()
+            if DefaultUserRoleService.is_applicable():
+                await DefaultUserRoleService(self.auth.db).ensure(tenant_id)
+            PackageService.invalidate_tenant_menu_cache(tenant_id, self.auth)
+            from app.core.http_limit import TenantPackageRateLimiter
+
+            TenantPackageRateLimiter.clear_cache()
+            await self.auth.db.flush()
         logger.info(
             f"租户[{tenant_id}]套餐变更：package_id={new_package_id}, "
             f"available_menus={len(plan.final_menu_ids)}"
@@ -450,6 +495,7 @@ class TenantService:
                 tenant_id=tenant_id,
                 order=1,
                 status=0,
+                is_system=True,
                 data_scope=4,
                 description="租户 owner 角色",
             )
@@ -457,6 +503,7 @@ class TenantService:
             await db.flush()
         else:
             owner_role.status = 0
+            owner_role.is_system = True
             owner_role.data_scope = 4
 
         user_role = (
@@ -598,7 +645,7 @@ class TenantService:
         *,
         preserve_integrity_error: bool = False,
     ) -> TenantModel:
-        """只创建租户记录；调用方负责在同一外层事务中装配身份和权限。"""
+        """创建租户记录并装配产品内置角色；调用方继续装配身份。"""
         from app.api.v1.module_platform.package.model import PackageModel
         from app.api.v1.module_platform.site.model import SiteModel
 
@@ -632,21 +679,29 @@ class TenantService:
 
         if not preserve_integrity_error:
             try:
-                return await TenantCRUD(self.auth).create(data=tenant_values)
+                tenant_obj = await TenantCRUD(self.auth).create(data=tenant_values)
             except CustomException as exc:
                 self._raise_stable_uscc_conflict(exc)
+        else:
+            tenant_obj = TenantModel(**tenant_values)
+            self.auth.db.add(tenant_obj)
+            try:
+                await self.auth.db.flush()
+            except IntegrityError as exc:
+                if self._is_uscc_unique_conflict(exc):
+                    raise CustomException(
+                        msg="统一社会信用代码在当前站点已存在",
+                        status_code=409,
+                    ) from exc
+                raise
 
-        tenant_obj = TenantModel(**tenant_values)
-        self.auth.db.add(tenant_obj)
-        try:
-            await self.auth.db.flush()
-        except IntegrityError as exc:
-            if self._is_uscc_unique_conflict(exc):
-                raise CustomException(
-                    msg="统一社会信用代码在当前站点已存在",
-                    status_code=409,
-                ) from exc
-            raise
+        if tenant_obj.package_id is not None:
+            from app.api.v1.module_system.federated_access.default_role import (
+                DefaultUserRoleService,
+            )
+
+            if DefaultUserRoleService.is_applicable():
+                await DefaultUserRoleService(self.auth.db).ensure(tenant_obj.id)
         return tenant_obj
 
     @require_platform_admin
@@ -775,6 +830,9 @@ class TenantService:
         if data.status != TenantStatus.ACTIVE and 1 in data.ids:
             raise CustomException(msg="系统租户必须保持正常状态")
         await TenantCRUD(self.auth).set(ids=data.ids, status=data.status)
+        if data.status not in (TenantStatus.ACTIVE, TenantStatus.GRACE):
+            from app.api.v1.module_control.user_entitlement.lifecycle import revoke_control_access
+            await revoke_control_access(self.auth, tenant_ids=data.ids)
 
     @require_platform_admin
     async def toggle_status(self, id: int) -> None:
@@ -798,6 +856,9 @@ class TenantService:
             else TenantStatus.ACTIVE
         )
         await TenantCRUD(self.auth).set(ids=[id], status=new_status)
+        if new_status == TenantStatus.SUSPENDED:
+            from app.api.v1.module_control.user_entitlement.lifecycle import revoke_control_access
+            await revoke_control_access(self.auth, tenant_ids=[id])
 
     @require_platform_admin
     async def get_tenant_users(self, tenant_id: int) -> list[TenantUserOutSchema]:
@@ -843,63 +904,75 @@ class TenantService:
         返回:
         - None
         """
-        # 验证租户存在
-        tenant = await TenantCRUD(self.auth).get(id=tenant_id)
-        if not tenant:
-            raise CustomException(msg="该数据不存在")
+        async with lock_tenant_role_assignment(self.auth.db, tenant_id):
+            async with lock_tenant_membership_users(
+                self.auth.db,
+                [data.user_id],
+            ) as users:
+                tenant = await TenantCRUD(self.auth).get(id=tenant_id)
+                if not tenant:
+                    raise CustomException(msg="该数据不存在")
+                user = next(
+                    (item for item in users if item.id == data.user_id),
+                    None,
+                )
+                if user is None:
+                    raise CustomException(msg="该数据不存在")
+                if user.is_deleted:
+                    raise CustomException(
+                        msg="该用户已删除，不能添加租户成员关系",
+                        status_code=409,
+                    )
 
-        # 验证用户存在
-        from app.api.v1.module_system.user.crud import UserCRUD
+                membership = (
+                    await self.auth.db.execute(
+                        sa.select(TenantUserModel)
+                        .where(
+                            TenantUserModel.user_id == data.user_id,
+                            TenantUserModel.tenant_id == tenant_id,
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if membership is not None:
+                    raise CustomException(msg="该用户已关联此租户")
 
-        user = await UserCRUD(self.auth).get(id=data.user_id)
-        if not user:
-            raise CustomException(msg="该数据不存在")
+                if data.is_default == 1:
+                    await self.auth.db.execute(
+                        sa.update(TenantUserModel)
+                        .where(TenantUserModel.user_id == data.user_id)
+                        .values(is_default=0)
+                    )
+                elif data.is_default == 0:
+                    count = (
+                        await self.auth.db.execute(
+                            sa.select(sa.func.count())
+                            .select_from(TenantUserModel)
+                            .where(TenantUserModel.user_id == data.user_id)
+                        )
+                    ).scalar_one()
+                    if count == 0:
+                        data.is_default = 1
 
-        # 检查是否已关联
-        from sqlalchemy import select
+                tu = TenantUserModel(
+                    user_id=data.user_id,
+                    tenant_id=tenant_id,
+                    role=data.role,
+                    is_default=data.is_default,
+                    create_time=datetime.now(),
+                )
+                self.auth.db.add(tu)
+                await self.auth.db.flush()
+                from app.api.v1.module_system.user.login_identifier import (
+                    sync_user_login_identifiers,
+                )
 
-        exist_stmt = (
-            select(TenantUserModel)
-            .where(
-                TenantUserModel.user_id == data.user_id,
-                TenantUserModel.tenant_id == tenant_id,
-            )
-            .limit(1)
-        )
-        result = await self.auth.db.execute(exist_stmt)
-        if result.scalar_one_or_none():
-            raise CustomException(msg="该用户已关联此租户")
-
-        # 如果设为默认租户，先取消其他默认
-        if data.is_default == 1:
-            await self.auth.db.execute(
-                sa.update(TenantUserModel).where(TenantUserModel.user_id == data.user_id).values(is_default=0)
-            )
-        elif data.is_default == 0:
-            # 检查是否是该用户的第一个租户关联
-            count_result = await self.auth.db.execute(
-                select(sa.func.count()).select_from(TenantUserModel).where(TenantUserModel.user_id == data.user_id)
-            )
-            count = count_result.scalar()
-            if count == 0:
-                # 第一个租户自动设为默认
-                data.is_default = 1
-
-        from datetime import datetime
-
-        tu = TenantUserModel(
-            user_id=data.user_id,
-            tenant_id=tenant_id,
-            role=data.role,
-            is_default=data.is_default,
-            create_time=datetime.now(),
-        )
-        self.auth.db.add(tu)
-        await self.auth.db.flush()
-        from app.api.v1.module_system.user.login_identifier import sync_user_login_identifiers
-
-        await sync_user_login_identifiers(self.auth.db, user)
-        await self._replace_tenant_member_rbac(tenant_id, data.user_id, data.role)
+                await sync_user_login_identifiers(self.auth.db, user)
+                await self._replace_tenant_member_rbac(
+                    tenant_id,
+                    data.user_id,
+                    data.role,
+                )
 
         logger.info(f"向租户[{tenant.name}]添加用户[{user.username}]成功, role={data.role}")
 
@@ -915,45 +988,58 @@ class TenantService:
         返回:
         - None
         """
-        from sqlalchemy import select
+        async with lock_tenant_role_assignment(self.auth.db, tenant_id):
+            async with lock_tenant_membership_users(
+                self.auth.db,
+                [user_id],
+            ) as users:
+                user = next((item for item in users if item.id == user_id), None)
+                if user is None:
+                    raise CustomException(msg="该数据不存在")
+                if user.is_deleted:
+                    raise CustomException(
+                        msg="该用户已删除，不能修改租户成员关系",
+                        status_code=409,
+                    )
+                tu = (
+                    await self.auth.db.execute(
+                        sa.select(TenantUserModel)
+                        .where(
+                            TenantUserModel.user_id == user_id,
+                            TenantUserModel.tenant_id == tenant_id,
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if tu is None:
+                    raise CustomException(msg="该用户未关联此租户")
 
-        # 查找关联记录
-        exist_stmt = (
-            select(TenantUserModel)
-            .where(
-                TenantUserModel.user_id == user_id,
-                TenantUserModel.tenant_id == tenant_id,
-            )
-            .limit(1)
-        )
-        result = await self.auth.db.execute(exist_stmt)
-        tu = result.scalar_one_or_none()
-        if not tu:
-            raise CustomException(msg="该用户未关联此租户")
+                if tu.role == "owner":
+                    owner_count = (
+                        await self.auth.db.execute(
+                            sa.select(sa.func.count())
+                            .select_from(TenantUserModel)
+                            .where(
+                                TenantUserModel.tenant_id == tenant_id,
+                                TenantUserModel.role == "owner",
+                            )
+                        )
+                    ).scalar_one()
+                    if owner_count <= 1:
+                        raise CustomException(
+                            msg="租户至少需要保留一个拥有者(owner)"
+                        )
 
-        # 不允许移除租户最后一个 owner
-        if tu.role == "owner":
-            count_result = await self.auth.db.execute(
-                select(sa.func.count())
-                .select_from(TenantUserModel)
-                .where(
-                    TenantUserModel.tenant_id == tenant_id,
-                    TenantUserModel.role == "owner",
+                from app.api.v1.module_control.user_entitlement.lifecycle import revoke_control_access
+                await revoke_control_access(self.auth, tenant_ids=[tenant_id], user_ids=[user_id])
+                await self._remove_tenant_member_rbac(tenant_id, user_id)
+                await self.auth.db.delete(tu)
+                await self.auth.db.flush()
+                from app.api.v1.module_system.user.login_identifier import (
+                    sync_user_login_identifiers,
                 )
-            )
-            owner_count = count_result.scalar()
-            if owner_count <= 1:
-                raise CustomException(msg="租户至少需要保留一个拥有者(owner)")
 
-        await self._remove_tenant_member_rbac(tenant_id, user_id)
-        await self.auth.db.delete(tu)
-        await self.auth.db.flush()
-        from app.api.v1.module_system.user.login_identifier import sync_user_login_identifiers
-        from app.api.v1.module_system.user.model import UserModel
-
-        user = await self.auth.db.get(UserModel, user_id)
-        if user is not None:
-            await sync_user_login_identifiers(self.auth.db, user)
+                await sync_user_login_identifiers(self.auth.db, user)
 
         logger.info(f"从租户[{tenant_id}]移除用户[{user_id}]成功")
 

@@ -1,0 +1,10 @@
+[assembly]
+name = "beta"
+application_code = "beta"
+[frontend]
+enabled_route_groups = ["beta", "auth", "home", "system", "platform", "user-profile", "exception"]
+[features]
+flags = { control_sso_client = true, control_tenant_provisioning = true, control_user_access_sync = true, control_user_access_enforcement = true }
+[federation.default_role]
+mode = "declared"
+permission_prefixes = ["module_beta"]

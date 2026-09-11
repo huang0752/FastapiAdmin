@@ -17,6 +17,8 @@ import { redirectToLogin } from "@/utils/auth";
 import { $t } from "@/locales";
 import AuthAPI from "@/api/module_system/auth";
 
+export { loadAllPages } from "./pagination";
+
 // --- 配置常量 -----------------------------------------------------------------
 
 /** 跳过鉴权标记：接口 headers.Authorization 设为该值时不带 token 请求 */
@@ -243,6 +245,7 @@ request.interceptors.response.use(
     }
 
     if (
+      (response.config as ExtendedRequestConfig).showSuccessMessage !== false &&
       response.config.method?.toUpperCase() !== "GET" &&
       !response.config.url?.includes("login") &&
       !response.config.url?.includes("logout")
@@ -253,6 +256,8 @@ request.interceptors.response.use(
     return response;
   },
   async (error: AxiosError<ApiResponse>) => {
+    const showErrorMessage =
+      (error.config as ExtendedRequestConfig | undefined)?.showErrorMessage !== false;
     // ── 网络错误（无响应体） ──
     if (!error.response) {
       let errorMessage = "网络连接异常";
@@ -266,7 +271,7 @@ request.interceptors.response.use(
       }
 
       console.error("网络请求失败:", error);
-      ElMessage.error(errorMessage);
+      if (showErrorMessage) ElMessage.error(errorMessage);
       return Promise.reject(new Error(errorMessage));
     }
 
@@ -279,15 +284,15 @@ request.interceptors.response.use(
         const jsonData: ApiResponse = JSON.parse(text);
 
         if (jsonData.code === ResultEnum.ERROR) {
-          ElMessage.error(jsonData.msg || "请求错误");
+          if (showErrorMessage) ElMessage.error(jsonData.msg || "请求错误");
           return Promise.reject(new Error(jsonData.msg || "请求错误"));
         } else if (jsonData.code === ResultEnum.EXCEPTION) {
-          ElMessage.error(jsonData.msg || "服务异常");
+          if (showErrorMessage) ElMessage.error(jsonData.msg || "服务异常");
           return Promise.reject(new Error(jsonData.msg || "服务异常"));
         }
       } catch (e) {
         console.error("请求异常:", e);
-        ElMessage.error("数据解析失败");
+        if (showErrorMessage) ElMessage.error("数据解析失败");
         return Promise.reject(new Error("数据解析失败"));
       }
     }
@@ -321,11 +326,18 @@ request.interceptors.response.use(
 
       // 首次 401：发起 refresh；后续并发 401 入队等待
       if (!isRefreshing) {
+        const currentRefreshToken = Auth.getRefreshToken();
+        if (!currentRefreshToken) {
+          onRefreshFailed();
+          await redirectToLogin("登录已失效，请重新登录");
+          return Promise.reject(new HttpError("登录已失效，请重新登录", ApiStatus.unauthorized));
+        }
+
         isRefreshing = true;
         try {
           // 直接请求刷新令牌接口，避免动态导入 user.store 造成循环依赖
           const refreshResp = await AuthAPI.refreshToken({
-            refresh_token: Auth.getRefreshToken(),
+            refresh_token: currentRefreshToken,
           });
           const tokenData = refreshResp.data.data;
           const newAccessToken = tokenData?.access_token || "";
@@ -354,18 +366,40 @@ request.interceptors.response.use(
       }
     }
 
+    if (status === 403 && data?.msg?.includes("站点上下文不匹配")) {
+      await redirectToLogin("站点已切换，请重新登录");
+      return Promise.reject(new HttpError(data.msg, ApiStatus.forbidden));
+    }
+
+    if (
+      status === 403 &&
+      data?.code === ResultEnum.UNAUTHORIZED &&
+      !error.config?.url?.includes("/current/info") &&
+      !error.config?.url?.includes("/auth/") &&
+      Auth.getAccessToken()
+    ) {
+      try {
+        const { recoverAuthorization } = await import("./recover-authorization");
+        if (await recoverAuthorization()) {
+          return Promise.reject(new HttpError("权限已更新", ApiStatus.forbidden));
+        }
+      } catch (recoveryError) {
+        console.warn("重新检查权限失败", recoveryError);
+      }
+    }
+
     // ── 业务错误（按 code 分类） ──
     if (data?.code === ResultEnum.ERROR) {
-      ElMessage.error(data.msg || "请求错误");
+      if (showErrorMessage) ElMessage.error(data.msg || "请求错误");
       return Promise.reject(new HttpError(data.msg || "请求错误", ApiStatus.error));
     } else if (data?.code === ResultEnum.UNAUTHORIZED) {
-      ElMessage.error(data.msg || "暂无权限");
+      if (showErrorMessage) ElMessage.error(data.msg || "暂无权限");
       return Promise.reject(new HttpError(data.msg || "请求错误", ApiStatus.unauthorized));
     } else if (data?.code === ResultEnum.EXCEPTION) {
-      ElMessage.error(data.msg || "服务异常");
+      if (showErrorMessage) ElMessage.error(data.msg || "服务异常");
       return Promise.reject(new HttpError(data.msg || "服务异常", ApiStatus.error));
     } else {
-      ElMessage.error("请求处理失败，请稍后重试");
+      if (showErrorMessage) ElMessage.error("请求处理失败，请稍后重试");
       return Promise.reject(new Error("请求处理失败"));
     }
   }

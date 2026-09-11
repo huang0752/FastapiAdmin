@@ -6,6 +6,8 @@ conftest — 模块化 API 接口测试共享 fixture。
 - assert_route: 验证接口路由存在 (status_code != 404)
 """
 
+import fnmatch
+import json
 import os
 import sys
 import tempfile
@@ -49,49 +51,53 @@ settings.CAPTCHA_ENABLE = False  # 测试环境关闭验证码
 _mock_redis_store: dict[bytes, bytes] = {}
 
 
-def _redis_get(name: bytes) -> bytes | None:
-    return _mock_redis_store.get(name)
+def _redis_get(name: bytes | str) -> bytes | None:
+    return _mock_redis_store.get(_redis_bytes(name))
 
 
-async def _redis_set(name: bytes, value: bytes, ex: int | None = None, nx: bool = False) -> bool | None:
+async def _redis_set(name: bytes | str, value: bytes | str, ex: int | None = None, nx: bool = False) -> bool | None:
+    name = _redis_bytes(name)
+    value = _redis_bytes(value)
     if nx and name in _mock_redis_store:
         return None
     _mock_redis_store[name] = value
     return True
 
 
-async def _redis_delete(*names: bytes) -> int:
+async def _redis_delete(*names: bytes | str) -> int:
     count = 0
-    for n in names:
+    for raw_name in names:
+        n = _redis_bytes(raw_name)
         if _mock_redis_store.pop(n, None) is not None:
             count += 1
     return count
 
 
-def _redis_keys(pattern: bytes | None = None) -> list[bytes]:
-    if pattern == b"*" or pattern is None:
+def _redis_keys(pattern: bytes | str | None = None) -> list[bytes]:
+    normalized_pattern = None if pattern is None else _redis_bytes(pattern)
+    if normalized_pattern == b"*" or normalized_pattern is None:
         return list(_mock_redis_store.keys())
-    return [k for k in _mock_redis_store if pattern == b"*" or k.startswith(pattern.replace(b"*", b""))]
+    return [k for k in _mock_redis_store if k.startswith(normalized_pattern.replace(b"*", b""))]
 
 
-def _redis_exists(*names: bytes) -> int:
-    return sum(1 for n in names if n in _mock_redis_store)
+def _redis_exists(*names: bytes | str) -> int:
+    return sum(1 for name in names if _redis_bytes(name) in _mock_redis_store)
 
 
-def _redis_ttl(name: bytes) -> int:
-    return 3600 if name in _mock_redis_store else -2
+def _redis_ttl(name: bytes | str) -> int:
+    return 3600 if _redis_bytes(name) in _mock_redis_store else -2
 
 
-async def _redis_expire(name: bytes, time: int) -> bool:
-    return name in _mock_redis_store
+async def _redis_expire(name: bytes | str, time: int) -> bool:
+    return _redis_bytes(name) in _mock_redis_store
 
 
-async def _redis_flushall( asynchronous: bool = False) -> bool:
+async def _redis_flushall(asynchronous: bool = False) -> bool:
     _mock_redis_store.clear()
     return True
 
 
-async def _redis_flushdb( asynchronous: bool = False) -> bool:
+async def _redis_flushdb(asynchronous: bool = False) -> bool:
     _mock_redis_store.clear()
     return True
 
@@ -115,7 +121,7 @@ async def _redis_hset(name: bytes, key: bytes, value: bytes) -> int:
 
 async def _redis_hgetall(name: bytes) -> dict[bytes, bytes]:
     prefix = name + b":"
-    return {k[len(prefix):]: v for k, v in _mock_redis_store.items() if k.startswith(prefix)}
+    return {k[len(prefix) :]: v for k, v in _mock_redis_store.items() if k.startswith(prefix)}
 
 
 async def _redis_hdel(name: bytes, *keys: bytes) -> int:
@@ -126,12 +132,185 @@ async def _redis_hdel(name: bytes, *keys: bytes) -> int:
     return count
 
 
+async def _redis_sadd(name: bytes | str, *values: bytes | str) -> int:
+    prefix = (name if isinstance(name, bytes) else str(name).encode()) + b":"
+    count = 0
+    for value in values:
+        member = value if isinstance(value, bytes) else str(value).encode()
+        key = prefix + member
+        if key not in _mock_redis_store:
+            count += 1
+        _mock_redis_store[key] = b"1"
+    return count
+
+
+async def _redis_srem(name: bytes | str, *values: bytes | str) -> int:
+    prefix = (name if isinstance(name, bytes) else str(name).encode()) + b":"
+    count = 0
+    for value in values:
+        member = value if isinstance(value, bytes) else str(value).encode()
+        if _mock_redis_store.pop(prefix + member, None) is not None:
+            count += 1
+    return count
+
+
+async def _redis_smembers(name: bytes | str) -> set[bytes]:
+    prefix = (name if isinstance(name, bytes) else str(name).encode()) + b":"
+    return {normalized_key[len(prefix) :] for key in _mock_redis_store if (normalized_key := key if isinstance(key, bytes) else str(key).encode()).startswith(prefix)}
+
+
 def _redis_info(section: str | None = None) -> dict:
     return {}
 
 
 def _redis_dbsize() -> int:
     return len(_mock_redis_store)
+
+
+def _redis_bytes(value: bytes | str) -> bytes:
+    return value if isinstance(value, bytes) else str(value).encode()
+
+
+async def _redis_scan(
+    cursor: int = 0,
+    match: bytes | str | None = None,
+    count: int | None = None,
+) -> tuple[int, list[bytes]]:
+    pattern = "*" if match is None else _redis_bytes(match).decode()
+    keys = sorted(key for key in _mock_redis_store if fnmatch.fnmatch(_redis_bytes(key).decode(), pattern))
+    size = count or len(keys) or 1
+    page = keys[cursor : cursor + size]
+    next_cursor = cursor + size
+    return (0 if next_cursor >= len(keys) else next_cursor, page)
+
+
+async def _redis_eval(script: str, numkeys: int, *args) -> int:
+    keys = [_redis_bytes(value) for value in args[:numkeys]]
+    argv = [_redis_bytes(value) for value in args[numkeys:]]
+
+    if "SESSION_CREATE_V1" in script:
+        try:
+            session = json.loads(argv[2])
+        except (TypeError, ValueError):
+            return -2
+        expected_fence = _redis_bytes(
+            f"user_session_fence:{argv[7].decode()}:{argv[8].decode()}:{argv[9].decode()}"
+        )
+        expected_index = _redis_bytes(
+            f"user_session_index:{argv[7].decode()}:{argv[8].decode()}:{argv[9].decode()}"
+        )
+        if (
+            keys[0] != expected_fence
+            or keys[4] != expected_index
+            or int(session.get("site_id") or 0) != int(argv[7])
+            or int(session.get("tenant_id") or 0) != int(argv[8])
+            or int(session.get("user_id") or 0) != int(argv[9])
+        ):
+            return -2
+        if _mock_redis_store.get(keys[0]) != argv[0]:
+            return 0
+        await _redis_set(keys[1], argv[2])
+        await _redis_set(keys[2], argv[3])
+        await _redis_set(keys[3], argv[4])
+        await _redis_sadd(keys[4], argv[1])
+        return 1
+    if "SESSION_INDEX_ADD_V1" in script:
+        return await _redis_sadd(keys[0], argv[0])
+    if "SESSION_REVOKE_ONE_V1" in script:
+        if _mock_redis_store.get(keys[4]) != argv[4]:
+            return -2
+        raw = _mock_redis_store.get(keys[1])
+        if raw is None:
+            await _redis_srem(keys[0], argv[0])
+            return 0
+        session = json.loads(raw)
+        matches = int(session["site_id"]) == int(argv[1]) and int(session["tenant_id"]) == int(argv[2]) and int(session["user_id"]) == int(argv[3])
+        if not matches:
+            await _redis_srem(keys[0], argv[0])
+            return 0
+        await _redis_delete(*keys[1:4])
+        await _redis_srem(keys[0], argv[0])
+        return 1
+    if "SESSION_DELETE_V1" in script:
+        if argv[3] and _mock_redis_store.get(keys[3]) != argv[3]:
+            return -2
+        raw = _mock_redis_store.get(keys[0])
+        if argv[1] and _mock_redis_store.get(keys[1]) != argv[1]:
+            return -1
+        if raw is not None:
+            session = json.loads(raw)
+            index_key = _redis_bytes(f"{argv[2].decode()}:{session['site_id']}:{session['tenant_id']}:{session['user_id']}")
+            await _redis_srem(index_key, argv[0])
+        await _redis_delete(*keys[:3])
+        return int(raw is not None)
+    if "SESSION_CLEAN_ORPHAN_INDEX_V1" in script:
+        if any(key in _mock_redis_store for key in keys[1:4]):
+            return 0
+        return await _redis_srem(keys[0], argv[0])
+    if "SESSION_SWITCH_V1" in script:
+        expected_lock = _redis_bytes(f"user_session_lock:{argv[6].decode()}")
+        if (
+            keys[4] != expected_lock
+            or _mock_redis_store.get(keys[4]) != argv[7]
+            or _mock_redis_store.get(keys[5]) != argv[8]
+            or _mock_redis_store.get(keys[6]) != argv[9]
+        ):
+            return -2
+        if _mock_redis_store.get(keys[0]) != argv[0] or _mock_redis_store.get(keys[1]) != argv[1]:
+            return 0
+        await _redis_set(keys[0], argv[2])
+        await _redis_set(keys[1], argv[3])
+        await _redis_sadd(keys[3], argv[6])
+        if keys[2] != keys[3]:
+            await _redis_srem(keys[2], argv[6])
+        return 1
+    if "SESSION_REFRESH_V1" in script:
+        expected_lock = _redis_bytes(f"user_session_lock:{argv[6].decode()}")
+        if (
+            keys[4] != expected_lock
+            or _mock_redis_store.get(keys[4]) != argv[7]
+            or _mock_redis_store.get(keys[5]) != argv[8]
+        ):
+            return -2
+        if _mock_redis_store.get(keys[0]) != argv[0] or _mock_redis_store.get(keys[2]) != argv[1]:
+            return 0
+        await _redis_set(keys[1], argv[2])
+        await _redis_set(keys[2], argv[3])
+        await _redis_sadd(keys[3], argv[6])
+        return 1
+    if "SESSION_LOCK_RELEASE_V1" in script:
+        if _mock_redis_store.get(keys[0]) == argv[0]:
+            return await _redis_delete(keys[0])
+        return 0
+    if "SESSION_LOCK_CHECK_V1" in script:
+        return int(_mock_redis_store.get(keys[0]) == argv[0])
+    if "SESSION_LOCK_RENEW_V1" in script:
+        return int(_mock_redis_store.get(keys[0]) == argv[0])
+    if "RECOVERY_LOCK_RENEW_V1" in script:
+        return int(_mock_redis_store.get(keys[0]) == argv[0])
+    if "RECOVERY_STORE_PROGRESS_V1" in script:
+        if _mock_redis_store.get(keys[0]) != argv[0]:
+            return 0
+        await _redis_set(keys[1], argv[1])
+        await _redis_set(keys[2], argv[2])
+        return 1
+    if "RECOVERY_COMPLETE_SCAN_V1" in script:
+        if _mock_redis_store.get(keys[0]) != argv[0]:
+            return 0
+        await _redis_set(keys[3], argv[1])
+        await _redis_delete(keys[1], keys[2])
+        return 1
+    if "RECOVERY_STORE_PENDING_CURSOR_V1" in script:
+        if _mock_redis_store.get(keys[0]) != argv[0]:
+            return 0
+        await _redis_set(keys[1], argv[1])
+        return 1
+    if "RECOVERY_DELETE_PENDING_CURSOR_V1" in script:
+        if _mock_redis_store.get(keys[0]) != argv[0]:
+            return 0
+        await _redis_delete(keys[1])
+        return 1
+    raise AssertionError("Mock Redis 尚未实现该 Lua 脚本")
 
 
 _mock_redis = AsyncMock()
@@ -151,6 +330,11 @@ _mock_redis.hmget = AsyncMock(side_effect=_redis_hmget)
 _mock_redis.hset = AsyncMock(side_effect=_redis_hset)
 _mock_redis.hgetall = AsyncMock(side_effect=_redis_hgetall)
 _mock_redis.hdel = AsyncMock(side_effect=_redis_hdel)
+_mock_redis.sadd = AsyncMock(side_effect=_redis_sadd)
+_mock_redis.srem = AsyncMock(side_effect=_redis_srem)
+_mock_redis.smembers = AsyncMock(side_effect=_redis_smembers)
+_mock_redis.scan = AsyncMock(side_effect=_redis_scan)
+_mock_redis.eval = AsyncMock(side_effect=_redis_eval)
 _mock_redis.info = AsyncMock(side_effect=_redis_info)
 _mock_redis.dbsize = AsyncMock(side_effect=_redis_dbsize)
 
@@ -197,11 +381,7 @@ async def _test_lifespan(app) -> AsyncGenerator[Any, None]:
     from app.utils.hash_bcrpy_util import PwdUtil
 
     async with async_db_session() as db:
-        await db.execute(
-            update(UserModel)
-            .where(UserModel.username == "admin")
-            .values(password=PwdUtil.hash_password("admin123"))
-        )
+        await db.execute(update(UserModel).where(UserModel.username == "admin").values(password=PwdUtil.hash_password("admin123")))
         await db.commit()
 
     yield
@@ -277,10 +457,44 @@ def assert_route(
     response = test_client.request(method, path, **kwargs)
 
     if expected_status is not None:
-        assert response.status_code == expected_status, (
-            f"{method} {path} 期望 {expected_status}，实际 {response.status_code}"
-        )
+        assert response.status_code == expected_status, f"{method} {path} 期望 {expected_status}，实际 {response.status_code}"
     else:
-        assert response.status_code != 404, (
-            f"{method} {path} 返回 404，路由未注册"
-        )
+        assert response.status_code != 404, f"{method} {path} 返回 404，路由未注册"
+
+
+@pytest.fixture
+def control_provider_context(test_client, monkeypatch):
+    """Provider API tests opt into capabilities without exposing them to SaaS tests."""
+    import asyncio
+    import copy
+    import importlib
+
+    from sqlalchemy import select
+
+    from app.api.v1.module_platform.menu.model import MenuModel
+    from app.core.assembly import get_assembly
+    from app.core.database import async_db_session
+    from app.plugin.module_task.runtime.registry import business_task_registry
+    from app.scripts.initialize import InitializeData
+
+    monkeypatch.setitem(get_assembly().feature_flags, "sso_provider", True)
+    for module, handler in (
+        ("app.plugin.module_control_provision.handlers", "control.tenant_provision"),
+        ("app.plugin.module_control_provision.entitlement_handlers", "control.user_entitlement_sync"),
+    ):
+        imported = importlib.import_module(module)
+        if handler not in {item.handler_code for item in business_task_registry.all()}:
+            importlib.reload(imported)
+
+    async def ensure_portal_menu():
+        async with async_db_session() as db:
+            if await db.scalar(select(MenuModel.id).where(MenuModel.route_name == "Control")):
+                return
+            seed = Path(__file__).parents[1] / "app/scripts/seeds/control/platform_menu.json"
+            root = next(item for item in json.loads(seed.read_text()) if item.get("route_name") == "Control")
+            objects = InitializeData._InitializeData__create_objects_with_children([copy.deepcopy(root)], MenuModel)
+            db.add_all(objects)
+            await db.commit()
+
+    asyncio.run(ensure_portal_menu())
+    yield

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -81,6 +82,27 @@ async def build_background_auth(
     return auth
 
 
+class DomainClosureDisposition(StrEnum):
+    CLOSED = "closed"
+    ALREADY_CLOSED = "already_closed"
+    SUPERSEDED = "superseded"
+
+
+@dataclass(slots=True)
+class BusinessTaskFailureContext:
+    """Minimal trusted context for closing domain state before a handler can start."""
+
+    task_id: int
+    tenant_id: int
+    actor_user_id: int
+    trace_id: str
+    execution_token: str
+    session_factory: async_sessionmaker[AsyncSession]
+    reconciliation: bool = False
+    db: AsyncSession | None = None
+    site_id: int | None = None
+
+
 @dataclass(slots=True)
 class BusinessTaskContext:
     task_id: int
@@ -91,6 +113,7 @@ class BusinessTaskContext:
     db: AsyncSession
     auth: AuthSchema
     session_factory: async_sessionmaker[AsyncSession]
+    lifecycle_revocation_verified: bool = False
 
     async def heartbeat(self) -> bool:
         now = utc_now()

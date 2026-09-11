@@ -1,142 +1,106 @@
-<div align="center">
-     <p align="center">
-          <img src="frontend/web/public/logo.svg" width="150" height="150" alt="logo" />
-     </p>
-     <h1>FastApiAdmin <sup style="background-color: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.4em; vertical-align: super; margin-left: 5px;">v3.0.0</sup></h1>
-     <h3>🚀 追求极致代码质量，五分钟搭建企业级中后台，开箱即用</h3>
-     <p>基于 <b>FastAPI + Vue3 + TypeScript</b> 的全栈快速开发平台，Web / H5 / 小程序一站式交付</p>
-     <p align="center">
-          <a href="https://gitee.com/fastapiadmin/FastapiAdmin.git" target="_blank">
-               <img src="https://gitee.com/fastapiadmin/FastapiAdmin/badge/star.svg?theme=dark" alt="Gitee Stars">
-          </a>
-          <a href="https://github.com/fastapiadmin/FastapiAdmin.git" target="_blank">
-               <img src="https://img.shields.io/github/stars/fastapiadmin/FastapiAdmin?style=social" alt="GitHub Stars">
-          </a>
-          <a href="https://github.com/fastapiadmin/FastapiAdmin/forks" target="_blank">
-               <img src="https://img.shields.io/github/forks/fastapiadmin/FastapiAdmin?style=social" alt="GitHub Forks">
-          </a>
-          <br>
-          <a href="https://gitee.com/fastapiadmin/FastapiAdmin/blob/master/LICENSE" target="_blank">
-               <img src="https://img.shields.io/badge/License-MIT-orange" alt="License">
-          </a>
-          <img src="https://img.shields.io/badge/Python-≥3.12-blue">
-          <img src="https://img.shields.io/badge/NodeJS-≥20.0-blue">
-          <img src="https://img.shields.io/badge/MySQL-≥8.0-blue">
-          <img src="https://img.shields.io/badge/Redis-≥7.0-blue">
-     </p>
+# 小柿 SaaS
 
-简体中文 | [English](./README.en.md)
+<img src="frontend/web/public/logo.png" alt="小柿 SaaS" width="112" />
 
-</div>
+基于 FastAPI、Vue 3 和 TypeScript 的多租户应用框架。支持独立 SaaS 部署，也支持一个中控连接多个独立产品实例。默认品牌为“小柿 SaaS”，产品与租户可覆盖名称、Logo、登录页和相关链接。
 
-## 💡 为什么选择 FastapiAdmin？
+## 能力与边界
 
-| 你需要的 | FastapiAdmin | Django Admin | 纯前端模板 |
-|---------|:-----------:|:-----------:|:---------:|
-| 🎯 **开箱即用**的后台系统 | ✅ | ⚠️ 功能有限 | ❌ 只有 UI |
-| ⚡ **FastAPI 异步**高性能后端 | ✅ | ❌ 同步为主 | ❌ 无后端 |
-| 🔐 **RBAC** 菜单/按钮/数据三级权限 | ✅ | ❌ 基础 | ❌ |
-| 🏢 **多租户 SaaS** 数据隔离 + 配额 + 个性化 | ✅ | ❌ | ❌ |
-| 🤖 **代码生成器**（选表 → 出前后端代码） | ✅ | ❌ | ❌ |
-| 📱 **移动端**（H5 + 小程序）一体 | ✅ | ❌ | ❌ |
-| 🐳 **Docker 一键部署**（含 Nginx + SSL） | ✅ | ❌ | ❌ |
+- 用户、角色、菜单和接口权限，租户数据隔离。
+- 站点与租户品牌配置、套餐与插件装配。
+- 中控企业开户、产品开通、员工应用授权、单点登录与撤权同步。
+- 产品独立数据库、独立登录凭证，本地角色由各产品管理。
+- 任务、审计、通知和可选扩展模块。
 
-> 👉 详细技术选型对比：[为什么选择 FastapiAdmin？](https://service.fastapiadmin.com/guide/why)
+应用授权决定能否进入产品；产品本地角色决定可以使用哪些功能。中控授权不会将员工自动变成产品超级管理员。默认联邦产品采用人工角色分配。
 
-## 🍪 在线体验
+当前跨实例联动覆盖身份、开户及访问授权；订单、库存等业务数据同步需要在具体产品中实现。
 
-| 端 | 地址 | 账号 |
-|----|------|------|
-| 💻 Web 端 | [service.fastapiadmin.com/web](https://service.fastapiadmin.com/web) | `admin` / `123456` |
-| 📱 移动端 | [service.fastapiadmin.com/app](https://service.fastapiadmin.com/app) | `admin` / `123456` |
-| 📖 官方文档 | [service.fastapiadmin.com](https://service.fastapiadmin.com) | 无需登录 |
+## 项目结构
 
-## 🚀 5 分钟本地跑起来
+```text
+backend/
+  app/api/v1/       接口、服务与业务模块
+  app/assemblies/   能力装配配置
+  app/scripts/      初始化和种子数据
+  tests/           后端定向测试
+frontend/web/
+  src/             管理界面、路由、状态与品牌配置
+  public/          默认品牌及静态资源
+docs/              架构、部署和验收记录
+```
+
+## 本地开发
+
+准备 Python 3.12+、Node.js 20+、uv、pnpm，以及 PostgreSQL 和 Redis。先配置连接信息和独立密钥，再启动服务。
 
 ```bash
-# 1. 克隆
-git clone https://gitee.com/fastapiadmin/FastapiAdmin.git
-
-# 2. 配置环境
-cp backend/env/.env.dev.example backend/env/.env.dev
-cp frontend/web/.env.development.example frontend/web/.env.development
-
-# 3. 启动后端（首次自动建表 + 初始化数据）
-cd backend && uv sync && uv run main.py run --env=dev
-
-# 4. 启动前端
-cd ../frontend/web && pnpm install && pnpm run dev
-
-# ✅ 浏览器打开 http://127.0.0.1:5173，用 admin/123456 登录
+cd backend
+cp env/.env.dev.example env/.env.dev
+uv sync
+# 编辑 env/.env.dev：数据库、Redis、密钥与装配配置
+uv run alembic upgrade head
+uv run python main.py run --env=dev
 ```
 
-| 环境要求 | |
-|---------|------|
-| Python ≥ 3.12 | Node.js ≥ 20.0 + pnpm |
-| MySQL 8.0+ / PostgreSQL 14+ | Redis 6.x / 7.x |
+新数据库需按项目初始化流程加载装配对应的菜单、套餐和基础数据。不要把已有环境的连接信息或初始化数据直接用于生产。
 
-## 📦 工程结构
-
-```
-FastapiAdmin/            # Monorepo 全栈工程
-├─ backend/              # FastAPI 后端（Pydantic 2.0 + SQLAlchemy + Alembic）
-├─ frontend/
-│   ├── web/             # Vue3 Web 前端（Element Plus + TypeScript）
-│   ├── app/             # UniApp 移动端（H5 + 小程序 + App）
-│   └── docs/            # VitePress 文档网站
-├─ docker/               # Docker Compose 一键部署（Nginx + SSL）
-├─ deploy.sh             # 一键部署脚本
-└─ LICENSE               # MIT 开源协议
+```bash
+cd frontend/web
+pnpm install
+# 按 .env.example 配置 .env.development.local，连接当前后端
+pnpm dev
 ```
 
-## 📌 内置功能（开箱即用）
+常用定向检查：
 
-| 模块 | 包含能力 |
-|------|---------|
-| 📊 仪表盘 | 工作台、数据分析 |
-| ⚙️ 系统管理 | 用户 / 角色 / 菜单 / 部门 / 岗位 / 字典 / 配置 / 公告 |
-| 🏢 多租户 | 租户管理 / 数据隔离 / 配额控制 / 个性化配置 / 菜单权限 |
-| 👀 监控管理 | 在线用户 / 服务器监控 / 缓存监控 |
-| 📋 任务管理 | 定时任务调度 |
-| 📝 日志管理 | 操作日志审计 |
-| 🧰 开发工具 | 代码生成、表单构建、接口文档 |
-| 📁 文件管理 | 统一文件管理 |
-| 🤖 智能体 | 基于 Agno 的智能体框架 |
+```bash
+# backend/
+uv run pytest tests/test_role_governance_visibility.py -q
+uv run ruff check app tests
 
-## 🔧 截图展示
+# frontend/web/
+pnpm exec vue-tsc --noEmit
+pnpm exec vitest run src/__tests__/menu-permission-selection.spec.ts
+```
 
-| 登录 | 仪表盘 | 代码生成 | AI 助手 |
-| ---- | ------ | -------- | ------- |
-| ![登录](frontend/web/public/login.png) | ![仪表盘](frontend/web/public/dashboard.png) | ![代码生成](frontend/web/public/gencode.png) | ![AI](frontend/web/public/ai.png) |
+## 部署方式
 
-## 📖 文档地址
+- **独立 SaaS**：选择合适的业务装配，自行管理用户、租户和权限。
+- **中控 + 产品**：中控使用 `control` 装配；产品使用 `federated-saas` 或自定义装配，每个产品配置唯一 `application_code`。
+- 中控与产品分别配置数据库、Redis 命名空间、密钥和服务地址。登记产品回调、开户与授权同步地址后再开通企业。
+- 多个实例可以共用代码；不要共用产品登录密钥或把数据库当作跨产品通信接口。
 
-- 🌐 [官网文档](https://service.fastapiadmin.com) — 完整开发指南、架构设计、二开教程
-- 📁 子工程 README：[backend](backend/README.md) · [web](frontend/web/README.md) · [移动端](frontend/app/README.md) · [Docker](docker/README.md)
+装配入口为后端 `APP_ASSEMBLY` / `APP_ASSEMBLY_FILE` 和前端 `VITE_APP_ASSEMBLY`。具体参数见对应环境模板与 [文档目录](docs/)。
 
-## 🤝 参与贡献
+## 实例品牌
 
-欢迎提交 Issue / PR！详见 [贡献指南](https://service.fastapiadmin.com/about/contributing)。
+创建产品实例请按 [实例品牌开发指南](docs/framework/instance-branding-guide.md) 操作，包含配置示例、覆盖顺序、多 Site、存量数据库和验收步骤。
 
-## 👥 社区与支持
+- `VITE_APP_TITLE`：实例默认标题。
+- `VITE_BRAND_FAVICON`：浏览器图标；框架默认 `/web/logo.png`。
+- 站点及租户品牌配置：覆盖名称、Logo、登录背景、页脚和帮助链接。
+- 未配置的官网、社区链接默认不展示。无需修改框架名称来定制实例。
 
-| 微信群 | 赞赏支持 |
-| ------ | -------- |
-| ![群组二维码](frontend/web/public/group.jpg) | ![微信支付](frontend/web/public/wechatPay.jpg) |
+不在通用页面注入口号或行业文案。业务品牌和业务模块由具体实例维护。
 
-> 如果你觉得项目有用，请给一个 ⭐️ Star 支持！
+## 开发约定
 
-[![Stargazers over time](https://starchart.cc/fastapiadmin/FastapiAdmin.svg?variant=adaptive)](https://starchart.cc/fastapiadmin/FastapiAdmin)
+权限码沿用模块命名空间；业务数据保持租户隔离；接口授权与前端菜单、按钮保持一致。密钥、日志、数据库备份及私有文件不提交到仓库。
 
-## 👥 贡献者
+## 许可
 
-<a href="https://github.com/fastapiadmin/FastapiAdmin/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=fastapiadmin/FastapiAdmin"/>
-</a>
+许可证及原始版权声明见 [LICENSE](LICENSE)。品牌替换不改变现有开源许可，源码中的历史署名与兼容标识保留。
 
-## 🙏 鸣谢
 
-- 后端：[FastAPI](https://fastapi.tiangolo.com/) · [Pydantic](https://docs.pydantic.dev/) · [SQLAlchemy](https://www.sqlalchemy.org/) · [APScheduler](https://github.com/agronholm/apscheduler)
-- 前端：[Vue3](https://cn.vuejs.org/) · [TypeScript](https://www.typescriptlang.org/) · [Vite](https://vitejs.dev/) · [Element Plus](https://element-plus.org/)
-- 移动端：[UniApp](https://uniapp.dcloud.net.cn/) · [Wot Design Uni](https://wot-ui.cn/)
-- AI：[Agno](https://github.com/agno-agi/agno)
+## 普通员工的最小访问能力
+
+有效登录且具有产品访问资格的员工，无业务角色时也可进入个人工作区（`/workspace/personal`），查看本人资料、刷新可用功能并退出登录；本地账号可修改自己的姓名，统一登录身份资料由中控维护。
+
+这层基础访问不授予用户列表、租户管理或业务数据权限。管理员分配产品角色后，业务菜单按角色开放；撤销业务角色后回到个人工作区。账号禁用、套餐/租户停用和产品访问资格撤销仍按后端规则拒绝访问。`manual` 指业务权限由管理员配置，不表示禁止基础登录。
+
+### 租户共享 AI
+
+右上角头像 → 配置中心 → **租户 AI**：租户管理员配置一次，同租户已获业务授权的成员共用。支持模型切换、连接检测、功能绑定和加密密钥。个人聊天按“个人模型 → 租户模型 → 部署默认”选择；中控与产品各自管理配置。
+
+业务实例接入方式、管理权限、Redis 持久化及密钥备份见 [租户共享 AI 配置](docs/framework/tenant-ai-config.md)。

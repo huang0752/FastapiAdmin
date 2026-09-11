@@ -73,6 +73,8 @@ export const useConfigStore = defineStore(
     const currentTenantConfigId = ref<number | null>(null);
     // 最近一次 fetch 时间戳，用于 force=true 时防止短期重复请求
     let _lastFetchedAt = 0;
+    let _configFetchCount = 0;
+    let _latestConfigRequestId = 0;
     const MIN_FETCH_INTERVAL_MS = 5000;
 
     function upsertConfigItem(target: Record<string, ConfigTable>, item: Partial<ConfigTable>) {
@@ -152,7 +154,11 @@ export const useConfigStore = defineStore(
      * @param force 是否强制刷新配置
      * @param tenantId 登录后的租户 ID；未传时不请求任何租户公开 ID 接口
      */
-    async function getConfig(force = false, tenantId?: number | null) {
+    async function getConfig(
+      force = false,
+      tenantId?: number | null,
+      options?: { shouldApply?: () => boolean }
+    ) {
       const numericTenantId = Number(tenantId);
       const resolvedTenantId =
         tenantId === null
@@ -160,9 +166,6 @@ export const useConfigStore = defineStore(
           : Number.isInteger(numericTenantId) && numericTenantId > 0
             ? numericTenantId
             : currentTenantConfigId.value;
-      if (configLoading.value) {
-        return;
-      }
       // force=true 时也需防短期内重复请求
       if (!force && isConfigLoaded.value && currentTenantConfigId.value === resolvedTenantId) {
         return;
@@ -174,6 +177,10 @@ export const useConfigStore = defineStore(
       ) {
         return;
       }
+      const requestId = ++_latestConfigRequestId;
+      const shouldApply = () =>
+        requestId === _latestConfigRequestId && options?.shouldApply?.() !== false;
+      _configFetchCount += 1;
       configLoading.value = true;
       try {
         // 三层配置互不依赖：并发请求，再按 system → site → tenant 的固定优先级合并。
@@ -185,7 +192,7 @@ export const useConfigStore = defineStore(
         const tenantPromise =
           resolvedTenantId === null
             ? Promise.resolve(null)
-            : TenantAPI.getTenantConfig(resolvedTenantId).catch((error) => {
+            : TenantAPI.getCurrentBrandConfig().catch((error) => {
                 console.warn("[configStore] 获取认证租户配置失败（非关键错误）", error);
                 return null;
               });
@@ -195,6 +202,7 @@ export const useConfigStore = defineStore(
           sitePromise,
           tenantPromise,
         ]);
+        if (!shouldApply()) return;
 
         // 1. 系统级配置（演示模式、IP黑白名单等）
         const list = response?.data?.data;
@@ -231,7 +239,8 @@ export const useConfigStore = defineStore(
         isConfigLoaded.value = true;
         _lastFetchedAt = Date.now();
       } finally {
-        configLoading.value = false;
+        _configFetchCount = Math.max(0, _configFetchCount - 1);
+        configLoading.value = _configFetchCount > 0;
       }
     }
 
@@ -248,7 +257,7 @@ export const useConfigStore = defineStore(
     };
   },
   {
-    persist: true,
+    persist: { omit: ["configLoading"] },
   }
 );
 

@@ -128,9 +128,20 @@ class Permission:
         """
         基于当前用户绑定角色的过滤（适用于角色模型）
 
-        只显示当前用户绑定的角色
+        租户治理管理员可管理本租户角色，其他用户仅看到自己绑定的角色。
         """
         roles = getattr(self.auth.user, "roles", []) or []
+        tenant_id = self.auth.tenant_id
+        if tenant_id is not None and any(
+            getattr(role, "tenant_id", None) == tenant_id
+            and getattr(role, "code", None) in {"owner", "admin"}
+            and getattr(role, "is_system", False)
+            and getattr(role, "status", None) == 0
+            and not getattr(role, "is_deleted", True)
+            for role in roles
+        ):
+            # 即使调用方没有额外拼接租户条件，也不能扩大到其他租户。
+            return self.model.tenant_id == tenant_id
         if not roles:
             id_attr = getattr(self.model, "id", None)
             if id_attr is not None:
