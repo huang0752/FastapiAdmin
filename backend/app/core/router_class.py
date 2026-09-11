@@ -12,6 +12,24 @@ from app.core.base_schema import AuthSchema
 from app.core.database import async_db_session
 from app.core.logger import logger
 
+_REDACTED_VALUE = "***"
+_SENSITIVE_FIELD_SUFFIXES = ("password", "token", "secret", "apikey", "authorization")
+
+
+def _is_sensitive_field(field_name: object) -> bool:
+    if not isinstance(field_name, str):
+        return False
+    normalized = "".join(character for character in field_name.casefold() if character.isalnum())
+    return normalized.endswith(_SENSITIVE_FIELD_SUFFIXES)
+
+
+def _redact_sensitive_data(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _REDACTED_VALUE if _is_sensitive_field(key) else _redact_sensitive_data(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_sensitive_data(item) for item in value]
+    return value
+
 
 async def _write_operation_log_async(log_data: dict) -> None:
     from app.api.v1.module_system.log.schema import OperationLogCreateSchema
@@ -62,12 +80,21 @@ class OperationLogRoute(APIRoute):
                 if request.path_params:
                     oper_param["path_params"] = dict(request.path_params)
 
-                log_payload = json.dumps(oper_param, ensure_ascii=False)
+                log_payload = json.dumps(_redact_sensitive_data(oper_param), ensure_ascii=False)
                 if len(log_payload) > 2000:
                     log_payload = "请求参数过长"
 
                 is_json = "application/json" in response.headers.get("Content-Type", "")
-                response_data = response.body if is_json else b"{}"
+                response_json = "{}"
+                if is_json:
+                    response_text = response.body.decode("utf-8", errors="ignore")
+                    try:
+                        response_json = json.dumps(
+                            _redact_sensitive_data(json.loads(response_text)),
+                            ensure_ascii=False,
+                        )
+                    except json.JSONDecodeError:
+                        response_json = response_text
 
                 ctx = getattr(request.state, "ctx", None)
                 current_user_id = ctx.user_id if ctx else None
@@ -83,7 +110,7 @@ class OperationLogRoute(APIRoute):
                     "request_method": request.method,
                     "request_payload": log_payload,
                     "response_code": response.status_code,
-                    "response_json": response_data.decode(),
+                    "response_json": response_json,
                     "process_time": f"{(time.time() - start):.2f}s",
                     "description": route.summary if route else "",
                     "created_id": current_user_id,

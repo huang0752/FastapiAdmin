@@ -138,3 +138,7 @@ Issues and PRs are welcome! See [Contributing Guide](https://service.fastapiadmi
 - Frontend: [Vue3](https://vuejs.org/) · [TypeScript](https://www.typescriptlang.org/) · [Vite](https://vitejs.dev/) · [Element Plus](https://element-plus.org/)
 - Mobile: [UniApp](https://uniapp.dcloud.net.cn/) · [Wot Design Uni](https://wot-ui.cn/)
 - AI: [Agno](https://github.com/agno-agi/agno)
+
+### Shared tenant AI
+
+Open the avatar menu → Configuration Center → Tenant AI. Tenant administrators configure shared models and feature bindings for their tenant within each instance. Existing business permissions still apply. Chat resolves personal model → tenant model → deployment default. See the [tenant AI guide](docs/framework/tenant-ai-config.md) for integration, encrypted keys and Redis persistence.

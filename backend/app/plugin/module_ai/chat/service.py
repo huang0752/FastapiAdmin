@@ -1,17 +1,21 @@
-
 import asyncio
+import base64
+import hashlib
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import datetime
+from functools import wraps
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 from agno.run.team import TeamRunOutput
 from agno.session.team import TeamSession
 from agno.team.team import Team
+from cryptography.fernet import Fernet, InvalidToken
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from redis.asyncio import Redis
+from redis.exceptions import LockError
 
 from app.api.v1.module_system.dept.service import DeptService
 from app.common.enums import RedisInitKeyConfig
@@ -20,7 +24,6 @@ from app.config.setting import settings
 from app.core.base_schema import AuthSchema
 from app.core.exceptions import CustomException
 from app.core.logger import logger
-from app.core.redis_crud import RedisCURD
 
 from .audit import AiCallAuditRecord, record_ai_call_audit
 from .crud import ChatSessionCRUD
@@ -396,6 +399,14 @@ class ChatService:
 # ******************* AI 模型配置 ****************** #
 # ================================================= #
 
+async def _save_ai_config(redis: Redis, key: str, value: str) -> None:
+    # 配置不是短期缓存。使用直接写入让存储故障传播，不能报告虚假的保存成功。
+    if not await redis.set(name=key, value=value.encode("utf-8")):
+        raise CustomException(msg="模型配置保存失败", code=10500, status_code=503)
+
+
+AiConfigScope = Literal["user", "tenant"]
+
 
 def _ai_model_items_key(user_id: int) -> str:
     return f"{RedisInitKeyConfig.AI_MODEL_CONFIG.key}:items:{user_id}"
@@ -403,6 +414,14 @@ def _ai_model_items_key(user_id: int) -> str:
 
 def _ai_model_active_key(user_id: int) -> str:
     return f"{RedisInitKeyConfig.AI_MODEL_CONFIG.key}:active:{user_id}"
+
+
+def _tenant_ai_model_items_key(tenant_id: int) -> str:
+    return f"{RedisInitKeyConfig.AI_MODEL_CONFIG.key}:tenant:items:{tenant_id}"
+
+
+def _tenant_ai_model_active_key(tenant_id: int) -> str:
+    return f"{RedisInitKeyConfig.AI_MODEL_CONFIG.key}:tenant:active:{tenant_id}"
 
 
 def _decode_redis_value(value: Any) -> Any:
@@ -419,7 +438,33 @@ def _mask_api_key(api_key: str | None) -> str | None:
     return f"****{api_key[-4:]}"
 
 
+def _api_key_fernet() -> Fernet:
+    digest = hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def _encrypted_api_key(api_key: str) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "ciphertext": _api_key_fernet().encrypt(api_key.encode("utf-8")).decode("ascii"),
+        "last4": api_key[-4:] if len(api_key) > 4 else "",
+    }
+
+
+def _decrypt_api_key(envelope: Any) -> str:
+    if not isinstance(envelope, dict) or envelope.get("version") != 1:
+        raise CustomException(msg="模型配置密钥不可用", code=10400, status_code=400)
+    try:
+        return _api_key_fernet().decrypt(str(envelope["ciphertext"]).encode("ascii")).decode("utf-8")
+    except (InvalidToken, KeyError, TypeError, ValueError, UnicodeDecodeError):
+        logger.warning("租户 AI 模型配置密钥解密失败")
+        raise CustomException(msg="模型配置密钥不可用", code=10400, status_code=400) from None
+
+
 def _public_model_config(item: dict[str, Any]) -> dict[str, Any]:
+    encrypted = item.get("api_key_encrypted")
+    raw_api_key = item.get("api_key")
+    last4 = encrypted.get("last4") if isinstance(encrypted, dict) else None
     return {
         "id": item.get("id"),
         "name": item.get("name"),
@@ -431,8 +476,8 @@ def _public_model_config(item: dict[str, Any]) -> dict[str, Any]:
         "max_tokens": item.get("max_tokens", 4096),
         "allow_business_data": bool(item.get("allow_business_data", False)),
         "created_time": item.get("created_time"),
-        "has_api_key": bool(item.get("api_key")),
-        "api_key_masked": _mask_api_key(item.get("api_key")),
+        "has_api_key": bool(raw_api_key or encrypted),
+        "api_key_masked": (f"****{last4}" if last4 else "****") if encrypted else _mask_api_key(raw_api_key),
     }
 
 
@@ -455,7 +500,7 @@ def _runtime_model_config(item: dict[str, Any], *, auth: AuthSchema | None = Non
 
 async def get_user_model_config(redis: Redis, user_id: int) -> dict[str, Any] | None:
     """读取当前激活的 AI 模型配置；不存在或未激活返回 None。"""
-    active_id = _decode_redis_value(await RedisCURD(redis).get(_ai_model_active_key(user_id)))
+    active_id = _decode_redis_value(await redis.get(_ai_model_active_key(user_id)))
     if not active_id:
         return None
     items = await list_user_model_configs(redis, user_id)
@@ -467,7 +512,7 @@ async def get_user_model_config(redis: Redis, user_id: int) -> dict[str, Any] | 
 
 async def list_user_model_configs(redis: Redis, user_id: int) -> list[dict[str, Any]]:
     """列出用户的所有模型配置项。"""
-    raw = _decode_redis_value(await RedisCURD(redis).get(_ai_model_items_key(user_id)))
+    raw = _decode_redis_value(await redis.get(_ai_model_items_key(user_id)))
     if not raw:
         return []
     try:
@@ -482,7 +527,34 @@ async def list_user_model_configs(redis: Redis, user_id: int) -> list[dict[str, 
 
 async def get_active_model_id(redis: Redis, user_id: int) -> str | None:
     """读取当前激活的模型配置 ID；为空表示使用系统默认。"""
-    return _decode_redis_value(await RedisCURD(redis).get(_ai_model_active_key(user_id)))
+    return _decode_redis_value(await redis.get(_ai_model_active_key(user_id)))
+
+
+async def list_tenant_model_configs(redis: Redis, tenant_id: int) -> list[dict[str, Any]]:
+    raw = _decode_redis_value(await redis.get(_tenant_ai_model_items_key(tenant_id)))
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("租户 AI 模型配置列表 JSON 解析失败: tenant_id={}", tenant_id)
+        return []
+
+
+async def get_tenant_active_model_id(redis: Redis, tenant_id: int) -> str | None:
+    return _decode_redis_value(await redis.get(_tenant_ai_model_active_key(tenant_id)))
+
+
+async def _get_tenant_model_config_by_id(redis: Redis, tenant_id: int, config_id: str) -> dict[str, Any] | None:
+    return next((item for item in await list_tenant_model_configs(redis, tenant_id) if item.get("id") == config_id), None)
+
+
+async def get_tenant_model_config(redis: Redis, tenant_id: int) -> dict[str, Any] | None:
+    active_id = await get_tenant_active_model_id(redis, tenant_id)
+    if not active_id:
+        return None
+    return await _get_tenant_model_config_by_id(redis, tenant_id, active_id)
 
 
 async def resolve_effective_model_config(redis: Redis, auth: AuthSchema) -> dict[str, Any]:
@@ -492,6 +564,10 @@ async def resolve_effective_model_config(redis: Redis, auth: AuthSchema) -> dict
         active_config = await get_user_model_config(redis, user_id)
         if active_config:
             return _runtime_model_config(active_config, auth=auth, source="user_active")
+    if auth and auth.tenant_id is not None:
+        shared = await get_tenant_model_config(redis, auth.tenant_id)
+        if shared:
+            return _runtime_model_config({**shared, "api_key": _decrypt_api_key(shared.get("api_key_encrypted"))}, auth=auth, source="tenant_active")
     return {
         "base_url": settings.OPENAI_BASE_URL,
         "api_key": settings.OPENAI_API_KEY,
@@ -524,14 +600,14 @@ async def create_user_model_config(
         "created_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     items.append(item)
-    await RedisCURD(redis).set(
+    await _save_ai_config(redis,
         _ai_model_items_key(user_id),
         json.dumps(items, ensure_ascii=False),
     )
 
     # 若用户尚未激活任何配置，自动激活新增的
     if not await get_active_model_id(redis, user_id):
-        await RedisCURD(redis).set(_ai_model_active_key(user_id), item["id"])
+        await _save_ai_config(redis, _ai_model_active_key(user_id), item["id"])
 
     logger.info("已新增 AI 模型配置: user_id={} name={} id={}", user_id, config.name, item["id"])
     return item
@@ -550,7 +626,7 @@ async def update_user_model_config(
         return None
     data = config.model_dump(exclude_none=True)
     target.update(data)
-    await RedisCURD(redis).set(
+    await _save_ai_config(redis,
         _ai_model_items_key(user_id),
         json.dumps(items, ensure_ascii=False),
     )
@@ -564,13 +640,13 @@ async def delete_user_model_config(redis: Redis, user_id: int, config_id: str) -
     new_items = [it for it in items if it.get("id") != config_id]
     if len(new_items) == len(items):
         return False
-    await RedisCURD(redis).set(
+    await _save_ai_config(redis,
         _ai_model_items_key(user_id),
         json.dumps(new_items, ensure_ascii=False),
     )
     active_id = await get_active_model_id(redis, user_id)
     if active_id == config_id:
-        await RedisCURD(redis).delete(_ai_model_active_key(user_id))
+        await redis.delete(_ai_model_active_key(user_id))
     logger.info("已删除 AI 模型配置: user_id={} id={}", user_id, config_id)
     return True
 
@@ -578,23 +654,38 @@ async def delete_user_model_config(redis: Redis, user_id: int, config_id: str) -
 async def set_active_model_config(redis: Redis, user_id: int, config_id: str) -> bool:
     """设置当前激活的模型配置项；id 为空字符串或 "__default__" 表示使用系统默认。"""
     if config_id in ("", "__default__"):
-        await RedisCURD(redis).delete(_ai_model_active_key(user_id))
+        await redis.delete(_ai_model_active_key(user_id))
         logger.info("已切换到系统默认模型: user_id={}", user_id)
         return True
     items = await list_user_model_configs(redis, user_id)
     if not any(it.get("id") == config_id for it in items):
         return False
-    await RedisCURD(redis).set(_ai_model_active_key(user_id), config_id)
+    await _save_ai_config(redis, _ai_model_active_key(user_id), config_id)
     logger.info("已切换 AI 模型: user_id={} id={}", user_id, config_id)
     return True
+
+
+def _serialize_tenant_config_write(method):
+    """同一租户的模型和绑定共同串行写入，避免读改写丢失与删除竞态。"""
+    @wraps(method)
+    async def wrapped(self, *args, **kwargs):
+        if self.scope != "tenant":
+            return await method(self, *args, **kwargs)
+        try:
+            async with self.redis.lock(f"ai_config:tenant:lock:{self._tenant_id}", timeout=15, blocking_timeout=5):
+                return await method(self, *args, **kwargs)
+        except LockError:
+            raise CustomException(msg="配置正在更新，请稍后重试", code=10400, status_code=409) from None
+    return wrapped
 
 
 class AiModelConfigService:
     """AI 模型配置业务服务（多配置 + 激活切换）"""
 
-    def __init__(self, auth: AuthSchema, redis: Redis) -> None:
+    def __init__(self, auth: AuthSchema, redis: Redis, *, scope: AiConfigScope = "user") -> None:
         self.auth = auth
         self.redis = redis
+        self.scope = scope
 
     @property
     def _user_id(self) -> int:
@@ -602,30 +693,104 @@ class AiModelConfigService:
             raise CustomException(msg="未登录", code=10401, status_code=401)
         return self.auth.user.id
 
+    @property
+    def _tenant_id(self) -> int:
+        if self.auth.tenant_id is None:
+            raise CustomException(msg="缺少租户上下文", code=10403, status_code=403)
+        return self.auth.tenant_id
+
+    async def _tenant_save_items(self, items: list[dict[str, Any]]) -> None:
+        await _save_ai_config(self.redis,
+            _tenant_ai_model_items_key(self._tenant_id),
+            json.dumps(items, ensure_ascii=False),
+        )
+
     async def list(self) -> dict[str, Any]:
         """获取配置列表 + 当前激活 ID。"""
+        if self.scope == "tenant":
+            items = await list_tenant_model_configs(self.redis, self._tenant_id)
+            active_id = await get_tenant_active_model_id(self.redis, self._tenant_id)
+            return {"items": [_public_model_config(item) for item in items], "active_id": active_id}
         items = await list_user_model_configs(self.redis, self._user_id)
         active_id = await get_active_model_id(self.redis, self._user_id)
         return {"items": [_public_model_config(item) for item in items], "active_id": active_id}
 
     async def get_active(self) -> dict[str, Any] | None:
+        if self.scope == "tenant":
+            return await get_tenant_model_config(self.redis, self._tenant_id)
         return await get_user_model_config(self.redis, self._user_id)
 
+    @_serialize_tenant_config_write
     async def create(self, config: AiModelConfigSchema) -> dict[str, Any]:
+        if self.scope == "tenant":
+            import uuid
+
+            items = await list_tenant_model_configs(self.redis, self._tenant_id)
+            data = config.model_dump()
+            api_key = data.pop("api_key")
+            item = {
+                **data,
+                "api_key_encrypted": _encrypted_api_key(api_key),
+                "id": uuid.uuid4().hex,
+                "created_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            items.append(item)
+            await self._tenant_save_items(items)
+            if not await get_tenant_active_model_id(self.redis, self._tenant_id):
+                await _save_ai_config(self.redis, _tenant_ai_model_active_key(self._tenant_id), item["id"])
+            logger.info("已新增租户 AI 模型配置: tenant_id={} name={} id={}", self._tenant_id, config.name, item["id"])
+            return _public_model_config(item)
         return _public_model_config(await create_user_model_config(self.redis, self._user_id, config))
 
+    @_serialize_tenant_config_write
     async def update(self, config_id: str, config: AiModelConfigUpdateSchema) -> dict[str, Any] | None:
+        if self.scope == "tenant":
+            items = await list_tenant_model_configs(self.redis, self._tenant_id)
+            target = next((item for item in items if item.get("id") == config_id), None)
+            if target is None:
+                raise CustomException(msg="模型配置不存在", code=10404, status_code=404)
+            data = config.model_dump(exclude_none=True)
+            api_key = data.pop("api_key", None)
+            if api_key:
+                target["api_key_encrypted"] = _encrypted_api_key(api_key)
+            target.update(data)
+            await self._tenant_save_items(items)
+            logger.info("已更新租户 AI 模型配置: tenant_id={} id={}", self._tenant_id, config_id)
+            return _public_model_config(target)
         result = await update_user_model_config(self.redis, self._user_id, config_id, config)
         if result is None:
             raise CustomException(msg="模型配置不存在", code=10404, status_code=404)
         return _public_model_config(result)
 
+    @_serialize_tenant_config_write
     async def delete(self, config_id: str) -> None:
+        if self.scope == "tenant":
+            bindings = await AiFeatureBindingService(self.auth, self.redis, scope="tenant").list()
+            if any(config_id in (item.get("model_config_id"), item.get("fallback_config_id")) for item in bindings):
+                raise CustomException(msg="模型仍被功能绑定，请先解除绑定", code=10400, status_code=400)
+            items = await list_tenant_model_configs(self.redis, self._tenant_id)
+            new_items = [item for item in items if item.get("id") != config_id]
+            if len(new_items) == len(items):
+                raise CustomException(msg="模型配置不存在", code=10404, status_code=404)
+            await self._tenant_save_items(new_items)
+            if await get_tenant_active_model_id(self.redis, self._tenant_id) == config_id:
+                await self.redis.delete(_tenant_ai_model_active_key(self._tenant_id))
+            logger.info("已删除租户 AI 模型配置: tenant_id={} id={}", self._tenant_id, config_id)
+            return
         ok = await delete_user_model_config(self.redis, self._user_id, config_id)
         if not ok:
             raise CustomException(msg="模型配置不存在", code=10404, status_code=404)
 
+    @_serialize_tenant_config_write
     async def set_active(self, config_id: str) -> None:
+        if self.scope == "tenant":
+            if config_id in ("", "__default__"):
+                await self.redis.delete(_tenant_ai_model_active_key(self._tenant_id))
+                return
+            if await _get_tenant_model_config_by_id(self.redis, self._tenant_id, config_id) is None:
+                raise CustomException(msg="模型配置不存在", code=10404, status_code=404)
+            await _save_ai_config(self.redis, _tenant_ai_model_active_key(self._tenant_id), config_id)
+            return
         ok = await set_active_model_config(self.redis, self._user_id, config_id)
         if not ok:
             raise CustomException(msg="模型配置不存在", code=10404, status_code=404)
@@ -640,6 +805,10 @@ def _ai_feature_bindings_key(tenant_id: int | None, user_id: int) -> str:
     return f"ai_feature_binding:{tenant_id or 0}:{user_id}"
 
 
+def _tenant_ai_feature_bindings_key(tenant_id: int) -> str:
+    return f"ai_feature_binding:tenant:{tenant_id}"
+
+
 async def _get_user_model_config_by_id(redis: Redis, user_id: int, config_id: str) -> dict[str, Any] | None:
     return next((item for item in await list_user_model_configs(redis, user_id) if item.get("id") == config_id), None)
 
@@ -647,9 +816,10 @@ async def _get_user_model_config_by_id(redis: Redis, user_id: int, config_id: st
 class AiFeatureBindingService:
     """管理当前租户、当前用户可用的 AI 功能绑定。"""
 
-    def __init__(self, auth: AuthSchema, redis: Redis) -> None:
+    def __init__(self, auth: AuthSchema, redis: Redis, *, scope: AiConfigScope = "user") -> None:
         self.auth = auth
         self.redis = redis
+        self.scope = scope
 
     @property
     def _user_id(self) -> int:
@@ -659,10 +829,18 @@ class AiFeatureBindingService:
 
     @property
     def _key(self) -> str:
+        if self.scope == "tenant":
+            return _tenant_ai_feature_bindings_key(self._tenant_id)
         return _ai_feature_bindings_key(self.auth.tenant_id, self._user_id)
 
+    @property
+    def _tenant_id(self) -> int:
+        if self.auth.tenant_id is None:
+            raise CustomException(msg="缺少租户上下文", code=10403, status_code=403)
+        return self.auth.tenant_id
+
     async def _saved(self) -> dict[str, dict[str, Any]]:
-        raw = _decode_redis_value(await RedisCURD(self.redis).get(self._key))
+        raw = _decode_redis_value(await self.redis.get(self._key))
         if not raw:
             return {}
         try:
@@ -698,16 +876,26 @@ class AiFeatureBindingService:
         saved = await self._saved()
         return {**self._default_item(feature), **saved.get(feature_code, {})}
 
+    @_serialize_tenant_config_write
     async def upsert(self, feature_code: str, data: AiFeatureBindingUpdateSchema) -> dict[str, Any]:
         feature = default_ai_registry.get_feature(feature_code)
         if feature is None:
             raise CustomException(msg="AI 功能不存在", code=10404, status_code=404)
+        tenant_id = self._tenant_id if self.scope == "tenant" else None
         if data.model_config_id:
-            primary = await _get_user_model_config_by_id(self.redis, self._user_id, data.model_config_id)
+            primary = (
+                await _get_tenant_model_config_by_id(self.redis, tenant_id, data.model_config_id)
+                if tenant_id is not None
+                else await _get_user_model_config_by_id(self.redis, self._user_id, data.model_config_id)
+            )
             if primary is None:
                 raise CustomException(msg="主模型配置不存在", code=10404, status_code=404)
         if data.fallback_config_id:
-            fallback = await _get_user_model_config_by_id(self.redis, self._user_id, data.fallback_config_id)
+            fallback = (
+                await _get_tenant_model_config_by_id(self.redis, tenant_id, data.fallback_config_id)
+                if tenant_id is not None
+                else await _get_user_model_config_by_id(self.redis, self._user_id, data.fallback_config_id)
+            )
             if fallback is None:
                 raise CustomException(msg="备用模型配置不存在", code=10404, status_code=404)
         if data.model_config_id and data.model_config_id == data.fallback_config_id:
@@ -722,8 +910,8 @@ class AiFeatureBindingService:
             "prompt_key": feature.prompt_key,
         }
         saved[feature_code] = item
-        await RedisCURD(self.redis).set(self._key, json.dumps(saved, ensure_ascii=False))
-        logger.info("AI 功能绑定已更新: tenant_id={} user_id={} feature_code={}", self.auth.tenant_id, self._user_id, feature_code)
+        await _save_ai_config(self.redis, self._key, json.dumps(saved, ensure_ascii=False))
+        logger.info("AI 功能绑定已更新: tenant_id={} scope={} feature_code={}", self.auth.tenant_id, self.scope, feature_code)
         return item
 
 
@@ -773,10 +961,18 @@ async def _openai_structured_runner(
 class AiRuntimeService:
     """面向产品功能的有界、可审计、结构化 AI 调用入口。"""
 
-    def __init__(self, auth: AuthSchema, redis: Redis, *, runner: StructuredRunner | None = None) -> None:
+    def __init__(
+        self,
+        auth: AuthSchema,
+        redis: Redis,
+        *,
+        runner: StructuredRunner | None = None,
+        scope: AiConfigScope = "user",
+    ) -> None:
         self.auth = auth
         self.redis = redis
         self.runner = runner or _openai_structured_runner
+        self.scope = scope
 
     @property
     def _user_id(self) -> int:
@@ -785,6 +981,14 @@ class AiRuntimeService:
         return self.auth.user.id
 
     async def _runtime_config(self, config_id: str | None, *, source: str) -> dict[str, Any]:
+        if self.scope == "tenant":
+            if self.auth.tenant_id is None:
+                raise CustomException(msg="缺少租户上下文", code=10403, status_code=403)
+            item = await _get_tenant_model_config_by_id(self.redis, self.auth.tenant_id, config_id) if config_id else await get_tenant_model_config(self.redis, self.auth.tenant_id)
+            if item is None:
+                raise CustomException(msg="模型配置不存在", code=10404, status_code=404)
+            runtime_item = {**item, "api_key": _decrypt_api_key(item.get("api_key_encrypted"))}
+            return _runtime_model_config(runtime_item, auth=self.auth, source=source)
         if config_id:
             item = await _get_user_model_config_by_id(self.redis, self._user_id, config_id)
             if item is None:
@@ -807,7 +1011,7 @@ class AiRuntimeService:
         contains_business_data: bool = False,
         business_id: str | None = None,
     ) -> ResultT:
-        binding = await AiFeatureBindingService(self.auth, self.redis).get(feature_code)
+        binding = await AiFeatureBindingService(self.auth, self.redis, scope=self.scope).get(feature_code)
         if not binding.get("enabled"):
             raise CustomException(msg="该 AI 功能尚未启用", code=10403, status_code=403)
         primary = await self._runtime_config(binding.get("model_config_id"), source="feature_primary")

@@ -12,6 +12,8 @@ from app.api.v1.module_system.role.controller import RoleRouter
 from app.api.v1.module_system.ticket.controller import TicketRouter
 from app.api.v1.module_system.user.controller import UserRouter
 
+from app.plugin.module_ai.chat.tenant_config import router as TenantAiConfigRouter
+
 system_router = APIRouter(prefix="/system")
 
 system_router.include_router(AuthRouter)
@@ -25,3 +27,5 @@ system_router.include_router(PositionRouter)
 system_router.include_router(RoleRouter)
 system_router.include_router(TicketRouter)
 system_router.include_router(UserRouter)
+
+system_router.include_router(TenantAiConfigRouter)

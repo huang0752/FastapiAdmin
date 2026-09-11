@@ -241,3 +241,77 @@ export interface ChatSessionDetail {
   message_count: number;
   messages: ChatSessionMessage[];
 }
+
+const silentTenantWrite = { showSuccessMessage: false };
+
+export const TenantAiConfigAPI = {
+  getModelConfig() {
+    return request<ApiResponse<AiModelConfigList>>({
+      url: `/system/ai-config/model`,
+      method: "get",
+    });
+  },
+
+  createModelConfig(body: AiModelConfigInput) {
+    return request<ApiResponse<AiModelConfigItem>>({
+      url: `/system/ai-config/model`,
+      method: "post",
+      ...silentTenantWrite,
+      data: body,
+    });
+  },
+
+  updateModelConfig(id: string, body: AiModelConfigInput) {
+    return request<ApiResponse<AiModelConfigItem>>({
+      url: `/system/ai-config/model/${id}`,
+      method: "put",
+      ...silentTenantWrite,
+      data: body,
+    });
+  },
+
+  deleteModelConfig(id: string) {
+    return request<ApiResponse<null>>({
+      url: `/system/ai-config/model/${id}`,
+      method: "delete",
+      ...silentTenantWrite,
+    });
+  },
+
+  activateModelConfig(id: string) {
+    return request<ApiResponse<null>>({
+      url: `/system/ai-config/model/${id || "__default__"}/activate`,
+      method: "post",
+      ...silentTenantWrite,
+    });
+  },
+
+  getFeatureBindings() {
+    return request<ApiResponse<AiFeatureBinding[]>>({
+      url: `/system/ai-config/feature`,
+      method: "get",
+    });
+  },
+
+  updateFeatureBinding(featureCode: string, body: AiFeatureBindingInput) {
+    return request<ApiResponse<AiFeatureBinding>>({
+      url: `/system/ai-config/feature/${featureCode}`,
+      method: "put",
+      ...silentTenantWrite,
+      data: body,
+    });
+  },
+  probeModel(id: string) {
+    return request<ApiResponse<{ connected: boolean }>>({
+      url: `/system/ai-config/model/${id}/probe`,
+      method: "post",
+      ...silentTenantWrite,
+    });
+  },
+  capabilities() {
+    return request<ApiResponse<{ can_manage: boolean; tenant_id: number | null }>>({
+      url: `/system/ai-config/capabilities`,
+      method: "get",
+    });
+  },
+};

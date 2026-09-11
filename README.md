@@ -140,3 +140,9 @@ FastapiAdmin/            # Monorepo 全栈工程
 - 前端：[Vue3](https://cn.vuejs.org/) · [TypeScript](https://www.typescriptlang.org/) · [Vite](https://vitejs.dev/) · [Element Plus](https://element-plus.org/)
 - 移动端：[UniApp](https://uniapp.dcloud.net.cn/) · [Wot Design Uni](https://wot-ui.cn/)
 - AI：[Agno](https://github.com/agno-agi/agno)
+
+### 租户共享 AI
+
+右上角头像 → 配置中心 → **租户 AI**：租户管理员配置一次，同租户已获业务授权的成员共用。支持模型切换、连接检测、功能绑定和加密密钥。个人聊天按“个人模型 → 租户模型 → 部署默认”选择；中控与产品各自管理配置。
+
+业务实例接入方式、管理权限、Redis 持久化及密钥备份见 [租户共享 AI 配置](docs/framework/tenant-ai-config.md)。
